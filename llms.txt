@@ -1,0 +1,34 @@
+# Garrett Stimpson — Security Research
+
+> In-the-wild exploit analysis, CVE breakdowns, and offensive security research by a 10-year industry veteran.
+> All content is published for educational and defensive purposes.
+
+This site documents real vulnerabilities as they drop — kernel LPEs, network protocol exploits, web server RCE chains, and red-team technique deep dives.
+Research includes working PoC analysis, root-cause breakdowns, detection guidance, and mitigation steps.
+
+## About
+
+- [About Garrett Stimpson](https://garrettstimpson.ca/about/): Background, specialties (web app security, kernel exploitation, network protocol analysis, cloud/container security), and research philosophy.
+
+## Posts
+
+- [Living Off the Land in 2026: The Techniques EDR Still Misses](https://garrettstimpson.ca/posts/2026/05/25/lolbins-edr-bypass-2026/): Analysis of LOLBins and living-off-the-land techniques that evade modern EDR — io_uring, mavinject, eBPF abuse. Tags: lolbins, edr, red-team, windows, linux.
+
+- [Dirty Frag: Deterministic Root in Every Major Linux Distro](https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/): Two in-place decryption optimizations allow arbitrary page-cache corruption and deterministic LPE with no race window. Tags: kernel, ipsec, rxrpc, privilege-escalation.
+
+- [CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro](https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/): AF_ALG page-cache corruption bug enabling root from 732-byte payload. Affects containers and cloud. Tags: CVE-2026-31431, AF_ALG, container-escape.
+
+- [CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain](https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/): 2008-vintage two-pass rewrite engine bug leading to unauthenticated RCE via heap pool-cleanup pointer overwrite. Tags: CVE-2026-42945, nginx, heap-overflow, RCE.
+
+- [CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys](https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/): pidfd race during process teardown exposes host SSH keys and shadow hashes to unprivileged local users. Tags: CVE-2026-46333, ptrace, pidfd, ssh.
+
+- [DirtyDecrypt (CVE-2026-31635): Missing COW Guard in rxgk_decrypt_skb](https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/): Missing copy-on-write guard in Linux RxGK subsystem enables arbitrary page-cache corruption and root with no race required. Tags: CVE-2026-31635, dirtydecrypt, kubernetes.
+
+## Tags Index
+
+kernel-exploitation, privilege-escalation, CVE, linux, lpe, red-team, edr-bypass, lolbins, heap-overflow, RCE, nginx, ssh, ptrace, page-cache, container-escape, cloud, kubernetes
+
+## Optional
+
+- [RSS Feed](https://garrettstimpson.ca/feed.xml): Atom/RSS feed of all posts.
+- [Sitemap](https://garrettstimpson.ca/sitemap.xml): Full XML sitemap.
