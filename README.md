@@ -1,0 +1,1 @@
+Garrett Stimpson is a cybersecurity enthusiast and developer focused on ethical hacking, CTFs, automation, AI, and modern web technologies. Passionate about building tools, exploring APIs, and creating innovative software projects driven by curiosity and continuous learning.
