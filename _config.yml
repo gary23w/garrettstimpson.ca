@@ -1,0 +1,34 @@
+title: Garrett Stimpson
+description: >-
+  In-the-wild exploits, PoC breakdowns, and vulnerability research.
+  10+ years in offensive security.
+baseurl: ""
+url: "https://garrettstimpson.ca"
+
+author:
+  name: Garrett Stimpson
+
+github_username: gary23w
+
+show_excerpts: true
+
+theme: minima
+
+minima:
+  skin: dark
+
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+
+permalink: /posts/:year/:month/:day/:title/
+
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor/bundle/
+  - vendor/cache/
+  - vendor/gems/
+  - vendor/ruby/
