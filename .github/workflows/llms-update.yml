@@ -18,8 +18,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
-          # GH_PAT belongs to gary23w (admin) — bypasses PR requirement
-          # when enforce_admins is false on branch protection
           token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
 
@@ -36,5 +34,6 @@ jobs:
           else
             COUNT=$(grep -c '<DOCUMENT' llms.txt || true)
             git commit -m "chore(llms): regenerate corpus — ${COUNT} documents [skip ci]"
+            git pull --rebase origin main
             git push
           fi
