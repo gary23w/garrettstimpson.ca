@@ -1,0 +1,12 @@
+name = "garrettstimpson-agent"
+main = "src/index.js"
+compatibility_date = "2026-05-27"
+
+# Workers AI — free tier, no API key required
+[ai]
+binding = "AI"
+
+# Configuration — change these to point at your own site
+[vars]
+LLMS_URL  = "https://garrettstimpson.ca/llms.txt"
+SITE_NAME = "Garrett Stimpson Security Research"
