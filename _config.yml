@@ -33,3 +33,6 @@ exclude:
   - vendor/cache/
   - vendor/gems/
   - vendor/ruby/
+  - agent/
+  - wrangler.toml
+  - build_llms.py
