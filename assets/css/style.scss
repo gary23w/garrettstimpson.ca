@@ -638,4 +638,5 @@ pre code {
 .badge-critical { background: rgba(255,45,85,0.15); color: var(--red-alert); border: 1px solid var(--red-alert); }
 .badge-high     { background: rgba(255,160,0,0.12); color: #ffa000; border: 1px solid #ffa000; }
 .badge-medium   { background: rgba(255,220,0,0.1);  color: #ffdd00; border: 1px solid #ffdd00; }
-.badge-low      { background: rgba(0,255,65,0.08);  co
+.badge-low      { background: rgba(0,255,65,0.08);  color: var(--green); border: 1px solid var(--green); }
+.badge-info     { background: rgba(0,212,255,0.08); color: var(--blue-accent); border: 1px solid var(--blue-accent); }
