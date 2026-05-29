@@ -22,21 +22,7 @@
   <!-- Custom head (favicons, extra meta) -->
   {%- include custom-head.html -%}
 
-  <!-- Research Agent button styles -->
-  <style>
-    .agent-btn {
-      display: inline-flex; align-items: center; gap: 3px;
-      font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
-      color: #00ff41; text-decoration: none;
-      border: 1px solid #00ff41; padding: 3px 10px;
-      letter-spacing: 0.08em; white-space: nowrap;
-      transition: background .15s, color .15s; vertical-align: middle;
-      margin-left: 12px;
-    }
-    .agent-btn:hover { background: #00ff41; color: #000; text-decoration: none; }
-    .agent-btn-dim   { opacity: .55; }
-    @media (max-width: 600px) { .agent-btn { font-size: 10px; padding: 2px 6px; } }
-  </style>
+
 
 </head>
 
@@ -69,9 +55,13 @@
             {%- endif -%}
           {%- endfor -%}
 
-          <a class="agent-btn" href="https://garrettstimpson-agent.garystimpson03.workers.dev" target="_blank" rel="noopener noreferrer"
-             title="Open the AI research agent — powered by Workers AI">
-            <span class="agent-btn-dim">$</span>&nbsp;research_agent
+          <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/gary23w/garrettstimpson-agent"
+             target="_blank" rel="noopener noreferrer"
+             title="Deploy your own research agent — powered by Cloudflare Workers AI"
+             style="vertical-align:middle;margin-left:12px;display:inline-flex;align-items:center;">
+            <img src="https://deploy.workers.cloudflare.com/button"
+                 alt="Deploy to Cloudflare Workers"
+                 style="height:24px;display:block;">
           </a>
         </div>
       </nav>
