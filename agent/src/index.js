@@ -185,6 +185,7 @@ async function runTool(name, args, env) {
     const query = (args.query || '').trim();
     const braveKey = env.BRAVE_API_KEY || '';
 
+    // ── Brave Search (when API key is configured) ───────────────────────────
     if (braveKey) {
       try {
         const r = await fetch(
@@ -200,27 +201,31 @@ async function runTool(name, args, env) {
         );
         const data = await r.json();
         const results = (data?.web?.results || []).slice(0, 6);
-        if (!results.length) return 'Brave search returned no results.';
-        return results.map((x, i) =>
-          `[${i + 1}] ${x.title}\n${x.url}\n${x.description || ''}`
-        ).join('\n\n');
-      } catch (e) {
-        return `Brave search failed: ${e.message}`;
-      }
+        if (results.length) {
+          return '[Brave Search]\n\n' + results.map((x, i) =>
+            `[${i + 1}] ${x.title}\n${x.url}\n${x.description || ''}`
+          ).join('\n\n');
+        }
+      } catch (_) { /* fall through to free search */ }
     }
 
-    // No Brave key — fall back to DuckDuckGo Instant Answers
+    // ── Jina AI Search — free, no API key required (default) ───────────────
+    // https://jina.ai — aggregated web search returning clean markdown results
     try {
       const r = await fetch(
-        `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1`,
-        { headers: { 'User-Agent': 'garrettstimpson-agent/2.0' }, signal: AbortSignal.timeout(6000) }
+        `https://s.jina.ai/${encodeURIComponent(query)}`,
+        {
+          headers: {
+            'User-Agent': 'garrettstimpson-agent/2.0',
+            'Accept':     'text/plain',
+            'X-Respond-With': 'no-references',  // cleaner output
+          },
+          signal: AbortSignal.timeout(12000)
+        }
       );
-      const data = await r.json();
-      const parts = [];
-      if (data.AbstractText)  parts.push(data.AbstractText);
-      if (data.Answer)        parts.push(`Answer: ${data.Answer}`);
-      (data.RelatedTopics || []).slice(0, 4).forEach(t => t.Text && parts.push(t.Text));
-      return parts.length ? parts.join('\n\n') : 'No results found. Consider setting BRAVE_API_KEY for full web search.';
+      if (!r.ok) throw new Error(`Jina returned ${r.status}`);
+      const text = (await r.text()).trim();
+      return text ? '[Jina AI Search]\n\n' + text.slice(0, 5000) : 'No results found.';
     } catch (e) {
       return `Search failed: ${e.message}`;
     }
@@ -350,7 +355,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 <div id="app">
   <header>
     <div class="h-title">${siteName}</div>
-    <div class="h-model">llama-3.1-8b · workers ai · BM25 RAG · NVD + Brave tools</div>
+    <div class="h-model">llama-3.1-8b · workers ai · BM25 RAG · NVD + Jina Search · Brave (if key set)</div>
     <div class="h-meta" id="status">initialising…</div>
   </header>
   <div id="log"></div>
@@ -609,12 +614,4 @@ export default {
         headers: {
           ...cors,
           'Content-Type':      'text/event-stream',
-          'Cache-Control':     'no-cache',
-          'X-Accel-Buffering': 'no',
-        }
-      });
-    }
-
-    return new Response('Not found', { status: 404, headers: cors });
-  }
-};
+   
