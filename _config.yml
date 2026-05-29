@@ -5,6 +5,10 @@ description: >-
 baseurl: ""
 url: "https://garrettstimpson.ca"
 
+# Cloudflare Web Analytics — paste your beacon token here
+# Get it from: Cloudflare Dashboard → Analytics → Web Analytics → Add a site
+cf_analytics_token: ""
+
 author:
   name: Garrett Stimpson
 
@@ -25,14 +29,4 @@ plugins:
 permalink: /posts/:year/:month/:day/:title/
 
 exclude:
-  - README.md
-  - Gemfile
-  - Gemfile.lock
-  - node_modules
-  - vendor/bundle/
-  - vendor/cache/
-  - vendor/gems/
-  - vendor/ruby/
-  - agent/
-  - wrangler.toml
-  - build_llms.py
+  - README.
