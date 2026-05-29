@@ -6,7 +6,11 @@ compatibility_date = "2026-05-27"
 [ai]
 binding = "AI"
 
-# Raw GitHub URL avoids Cloudflare-to-Cloudflare SSL loop (HTTP 526)
+# Configuration
+# BRAVE_API_KEY: get a free key at https://api.search.brave.com (2000 req/month free)
+#   → add via CF Dashboard: Workers → garrettstimpson-agent → Settings → Variables & Secrets
+# LLMS_URL / SITE_NAME can be overridden the same way
 [vars]
-LLMS_URL  = "https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/main/llms.txt"
-SITE_NAME = "Garrett Stimpson Security Research"
+LLMS_URL      = "https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/main/llms.txt"
+SITE_NAME     = "Garrett Stimpson Security Research"
+BRAVE_API_KEY = ""
