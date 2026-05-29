@@ -6,7 +6,7 @@ compatibility_date = "2026-05-27"
 [ai]
 binding = "AI"
 
-# Configuration — change these to point at your own site
+# Raw GitHub URL avoids Cloudflare-to-Cloudflare SSL loop (HTTP 526)
 [vars]
-LLMS_URL  = "https://garrettstimpson.ca/llms.txt"
+LLMS_URL  = "https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/main/llms.txt"
 SITE_NAME = "Garrett Stimpson Security Research"
