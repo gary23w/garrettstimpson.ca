@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-05-29T09:43:24Z
+GENERATED    : 2026-05-29T12:09:06Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 14
+TOTAL POSTS  : 15
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -194,6 +194,164 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 <DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
+TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
+DATE       : 2026-05-29
+URL        : https://garrettstimpson.ca/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/
+CVE        : CVE-2026-43284, CVE-2026-43500, CVE-2026-46300
+CATEGORIES : exploits, linux
+TAGS       : CVE-2026-46300, linux-kernel, LPE, page-cache, ESP-in-TCP, XFRM, PoC
+WORD_COUNT : 1571
+EXCERPT    : Five days after Dirty Frag dropped, William Bowling published a working root exploit that the Dirty Frag patches don't fix.
+</FRONTMATTER>
+<BODY>
+Five days. That's how long it took between the Linux kernel shipping fixes for Dirty Frag (CVE-2026-43284/CVE-2026-43500) and a researcher publishing a brand new root exploit in the exact same subsystem. On May 13, William Bowling of V12 Security dropped Fragnesia (CVE-2026-46300) on the netdev mailing list, on oss-security, and on GitHub simultaneously. No coordinated disclosure window. No distro heads-up. Just the patch, the PoC, and a very bad afternoon for Linux defenders.
+
+Here's what gets me about this one: it's not just another page-cache bug. The candidate patch Bowling submitted carries two `Fixes:` tags. One points at the Dirty Frag fix itself (commit `f4c50a4034e6`). The other points at a 2013 commit (`cef401de7be8`). The Dirty Frag fix didn't just fail to close Fragnesia. It actively made the underlying coalescing bug exploitable in a useful way.
+
+Hyunwoo Kim, who originally found Dirty Frag, acknowledged publicly that Fragnesia emerged as an unintended side effect of his patches. That's the kind of disclosure footnote that should make kernel security folks uncomfortable. The fix created the exploit path.
+
+## What the Bug Actually Is
+
+The root cause lives in `skb_try_coalesce()`. When that function merges paged fragments from one `sk_buff` into another, it drops the `SKBFL_SHARED_FRAG` marker. That flag signals that certain pages are shared, backed by file page cache entries rather than privately allocated kernel memory.
+
+Once the marker is gone, the invariant that ESP input handling depends on is broken. The check `skb_has_shared_frag()` returns false. The kernel skips `skb_cow_data()` (the copy-on-write step) and proceeds to AES-GCM decrypt the buffer in place. Directly onto file-backed pages. Pages that belong to whatever readable file an unprivileged user pointed at them.
+
+The Dirty Frag fix added code that explicitly trusts this marker to be accurate. It isn't. So now you have: (1) a marker that can be lost during coalescing, (2) downstream code that trusts the marker completely, and (3) a two-line fix waiting on the netdev mailing list to review.
+
+The actual patch is small. `skb_try_coalesce()` just needs to preserve `SKBFL_SHARED_FRAG` when transferring fragment descriptors. Two lines changed.
+
+## Walking Through the PoC
+
+The public PoC from `https://github.com/v12-security/pocs/tree/main/fragnesia` hits root through a 7-step sequence, and there's no race condition anywhere in it. That's the thing that makes Fragnesia stand out from a lot of kernel exploits. It's deterministic.
+
+**Step 1: namespace escape for CAP_NET_ADMIN**
+
+```c
+unshare(CLONE_NEWUSER | CLONE_NEWNET);
+```
+
+This is unprivileged on most distros by default. You get `CAP_NET_ADMIN` inside the new namespace without any host privileges. Ubuntu's AppArmor config restricts this by default (`kernel.apparmor_restrict_unprivileged_userns=1`), which is why the PoC README tells you to set it to 0 before running.
+
+**Step 2: install an ESP-in-TCP security association**
+
+Through `NETLINK_XFRM`, the exploit installs a transport-mode SA using AES-128-GCM with a fully known key and IV. You control the entire keystream.
+
+**Step 3: build a keystream lookup table**
+
+Using `AF_ALG` crypto interfaces, the exploit precomputes a 256-entry table mapping every possible ciphertext byte to the corresponding AES-GCM nonce. This is what makes the write primitive controllable rather than random.
+
+**Step 4: splice file pages into the TCP receive queue**
+
+```c
+splice(file_fd, NULL, pipe_fds[1], NULL, PAGE_SIZE, 0);
+splice(pipe_fds[0], NULL, sock_fd, NULL, PAGE_SIZE, SPLICE_F_MORE);
+```
+
+Pages from the target file land in the TCP socket's receive queue. They're still shared with the page cache at this point.
+
+**Step 5: switch the socket into espintcp ULP mode**
+
+```c
+setsockopt(sock_fd, SOL_TCP, TCP_ULP, "espintcp", 8);
+```
+
+This is the trigger. The socket transitions into espintcp mode after the pages are already queued. `skb_try_coalesce()` runs during coalescing, drops `SKBFL_SHARED_FRAG`, and now the kernel thinks it's safe to decrypt in place.
+
+**Step 6: drive the AES-GCM decryption into the page cache**
+
+The exploit reads from the socket, which triggers ESP decryption. The keystream XORs into the shared page cache entry. One byte per invocation, fully controlled via the precomputed nonce table.
+
+**Step 7: payload execution**
+
+The PoC writes a small position-independent ELF stub into the page-cache copy of `/usr/bin/su`:
+
+```c
+// payload: setresuid(0,0,0); execve("/bin/sh", ...)
+char payload[] = "\x48\x31\xff\x48\x31\xf6\x48\x31\xd2\xb8\x75\x00\x00\x00\x0f\x05"
+                 "\x48\x31\xd2\x52\x48\xb8\x2f\x62\x69\x6e\x2f\x2f\x73\x68\x50\x48"
+                 "\x89\xe7\x52\x57\x48\x89\xe6\xb8\x3b\x00\x00\x00\x0f\x05";
+```
+
+The on-disk binary is never touched. The next time anyone runs `su`, they get a root shell from the modified cached copy. The modification persists until page eviction or reboot.
+
+One thing worth noting: the PoC only writes to the cached copy of files the attacker can read. That includes any setuid binary readable by unprivileged users, which on a standard Linux system is most of them.
+
+## Who Should Be Sweating
+
+The "local" qualifier on this LPE is almost meaningless in modern infrastructure. Any of the following situations gives an attacker local code execution as a precondition:
+
+A compromised container, a stolen developer SSH key, a malicious CI/CD job, an RCE in a web application running on the host. Once you're there, Fragnesia gives you root. On Kubernetes worker nodes, that means node compromise. On shared CI runners, it means whatever secrets and credentials are cached on that host.
+
+Environments that combine unprivileged namespace access, `CONFIG_INET_ESPINTCP`, and multi-tenant or untrusted workloads are the most exposed. Ubuntu 6.8.0-111-generic (the April 11, 2026 build) was confirmed vulnerable in V12's disclosure. Fedora and AlmaLinux already have patched kernels out. Ubuntu's status was "needs evaluation" as of May 14. RHEL, Debian, CentOS Stream, Gentoo: all vulnerable at publication time.
+
+Amazon Linux is not affected. It doesn't ship the `espintcp` module.
+
+## Mitigation
+
+If you applied the Dirty Frag module blacklist, you're already covered. The same three modules need to go:
+
+```bash
+sudo sh -c "printf 'install esp4 /bin/false\ninstall esp6 /bin/false\ninstall rxrpc /bin/false\n' \
+  > /etc/modprobe.d/fragnesia.conf; \
+  rmmod esp4 esp6 rxrpc 2>/dev/null; true"
+```
+
+The `esp4` and `esp6` unloads will break IPsec and ESP-based VPN (strongSwan, Libreswan). WireGuard is not affected. `rxrpc` is AFS-related and safe to disable on most servers. Know your environment before running this broadly.
+
+If you only applied the Dirty Frag kernel patches without the module blacklist, those patches do not protect against Fragnesia. You need the new patch separately.
+
+The candidate fix is at `https://lists.openwall.net/netdev/2026/05/13/79`. Patched kernel versions already released:
+
+| Distribution | Fixed Kernel |
+|---|---|
+| AlmaLinux 8 | kernel-4.18.0-553.124.2.el8_10 |
+| AlmaLinux 9 | kernel-5.14.0-611.54.4.el9_7 |
+| AlmaLinux 10 | kernel-6.12.0-124.56.2.el10_1 |
+| Fedora | patched as of May 14 |
+
+For anything else, the module blacklist is your stop-gap until your distro ships a kernel package.
+
+To restrict unprivileged namespaces on RHEL-family systems (partial mitigation, breaks rootless containers):
+
+```bash
+echo "user.max_user_namespaces=0" > /etc/sysctl.d/fragnesia.conf
+sysctl --system
+```
+
+If you suspect you may have already been hit, the page-cache modification disappears on reboot or after flushing:
+
+```bash
+sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+```
+
+That said, if Fragnesia ran successfully on a system before you got to mitigation, treat it as full host compromise. The page-cache modification is the exploit delivering its payload, not the extent of what an attacker can do with root afterward.
+
+## Detection
+
+File integrity tools like AIDE and Tripwire will not catch this. On-disk hashes are untouched. The malicious change lives in memory and disappears after cache eviction.
+
+What you want to be watching for:
+
+`unshare(CLONE_NEWUSER | CLONE_NEWNET)` from processes unrelated to containers or sandboxed browsers. `NETLINK_XFRM` socket activity from workloads that have no VPN or IPsec function. Tight-loop `AF_ALG` crypto interface use (the keystream precomputation step). `splice()` calls from regular files into TCP sockets followed by `TCP_ULP` mode changes on the same socket.
+
+No single signal is conclusive. The combination is suspicious. eBPF tooling, Falco, or Tetragon are the right places to build detection rules for this sequence.
+
+## The Pattern That Won't Stop
+
+Dirty Pipe in 2022. Copy Fail in early 2026. Dirty Frag in May 2026. Fragnesia five days later. The recurring theme across all of them is performance-oriented kernel subsystems that handle shared memory, page ownership, and in-place processing. The optimizations that make splice and skb coalescing fast are the same optimizations that create write primitives when ownership semantics break down.
+
+V12 Security mentioned agentic AI-assisted tooling as part of what helped find Fragnesia quickly after Dirty Frag. I'm not sure how much weight to give that claim, but the iteration speed is real regardless of the method. Two public kernel LPEs in five days, both with working PoCs before most distros had patches out.
+
+The two `Fixes:` tags on Bowling's patch, one from 2013 and one from last week, are the most significant line in this whole disclosure. The skb coalescing path hasn't been exhaustively audited for shared-fragment invariant violations. Fragnesia is probably not the last exploit that comes out of it.
+
+Patch, blacklist the modules, watch your namespace usage. And check back.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="003" type="security-research-post">
+<FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/cve-2026-2005-postgresql-pgcrypto-heap-overflow-rce/
@@ -326,7 +484,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -454,7 +612,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -661,12 +819,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -775,7 +933,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -959,12 +1117,12 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
+CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -1115,7 +1273,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -1268,12 +1426,12 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : cve-2026-46333, CVE-2026-46333
+CVE        : CVE-2026-46333, cve-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -1368,7 +1526,7 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
@@ -1519,12 +1677,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431
+CVE        : cve-2026-31431, CVE-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -1727,12 +1885,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -1842,12 +2000,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -1939,7 +2097,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -2086,5 +2244,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 14 documents — 2026-05-29T09:43:24Z
+END OF CORPUS — 15 documents — 2026-05-29T12:09:06Z
 ================================================================================
