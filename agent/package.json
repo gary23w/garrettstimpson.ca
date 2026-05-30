@@ -2,15 +2,21 @@
   "name": "garrettstimpson-agent",
   "version": "1.0.0",
   "private": true,
-  "description": "llms.txt-powered research agent — deploy on Cloudflare Workers AI (free tier)",
+  "description": "BM25 RAG research agent powered by Cloudflare Workers AI — deploy to your own account in one click.",
   "cloudflare": {
-    "bindings": {
-      "LLMS_URL": {
-        "description": "URL to your site's `llms.txt` corpus file (e.g. `https://yoursite.com/llms.txt`)"
+    "bindings": [
+      {
+        "type": "plain_text",
+        "name": "LLMS_URL",
+        "text": "https://garrettstimpson.ca/llms.txt",
+        "description": "URL of your site llms.txt corpus (e.g. https://yoursite.com/llms.txt)"
       },
-      "SITE_NAME": {
-        "description": "Your site's display name shown in the agent chat UI"
+      {
+        "type": "plain_text",
+        "name": "SITE_NAME",
+        "text": "Garrett Stimpson Security Research",
+        "description": "Display name shown in the agent chat UI"
       }
-    }
+    ]
   }
 }
