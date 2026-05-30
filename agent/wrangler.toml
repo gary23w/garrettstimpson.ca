@@ -1,16 +1,14 @@
 name = "garrettstimpson-agent"
 main = "src/index.js"
-compatibility_date = "2026-05-27"
+compatibility_date = "2024-09-23"
 
 # Workers AI — free tier, no API key required
 [ai]
 binding = "AI"
 
-# Configuration
-# BRAVE_API_KEY: get a free key at https://api.search.brave.com (2000 req/month free)
-#   → add via CF Dashboard: Workers → garrettstimpson-agent → Settings → Variables & Secrets
-# LLMS_URL / SITE_NAME can be overridden the same way
 [vars]
-LLMS_URL      = "https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/main/llms.txt"
-SITE_NAME     = "Garrett Stimpson Security Research"
-BRAVE_API_KEY = ""
+LLMS_URL  = "https://garrettstimpson.ca/llms.txt"
+SITE_NAME = "Garrett Stimpson Security Research"
+
+# Optional: add Brave Search API key via CF Dashboard → Workers → Settings → Variables & Secrets
+# BRAVE_API_KEY = ""
