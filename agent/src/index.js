@@ -438,7 +438,7 @@ const PERSONA = [
   'Answer with technical precision. Cite the post title/URL when you draw from the corpus.',
 ].join(' ');
 
-function buildSystemPrompt(env, { summary, chunks, toolContext }) {
+function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory }) {
   const persona = PERSONA.replace('{SITE}', env.SITE_NAME || 'Garrett Stimpson Security Research');
   let corpusText = '';
   if (chunks.length) {
@@ -452,7 +452,10 @@ function buildSystemPrompt(env, { summary, chunks, toolContext }) {
     corpusText = `CORPUS (top ${parts.length} chunks by relevance):\n${parts.join('\n\n---\n\n')}`;
   }
   const toolSection = toolContext.length ? `LIVE TOOL RESULTS:\n${toolContext.join('\n\n').slice(0, TOOL_CHARS)}` : '';
-  const memSection  = summary ? `CONVERSATION MEMORY (summary of earlier turns):\n${summary}` : '';
+  const memParts = [];
+  if (summary)      memParts.push(`Summary of earlier turns:\n${summary}`);
+  if (clientMemory) memParts.push(`Relevant prior research/notes:\n${String(clientMemory).slice(0, 1500)}`);
+  const memSection = memParts.length ? `MEMORY:\n${memParts.join('\n\n')}` : '';
   return [persona, memSection, toolSection, corpusText].filter(Boolean).join('\n\n');
 }
 
@@ -526,6 +529,24 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 #inp{flex:1;background:transparent;border:none;outline:none;color:var(--green);font:inherit;caret-color:var(--green);}
 #inp::placeholder{color:var(--muted);}
 #prompt{color:var(--green);flex-shrink:0;}
+#jobs{display:none;border:1px solid var(--border);border-radius:3px;padding:10px;margin-bottom:10px;background:var(--panel);font-size:11px;}
+#jobs.show{display:block;}
+#jobs .row{display:flex;gap:8px;align-items:center;margin:5px 0;flex-wrap:wrap;}
+#jobs input[type=text],#jobs select{background:#000;border:1px solid var(--border);color:var(--green);font:inherit;padding:3px 6px;}
+#jobs input#j-obj{flex:1;min-width:240px;}
+#jobs .jbtn{border:1px solid var(--green);color:var(--green);background:transparent;font:inherit;font-size:10px;padding:3px 10px;cursor:pointer;border-radius:2px;}
+#jobs .jbtn:hover{background:#0a2a12;}
+#j-tasks{margin-top:8px;display:flex;flex-direction:column;gap:3px;}
+.jtask{display:flex;gap:8px;align-items:center;font-size:10.5px;color:#bbb;}
+.jbadge{font-size:9px;padding:1px 6px;border-radius:2px;border:1px solid var(--border);}
+.jbadge.queued{color:var(--muted);}
+.jbadge.running{color:var(--blue);border-color:var(--blue);}
+.jbadge.done{color:var(--green);border-color:var(--green);}
+.jbadge.failed{color:var(--err);border-color:var(--err);}
+#j-saved{margin-top:8px;color:var(--muted);font-size:10px;}
+#j-saved .sjob{display:flex;gap:8px;align-items:center;margin:2px 0;}
+#j-saved .sj-del{color:var(--muted);cursor:pointer;font-weight:700;}
+#j-saved .sj-del:hover{color:var(--err);}
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -544,6 +565,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
         <button class="btn" id="btn-new" title="Start a new conversation (max 3)">+ new</button>
         <button class="btn" id="btn-set" title="Settings">settings</button>
         <button class="btn" id="btn-dbg" title="Toggle debug pane">debug</button>
+        <button class="btn" id="btn-job" title="Agent mode — jobs &amp; swarms">agent</button>
       </div>
     </div>
   </header>
@@ -557,6 +579,34 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
     <label><input type="checkbox" id="s-debug"> show debug pane by default</label>
     <label>brave api key (optional, stored in your browser) <input type="password" id="s-brave" placeholder="leave blank to skip"></label>
     <div style="color:var(--muted);margin-top:6px;font-size:10px;">Settings &amp; chats are saved in this browser. Up to 3 conversations are kept.</div>
+  </div>
+
+  <div id="jobs">
+    <div style="color:var(--muted);margin-bottom:6px;">AGENT MODE — give Agent Garrett a job. It plans linked sub-tasks, runs them as a swarm, and writes a synthesized report into the current chat.</div>
+    <div class="row">
+      <input id="j-obj" type="text" placeholder="objective — e.g. profile CVE-2026-2005, or recon 8.8.8.8">
+      <select id="j-tpl">
+        <option value="cve">CVE profile</option>
+        <option value="infra">Infra recon (passive)</option>
+        <option value="malware">Malware/actor brief</option>
+        <option value="free">Free-form</option>
+      </select>
+      <button class="jbtn" id="j-run">run swarm</button>
+    </div>
+    <div class="row">
+      schedule:
+      <select id="j-sched">
+        <option value="0">off</option>
+        <option value="900000">every 15m</option>
+        <option value="3600000">hourly</option>
+        <option value="21600000">every 6h</option>
+        <option value="86400000">daily</option>
+      </select>
+      <button class="jbtn" id="j-save">save scheduled job</button>
+      <span style="color:var(--muted);font-size:9px;">(runs while this tab is open)</span>
+    </div>
+    <div id="j-tasks"></div>
+    <div id="j-saved"></div>
   </div>
 
   <div id="main">
@@ -735,7 +785,7 @@ inp.addEventListener('keydown', async function(e){
   dbg('query', q+'  [search='+opts.webSearch+' temp='+opts.temperature+' topK='+opts.topK+']');
   try{
     var res=await fetch('/api/chat',{ method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ sessionId:c.id, message:q, messages:c.msgs.slice(-MAX_HIST), settings:opts }) });
+      body: JSON.stringify({ sessionId:c.id, message:q, messages:c.msgs.slice(-MAX_HIST), memory:MEM.retrieve(q,4), settings:opts }) });
     if(!res.ok) throw new Error('HTTP '+res.status);
     var reader=res.body.getReader(), decoder=new TextDecoder(), buf='';
     while(true){
@@ -755,9 +805,192 @@ inp.addEventListener('keydown', async function(e){
     }
   }catch(e){ full=(full||'')+'\\n[error] '+e.message; el2.textContent=full; }
   el2.className='msg agent';
-  if(full.trim()){ el2.innerHTML=renderMarkdown(full); c.msgs.push({role:'assistant',content:full}); saveChats(chats); }
+  if(full.trim()){ el2.innerHTML=renderMarkdown(full); c.msgs.push({role:'assistant',content:full}); saveChats(chats); MEM.add(q+' \u2192 '+full.slice(0,500),'finding'); }
   busy=false; inp.disabled=false; inp.focus();
 });
+
+
+// ============ JS-controlled memory bank (browser-first) ============
+var MEM=(function(){
+  var KEY='gsa_memory', CAP=80;
+  function load(){ try{ return JSON.parse(localStorage.getItem(KEY)||'[]'); }catch(e){ return []; } }
+  function save(a){ try{ localStorage.setItem(KEY, JSON.stringify(a)); }catch(e){} }
+  function toks(t){ return (t||'').toLowerCase().replace(/[^a-z0-9\\-\\.]/g,' ').split(/\\s+/).filter(function(x){return x.length>2;}); }
+  function rank(a, query, n){
+    var q=toks(query), now=Date.now(), set={};
+    q.forEach(function(w){ set[w]=1; });
+    return a.map(function(e){
+      var overlap=0;
+      if(q.length){ toks(e.text).forEach(function(w){ if(set[w]) overlap++; }); }
+      var ageDays=(now-(e.ts||0))/86400000, recency=1/(1+ageDays);
+      return { e:e, score: overlap*2 + recency + (e.hits||0)*0.2 + (e.kind==='finding'?0.5:0) };
+    }).sort(function(x,y){ return y.score-x.score; }).slice(0,n).map(function(x){ return x.e; });
+  }
+  function add(text, kind){
+    if(!text||!text.trim()) return;
+    var a=load();
+    a.push({ id:'m_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+             text:text.slice(0,800), kind:kind||'note', ts:Date.now(), hits:0 });
+    if(a.length>CAP) a=rank(a,'',CAP);   // compact: drop lowest-scoring
+    save(a);
+  }
+  function retrieve(query, n){
+    var a=load(); if(!a.length) return '';
+    var top=rank(a, query, n||4), ids={};
+    top.forEach(function(e){ ids[e.id]=1; });
+    a.forEach(function(e){ if(ids[e.id]) e.hits=(e.hits||0)+1; });
+    save(a);
+    return top.map(function(e){ return '- '+e.text; }).join('\\n');
+  }
+  return { add:add, retrieve:retrieve, all:load, clear:function(){ save([]); } };
+})();
+
+// ============ Agent planning + scheduled jobs ============
+var AGENT=(function(){
+  var JKEY='gsa_jobs';
+  function loadJobs(){ try{ return JSON.parse(localStorage.getItem(JKEY)||'[]'); }catch(e){ return []; } }
+  function saveJobs(a){ try{ localStorage.setItem(JKEY, JSON.stringify(a)); }catch(e){} }
+  function plan(objective, template){
+    var cve=(objective.match(/CVE-\\d{4}-\\d+/i)||[''])[0].toUpperCase();
+    var ip=(objective.match(/\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b/)||[''])[0];
+    if(template==='cve'){
+      var b=cve||objective;
+      return [
+        {id:'t1', title:'Severity & CVSS',       prompt:'Summarize severity, CVSS vector/score, and CWE for '+b+'.'},
+        {id:'t2', title:'Exploitation status',   prompt:'Is '+b+' exploited in the wild? Give EPSS, KEV status, and any active-exploitation evidence.'},
+        {id:'t3', title:'Affected versions & fix',prompt:'List affected products/versions and patched versions or mitigations for '+b+'.', dep:['t1']},
+        {id:'t4', title:'PoC availability',       prompt:'Is there a public PoC/exploit for '+b+'? Describe the mechanism at a high level for defensive purposes.'},
+        {id:'t5', title:'Detection & mitigation', prompt:'Provide detection guidance (logs, signatures, hunts) and mitigations for '+b+'.', dep:['t2','t3']}
+      ];
+    }
+    if(template==='infra'){
+      var t=ip||objective;
+      return [
+        {id:'t1', title:'Ownership / ASN (RDAP)', prompt:'Who owns '+t+'? Give RDAP ownership, ASN, country, and abuse contact. Passive registration data only.'},
+        {id:'t2', title:'Known associations',      prompt:'Summarize anything in the research corpus or public sources associated with '+t+'. Passive OSINT only, no scanning.'},
+        {id:'t3', title:'Relevant services/CVEs',  prompt:'What services or CVEs are commonly relevant to infrastructure like '+t+' per the research? Defensive framing.', dep:['t1']}
+      ];
+    }
+    if(template==='malware'){
+      return [
+        {id:'t1', title:'Overview',   prompt:'Give a concise overview of '+objective+' (family, purpose, platform) from the research.'},
+        {id:'t2', title:'TTPs / MITRE',prompt:'List key TTPs and MITRE ATT&CK techniques for '+objective+'.'},
+        {id:'t3', title:'IOCs',        prompt:'List notable research IOCs (hashes, domains, paths) for '+objective+', clearly labeled as research indicators.'},
+        {id:'t4', title:'Detection',   prompt:'Provide detection and mitigation guidance for '+objective+'.', dep:['t1','t2']}
+      ];
+    }
+    return [{id:'t1', title:'Research', prompt:objective}];
+  }
+  return { plan:plan, loadJobs:loadJobs, saveJobs:saveJobs };
+})();
+
+// ============ Swarm runner (browser orchestration) ============
+function curOpts(){
+  return { webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
+           topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'' };
+}
+async function callTask(objective, context){
+  var res=await fetch('/api/task',{ method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ objective:objective, context:context||'', memory:MEM.retrieve(objective,4), settings:curOpts() }) });
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  var d=await res.json(); if(!d.ok) throw new Error(d.error||'task failed');
+  return d.text||'';
+}
+function jtasksRender(tasks){
+  var box=el('j-tasks'); box.innerHTML='';
+  tasks.concat([{id:'synth',title:'Synthesis'}]).forEach(function(t){
+    var row=document.createElement('div'); row.className='jtask'; row.id='jt-'+t.id;
+    var b=document.createElement('span'); b.className='jbadge queued'; b.textContent='queued';
+    var n=document.createElement('span'); n.textContent=t.title;
+    row.appendChild(b); row.appendChild(n); box.appendChild(row);
+  });
+}
+function jstatus(id, state){
+  var row=el('jt-'+id); if(!row) return;
+  var b=row.querySelector('.jbadge'); if(b){ b.className='jbadge '+state; b.textContent=state; }
+}
+async function runSwarmToChat(objective, template){
+  if(busy||!objective.trim()) return;
+  busy=true; inp.disabled=true;
+  var c=active();
+  addMsg('system','Agent job started: '+objective+'  ['+template+']');
+  var tasks=AGENT.plan(objective, template);
+  jtasksRender(tasks);
+  dbg('agent job', objective+' ['+template+'] '+tasks.length+' tasks');
+  var done={}, results={}, pending=tasks.slice(), CONC=3;
+  try{
+    while(pending.length){
+      var ready=pending.filter(function(t){ return (t.dep||[]).every(function(d){ return done[d]; }); });
+      if(!ready.length) ready=[pending[0]];
+      var batch=ready.slice(0,CONC);
+      await Promise.all(batch.map(async function(t){
+        jstatus(t.id,'running'); dbg('task running', t.title);
+        try{
+          var ctx=(t.dep||[]).map(function(d){ return '['+d+'] '+(results[d]||''); }).join('\\n\\n').slice(0,2000);
+          var out=await callTask(t.prompt, ctx);
+          results[t.id]=out; done[t.id]=true;
+          MEM.add('['+(template||'job')+'] '+t.title+': '+out.slice(0,500),'finding');
+          jstatus(t.id,'done');
+        }catch(e){ done[t.id]=true; results[t.id]='(failed: '+e.message+')'; jstatus(t.id,'failed'); dbg('task failed', t.title+' '+e.message); }
+      }));
+      pending=pending.filter(function(t){ return !done[t.id]; });
+    }
+    jstatus('synth','running');
+    var combined=tasks.map(function(t){ return '## '+t.title+'\\n'+(results[t.id]||''); }).join('\\n\\n');
+    var report;
+    try{ report=await callTask('Synthesize these findings about "'+objective+'" into one clear markdown report: a short summary line at the top, then a section per finding. Do not invent anything beyond the findings.', combined); }
+    catch(e){ report='# '+objective+'\\n\\n'+combined; }
+    jstatus('synth','done');
+    MEM.add('REPORT '+objective+': '+report.slice(0,600),'finding');
+    var d=addMsg('agent',''); d.innerHTML=renderMarkdown(report);
+    c.msgs.push({role:'assistant',content:report}); if(c.msgs.length===1) c.title='[job] '+objective.slice(0,34); saveChats(chats); renderChats();
+  }catch(e){ addMsg('system','Agent job error: '+e.message); }
+  busy=false; inp.disabled=false; inp.focus();
+}
+
+// ============ Scheduler (browser-side; runs while tab open) ============
+function renderSaved(){
+  var box=el('j-saved'); if(!box) return; box.innerHTML='';
+  var jobs=AGENT.loadJobs();
+  if(!jobs.length){ box.textContent='No scheduled jobs.'; return; }
+  jobs.forEach(function(j,idx){
+    var row=document.createElement('div'); row.className='sjob';
+    var mins=Math.round(j.schedule/60000);
+    var label=document.createElement('span'); label.textContent='every '+mins+'m · '+j.template+' · '+j.objective;
+    var del=document.createElement('span'); del.className='sj-del'; del.textContent='x'; del.title='Delete scheduled job';
+    del.onclick=function(){ var a=AGENT.loadJobs(); a.splice(idx,1); AGENT.saveJobs(a); renderSaved(); };
+    row.appendChild(del); row.appendChild(label); box.appendChild(row);
+  });
+}
+function startScheduler(){
+  setInterval(async function(){
+    if(busy) return;
+    var jobs=AGENT.loadJobs(), now=Date.now(), changed=false;
+    for(var k=0;k<jobs.length;k++){
+      var j=jobs[k];
+      if(j.schedule && (!j.lastRun || now-j.lastRun>=j.schedule)){
+        j.lastRun=now; AGENT.saveJobs(jobs); changed=true;
+        await runSwarmToChat(j.objective, j.template);
+        break;
+      }
+    }
+    if(changed) renderSaved();
+  }, 60000);
+}
+
+// ============ Agent-panel wiring ============
+el('btn-job').onclick=function(){ var on=el('jobs').classList.toggle('show'); el('btn-job').classList.toggle('on',on); };
+el('j-run').onclick=function(){ runSwarmToChat(el('j-obj').value.trim(), el('j-tpl').value); };
+el('j-save').onclick=function(){
+  var obj=el('j-obj').value.trim(), sched=parseInt(el('j-sched').value,10);
+  if(!obj){ addMsg('system','Enter an objective before saving a scheduled job.'); return; }
+  if(!sched){ addMsg('system','Pick a schedule interval (not "off") to save a recurring job.'); return; }
+  var a=AGENT.loadJobs(); a.push({ objective:obj, template:el('j-tpl').value, schedule:sched, lastRun:0 }); AGENT.saveJobs(a);
+  renderSaved(); addMsg('system','Scheduled job saved. It will run while this tab is open.');
+};
+renderSaved();
+startScheduler();
+
 
 init();
 </script>
@@ -851,6 +1084,42 @@ export default {
       });
     }
 
+    // POST /api/task — non-streaming single task (browser agent/swarm mode)
+    if (url.pathname === '/api/task' && request.method === 'POST') {
+      let body; try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }
+      const opts      = body.settings || {};
+      const topK      = Math.max(1, Math.min(10, opts.topK || TOP_K));
+      const temp      = typeof opts.temperature === 'number' ? opts.temperature : 0.3;
+      const useSearch = opts.webSearch !== false;
+      const braveKey  = opts.brave || env.BRAVE_API_KEY || '';
+      const objective = (body.objective || body.message || '').toString();
+      const context   = (body.context || '').toString();
+      const clientMemory = typeof body.memory === 'string' ? body.memory : '';
+      try {
+        const { cveIds, ips, wantSearch } = analyseQuery(objective + ' ' + context);
+        const toolContext = [];
+        for (const cveId of cveIds.slice(0, 3)) {
+          const epss = await epssLookup(cveId);
+          toolContext.push(`=== NVD: ${cveId} ===\n${await nvdLookup(cveId)}${epss ? '\n' + epss : ''}`);
+        }
+        for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP RDAP: ${ip} ===\n${await ipLookup(ip)}`);
+        if (useSearch && wantSearch) {
+          const s = await webSearch(cveIds.length ? `${cveIds[0]} exploit PoC advisory` : objective, braveKey);
+          toolContext.push(s ? `=== Web Search ===\n${formatSearch(s)}` : '=== Search Unavailable ===\nDo NOT fabricate details; rely on corpus or state what is unknown.');
+        }
+        let chunks = await vectorRetrieve(env, objective, topK);
+        const usedVectorize = chunks !== null;
+        if (!chunks) chunks = bm25Chunks(await getChunks(env), objective, topK);
+        const sysPrompt = buildSystemPrompt(env, { summary: '', chunks, toolContext, clientMemory });
+        const userContent = context ? `${objective}\n\nContext from earlier steps:\n${context.slice(0, 2500)}` : objective;
+        const r = await env.AI.run(MODEL, {
+          messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userContent }],
+          stream: false, max_tokens: 1024, temperature: temp,
+        });
+        return json({ ok: true, text: (r.response || '').trim(), meta: { cveIds, ips, usedVectorize, chunkCount: chunks.length } });
+      } catch (e) { return json({ ok: false, error: e.message }, 500); }
+    }
+
     // POST /api/chat
     if (url.pathname === '/api/chat' && request.method === 'POST') {
       let body; try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }
@@ -860,6 +1129,7 @@ export default {
       const temp      = typeof opts.temperature === 'number' ? opts.temperature : 0.3;
       const useSearch = opts.webSearch !== false;
       const braveKey  = opts.brave || env.BRAVE_API_KEY || '';
+      const clientMemory = typeof body.memory === 'string' ? body.memory : '';
 
       // Resolve conversation: server session (KV) is authoritative when present.
       let sess = await loadSession(env, body.sessionId);
@@ -924,7 +1194,7 @@ export default {
               chunks.map(c => (c.title || '?').slice(0, 24) + '(' + (c.score ?? '') + ')').join(', '));
 
           // Build prompt
-          const sysPrompt = buildSystemPrompt(env, { summary: sess?.summary || '', chunks, toolContext });
+          const sysPrompt = buildSystemPrompt(env, { summary: sess?.summary || '', chunks, toolContext, clientMemory });
           const messages = [
             { role: 'system', content: sysPrompt },
             ...priorTurns.filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim()),
