@@ -478,7 +478,7 @@ html,body{height:100%;background:var(--bg);color:var(--green);font-family:'JetBr
 ::-webkit-scrollbar-track{background:#050805;}
 ::-webkit-scrollbar-thumb{background:#0a3d1a;border:1px solid #0f5a26;border-radius:2px;}
 ::-webkit-scrollbar-thumb:hover{background:#0f5a26;}
-#app{display:flex;flex-direction:column;height:100vh;max-width:980px;margin:0 auto;padding:12px;}
+#app{display:flex;flex-direction:column;height:100vh;max-width:980px;margin:0 auto;padding:12px;position:relative;z-index:1;}
 header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10px;}
 .h-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
 .h-title{font-size:13px;color:var(--green);letter-spacing:.12em;text-transform:uppercase;font-weight:700;}
@@ -547,11 +547,16 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 #j-saved .sjob{display:flex;gap:8px;align-items:center;margin:2px 0;}
 #j-saved .sj-del{color:var(--muted);cursor:pointer;font-weight:700;}
 #j-saved .sj-del:hover{color:var(--err);}
+#wm{position:fixed;left:16px;bottom:60px;width:150px;height:150px;z-index:0;pointer-events:none;
+  background:url('https://garrettstimpson.ca/assets/img/agent-garrett-logo.png') no-repeat bottom left;
+  background-size:contain;opacity:.13;filter:drop-shadow(0 0 8px rgba(0,212,255,.25));}
+@media (max-width:640px){#wm{width:96px;height:96px;bottom:54px;opacity:.1;}}
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
+<div id="wm" aria-hidden="true"></div>
 <div id="app">
   <header>
     <div class="h-row">
