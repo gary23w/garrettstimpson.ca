@@ -439,8 +439,8 @@ async function cveIntel(env, cveId) {
   return `${nvd}${epss ? '\n' + epss : ''}${kev ? '\n' + kev : ''}`;
 }
 async function domainIntel(domain) {
-  const [rd, dns, ct] = await Promise.all([domainLookup(domain), dnsLookup(domain), certLookup(domain)]);
-  return `${rd}\n${dns}\n${ct}`;
+  const [rd, dns, ct, wb, us] = await Promise.all([domainLookup(domain), dnsLookup(domain), certLookup(domain), wayback(domain), urlscanSearch(domain)]);
+  return `${rd}\n${dns}\n${ct}\n${wb}\n${us}`;
 }
 
 // Shodan InternetDB — pre-collected open ports / CVEs / hostnames for an IP.
@@ -488,9 +488,88 @@ async function httpHeaders(url) {
 
 // Combined passive IP intel (RDAP + reverse DNS + Shodan InternetDB).
 async function ipIntel(env, ip) {
-  const [rd, rev, sh] = await Promise.all([ipLookup(ip), reverseDns(ip), shodanInternetDB(ip)]);
-  return `${rd}\n${rev}\n${sh}`;
+  const [rd, rev, sh, geo, asn] = await Promise.all([ipLookup(ip), reverseDns(ip), shodanInternetDB(ip), ipGeo(ip), asnInfo(ip)]);
+  return `${rd}\n${rev}\n${geo}\n${asn}\n${sh}`;
 }
+
+// ── OSINT tool suite (all passive, keyless public sources) ────────────────────
+
+// IP geolocation + ASN/org (ipwho.is)
+async function ipGeo(ip) {
+  try {
+    const r = await fetch(`http://ip-api.com/json/${ip}?fields=status,message,country,regionName,city,isp,org,as,reverse,query`, { signal: AbortSignal.timeout(7000) });
+    const d = await r.json();
+    if (d.status !== 'success') return `Geo ${ip}: ${d.message || 'no data'}.`;
+    return `Geo ${ip}: ${[d.city, d.regionName, d.country].filter(Boolean).join(', ')}\nASN: ${d.as || '?'} | ISP: ${d.isp || '?'} | Org: ${d.org || '?'}${d.reverse ? ' | PTR: ' + d.reverse : ''}`;
+  } catch (e) { return `Geo ${ip}: lookup failed (${e.message}).`; }
+}
+
+// BGP/ASN prefix + holder (bgpview.io). Accepts an IP or an AS number.
+async function asnInfo(target) {
+  const t = String(target || '').trim().replace(/^as/i, '');
+  const isAsn = /^\d+$/.test(t);
+  const url = isAsn ? `https://api.bgpview.io/asn/${t}` : `https://api.bgpview.io/ip/${target}`;
+  try {
+    const r = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) });
+    const d = (await r.json()).data || {};
+    if (isAsn) return `ASN AS${t}: ${d.name || '?'} — ${d.description_short || ''} (${d.country_code || '?'})`;
+    const pfx = (d.prefixes || []).slice(0, 1).map(p => `${p.prefix} ${p.name || ''}`).join('; ');
+    const asns = (d.prefixes || []).map(p => p.asn && `AS${p.asn.asn} ${p.asn.name || ''}`).filter(Boolean).slice(0, 2).join('; ');
+    return `BGP ${target}: prefix ${pfx || '?'}\noriginating ASN: ${asns || '?'}`;
+  } catch (e) { return `ASN/BGP ${target}: lookup failed (${e.message}).`; }
+}
+
+// Wayback Machine — latest snapshot + recent archived URLs (archive.org)
+async function wayback(url) {
+  try {
+    const a = await (await fetch(`https://archive.org/wayback/available?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8000) })).json();
+    const snap = a && a.archived_snapshots && a.archived_snapshots.closest;
+    let cdx = '';
+    try {
+      const host = String(url).replace(/^https?:\/\//, '').split('/')[0];
+      const rows = await (await fetch(`https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(host)}*&output=json&limit=5&collapse=urlkey`, { signal: AbortSignal.timeout(8000) })).json();
+      cdx = Array.isArray(rows) && rows.length > 1 ? rows.slice(1, 5).map(x => x[2]).join('\n') : '';
+    } catch {}
+    return `Wayback ${url}\nlatest snapshot: ${snap ? `${snap.timestamp} ${snap.url}` : 'none'}${cdx ? `\narchived URLs:\n${cdx}` : ''}`;
+  } catch (e) { return `Wayback ${url}: lookup failed (${e.message}).`; }
+}
+
+// urlscan.io — public scan history for a domain (passive: others' prior scans)
+async function urlscanSearch(domain) {
+  try {
+    const r = await fetch(`https://urlscan.io/api/v1/search/?q=domain:${encodeURIComponent(domain)}&size=5`, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return `urlscan ${domain}: search failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    const res = (d.results || []).slice(0, 5).map(x => `${(x.task && x.task.time || '').slice(0, 10)} ${(x.page && x.page.url) || (x.task && x.task.url) || ''} -> ${(x.page && x.page.ip) || '?'} (${(x.page && x.page.server) || '?'})`);
+    return `urlscan.io ${domain}: ${d.total || 0} public scans\n${res.join('\n') || 'no recent results'}`;
+  } catch (e) { return `urlscan ${domain}: lookup failed (${e.message}).`; }
+}
+
+// abuse.ch URLhaus — malware-URL records for a host/IP/domain
+async function urlhausLookup(host) {
+  try {
+    const r = await fetch('https://urlhaus-api.abuse.ch/v1/host/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `host=${encodeURIComponent(host)}`, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return `URLhaus ${host}: unavailable (HTTP ${r.status}; may now require a free Auth-Key).`;
+    const d = await r.json();
+    if (d.query_status === 'no_results') return `URLhaus ${host}: no malware URLs on record.`;
+    if (d.query_status !== 'ok') return `URLhaus ${host}: ${d.query_status}.`;
+    const urls = (d.urls || []).slice(0, 5).map(u => `${u.url_status} ${u.threat || ''} ${u.url}`);
+    return `URLhaus ${host}: ${d.url_count || urls.length} known malware URLs\n${urls.join('\n')}`;
+  } catch (e) { return `URLhaus ${host}: lookup failed (${e.message}).`; }
+}
+
+// GitHub public code search (anonymous — rate-limited, no token)
+async function githubOsint(query) {
+  try {
+    const r = await fetch(`https://api.github.com/search/code?q=${encodeURIComponent(query)}&per_page=5`, { headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(9000) });
+    if (r.status === 403) return `GitHub OSINT "${query}": rate-limited (anonymous). Retry later or wire a token via a broker.`;
+    if (!r.ok) return `GitHub OSINT "${query}": search failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    const items = (d.items || []).slice(0, 5).map(x => `${x.repository && x.repository.full_name}/${x.path}`);
+    return `GitHub code search "${query}": ${d.total_count || 0} hits\n${items.join('\n') || 'none'}`;
+  } catch (e) { return `GitHub OSINT "${query}": lookup failed (${e.message}).`; }
+}
+
 
 function ddgParse(html) {
   // Parse DuckDuckGo HTML endpoint result anchors.
@@ -580,6 +659,12 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'shodan_internetdb', category: 'osint', passive: true, description: 'Shodan InternetDB — pre-collected open ports/CVEs/hostnames (no live scan)' },
   { name: 'reverse_dns', category: 'osint', passive: true, description: 'Reverse DNS (PTR) lookup via DoH' },
   { name: 'http_headers', category: 'recon', passive: false, description: 'Fetch a URL and report security-relevant HTTP headers (contacts target)' },
+  { name: 'ip_geo', category: 'osint', passive: true, description: 'IP geolocation + ASN/org (ipwho.is)' },
+  { name: 'asn_info', category: 'osint', passive: true, description: 'BGP/ASN prefix + holder (bgpview.io); accepts IP or ASN' },
+  { name: 'wayback', category: 'osint', passive: true, description: 'Wayback Machine snapshots + archived URLs (archive.org)' },
+  { name: 'urlscan', category: 'osint', passive: true, description: 'urlscan.io public scan history for a domain' },
+  { name: 'urlhaus', category: 'osint', passive: true, description: 'abuse.ch URLhaus malware-URL lookup by host' },
+  { name: 'github_osint', category: 'osint', passive: true, description: 'GitHub public code search (anonymous, rate-limited)' },
 ];
 
 function parseCsvSet(value) {
@@ -660,6 +745,12 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'shodan_internetdb') return shodanInternetDB(String(args.ip || ''));
   if (name === 'reverse_dns')  return reverseDns(String(args.ip || ''));
   if (name === 'http_headers') return httpHeaders(String(args.url || args.target || ''));
+  if (name === 'ip_geo')       return ipGeo(String(args.ip || ''));
+  if (name === 'asn_info')     return asnInfo(String(args.target || args.ip || args.asn || ''));
+  if (name === 'wayback')      return wayback(String(args.url || args.domain || ''));
+  if (name === 'urlscan')      return urlscanSearch(String(args.domain || ''));
+  if (name === 'urlhaus')      return urlhausLookup(String(args.host || args.domain || args.ip || ''));
+  if (name === 'github_osint') return githubOsint(String(args.query || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1324,7 +1415,7 @@ function startScheduler(){
 // ============ Agent-panel wiring ============
 el('btn-job').onclick=function(){ var on=el('jobs').classList.toggle('show'); el('btn-job').classList.toggle('on',on); };
 el('btn-tools').onclick=function(){ var on=el('tools').classList.toggle('show'); el('btn-tools').classList.toggle('on',on); if(on) loadCatalog(); };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
