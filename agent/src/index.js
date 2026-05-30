@@ -381,6 +381,67 @@ async function domainLookup(domain) {
   } catch (e) { return `RDAP domain lookup failed for ${domain}: ${e.message}. Ownership is UNKNOWN — do not invent it.`; }
 }
 
+// Passive DNS resolution via DNS-over-HTTPS (Cloudflare). Read-only, no scanning.
+async function dnsLookup(domain) {
+  const types = ['A', 'AAAA', 'MX', 'NS', 'TXT'];
+  const out = [];
+  for (const t of types) {
+    try {
+      const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(domain)}&type=${t}`,
+        { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(6000) });
+      const d = await r.json();
+      const ans = (d.Answer || []).map(a => a.data).filter(Boolean).slice(0, 5);
+      if (ans.length) out.push(`${t}: ${ans.join(', ')}`);
+    } catch (_) {}
+  }
+  return out.length ? `DNS ${domain}\n${out.join('\n')}` : `DNS ${domain}: no records resolved. Treat as UNKNOWN — do not invent records.`;
+}
+
+// Passive TLS certificate transparency via crt.sh. Reveals known subdomains/SANs
+// from public CT logs (read-only OSINT, not a scan).
+async function certLookup(domain) {
+  try {
+    const r = await fetch(`https://crt.sh/?q=${encodeURIComponent('%.' + domain)}&output=json`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return `crt.sh: no certificate data for ${domain} (HTTP ${r.status}).`;
+    const data = await r.json();
+    const names = [...new Set(data.flatMap(x => (x.name_value || '').split('\n')))].filter(Boolean).slice(0, 12);
+    const issuers = [...new Set(data.map(x => x.issuer_name).filter(Boolean))].slice(0, 3);
+    return `Certificate Transparency (crt.sh) ${domain}\nnames/SANs: ${names.join(', ') || 'none'}\nissuers: ${issuers.join('; ') || '?'}`;
+  } catch (e) { return `crt.sh lookup failed for ${domain}: ${e.message}.`; }
+}
+
+// CISA Known Exploited Vulnerabilities catalog (cached). Authoritative "is this
+// actively exploited" signal.
+async function kevSet(env) {
+  const cache = caches.default, key = new Request('https://kev-cache/v1');
+  const c = await cache.match(key);
+  if (c) { try { return new Set(await c.json()); } catch {} }
+  try {
+    const r = await fetch('https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json',
+      { signal: AbortSignal.timeout(12000) });
+    const d = await r.json();
+    const ids = (d.vulnerabilities || []).map(v => v.cveID).filter(Boolean);
+    await cache.put(key, new Response(JSON.stringify(ids), { headers: { 'Cache-Control': 'max-age=21600', 'Content-Type': 'application/json' } }));
+    return new Set(ids);
+  } catch { return null; }
+}
+async function kevLookup(env, cveId) {
+  const set = await kevSet(env);
+  if (!set) return null;
+  return set.has(cveId) ? 'CISA KEV: LISTED — known exploited in the wild' : 'CISA KEV: not listed';
+}
+
+// Combined intel helpers (run leaf tools in parallel).
+async function cveIntel(env, cveId) {
+  const [nvd, epss, kev] = await Promise.all([nvdLookup(cveId), epssLookup(cveId), kevLookup(env, cveId)]);
+  return `${nvd}${epss ? '\n' + epss : ''}${kev ? '\n' + kev : ''}`;
+}
+async function domainIntel(domain) {
+  const [rd, dns, ct] = await Promise.all([domainLookup(domain), dnsLookup(domain), certLookup(domain)]);
+  return `${rd}\n${dns}\n${ct}`;
+}
+
 function ddgParse(html) {
   // Parse DuckDuckGo HTML endpoint result anchors.
   const out = [];
@@ -563,7 +624,10 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 #jobs.show{display:block;}
 #jobs .row{display:flex;gap:8px;align-items:center;margin:5px 0;flex-wrap:wrap;}
 #jobs input[type=text],#jobs select{background:#000;border:1px solid var(--border);color:var(--green);font:inherit;padding:3px 6px;}
-#jobs input#j-obj{flex:1;min-width:240px;}
+#jobs textarea#j-obj{flex:1 1 100%;width:100%;min-height:64px;resize:vertical;background:#000;border:1px solid var(--border);color:var(--green);font:inherit;padding:6px 8px;line-height:1.5;}
+#j-chips{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 6px;}
+.jchip{border:1px solid var(--border);color:var(--blue);background:transparent;font:inherit;font-size:10px;padding:3px 9px;cursor:pointer;border-radius:11px;}
+.jchip:hover{border-color:var(--blue);background:#06121a;}
 #jobs .jbtn{border:1px solid var(--green);color:var(--green);background:transparent;font:inherit;font-size:10px;padding:3px 10px;cursor:pointer;border-radius:2px;}
 #jobs .jbtn:hover{background:#0a2a12;}
 #j-tasks{margin-top:8px;display:flex;flex-direction:column;gap:3px;}
@@ -617,9 +681,12 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
   </div>
 
   <div id="jobs">
-    <div style="color:var(--muted);margin-bottom:6px;">AGENT MODE — give Agent Garrett a job. It plans linked sub-tasks, runs them as a swarm, and writes a synthesized report into the current chat.</div>
+    <div style="color:var(--muted);margin-bottom:6px;">AGENT MODE — give Agent Garrett a job. It plans linked sub-tasks, runs them as a swarm, and writes a synthesized report into the current chat. Tools (passive / read-only): NVD &middot; EPSS &middot; CISA KEV &middot; RDAP whois (IP + domain) &middot; DNS &middot; TLS / certificate-transparency &middot; web search. No active scanning or exploitation.</div>
+    <div id="j-chips"></div>
     <div class="row">
-      <input id="j-obj" type="text" placeholder="objective — e.g. profile CVE-2026-2005, or recon 8.8.8.8">
+      <textarea id="j-obj" rows="3" placeholder="objective — describe the job in detail, or click an example prompt above"></textarea>
+    </div>
+    <div class="row">
       <select id="j-tpl">
         <option value="cve">CVE profile</option>
         <option value="infra">Infra recon (passive)</option>
@@ -801,7 +868,7 @@ async function init(){
   renderChats(); renderLog(active());
   try{
     var d=await (await fetch('/api/status')).json();
-    modeline.textContent='llama-3.1-8b · '+(d.retrieval||'?')+' RAG · memory on · NVD+EPSS+RDAP+web';
+    modeline.textContent='llama-3.1-8b · '+(d.retrieval||'?')+' RAG · memory on · NVD/EPSS/KEV · RDAP/DNS/CT · web';
     stat.textContent=ts()+' · corpus: '+d.docCount+' posts / '+(d.chunkCount||0)+' chunks · '+(d.totalChars||0).toLocaleString()+' chars'+(d.memory?' · KV sync':'');
     if(d.docCount===0) stat.textContent+=' · WARNING corpus empty';
   }catch(e){ stat.textContent='status unavailable — '+e.message; }
@@ -1019,6 +1086,24 @@ function startScheduler(){
 // ============ Agent-panel wiring ============
 el('btn-job').onclick=function(){ var on=el('jobs').classList.toggle('show'); el('btn-job').classList.toggle('on',on); };
 el('j-run').onclick=function(){ runSwarmToChat(el('j-obj').value.trim(), el('j-tpl').value); };
+var JOB_TEMPLATES=[
+  {label:'CVE deep-dive', tpl:'cve', text:'Profile CVE-2026-2005: CVSS severity, EPSS score, CISA KEV status, affected PostgreSQL versions, the patched release, public PoC availability, and detection guidance.'},
+  {label:'Passive domain recon', tpl:'infra', text:'Passive recon of example.com using OSINT only (no scanning): RDAP ownership/registrar, DNS records (A/MX/NS/TXT), TLS certificate-transparency subdomains, and any related items in the research corpus.'},
+  {label:'Attack-surface map', tpl:'infra', text:'Map the public attack surface of cloudflare.com from certificate-transparency and DNS data (passive only). List discovered subdomains, the services they imply, and defensive notes.'},
+  {label:'Malware family brief', tpl:'malware', text:'Brief on Lumma Stealer: overview, MITRE ATT&CK TTPs, notable IOCs from the research, and detection + mitigation guidance.'},
+  {label:'Patch-priority triage', tpl:'free', text:'Compare CVE-2026-42945 and CVE-2026-46333 using CVSS, EPSS, and CISA KEV status: which should be patched first and why? Give a short remediation order.'},
+  {label:'Detection engineering', tpl:'free', text:'Draft detection logic (log sources, candidate signatures, and hunt queries) for the techniques in the DirtyDecrypt research. Defensive use only.'},
+  {label:'Corpus threat brief', tpl:'free', text:'Summarize what the research corpus covers about ClickFix-style social-engineering campaigns on Windows and macOS, and how defenders detect them.'}
+];
+(function renderChips(){
+  var box=el('j-chips'); if(!box) return;
+  JOB_TEMPLATES.forEach(function(t){
+    var b=document.createElement('button'); b.className='jchip'; b.type='button'; b.textContent=t.label;
+    b.title='Click to load this example';
+    b.onclick=function(){ el('j-obj').value=t.text; el('j-tpl').value=t.tpl; el('j-obj').focus(); };
+    box.appendChild(b);
+  });
+})();
 el('j-save').onclick=function(){
   var obj=el('j-obj').value.trim(), sched=parseInt(el('j-sched').value,10);
   if(!obj){ addMsg('system','Enter an objective before saving a scheduled job.'); return; }
@@ -1104,12 +1189,9 @@ export default {
       const q = body.message || '';
       const { cveIds, ips, domains, wantSearch } = analyseQuery(q);
       const toolContext = [];
-      for (const cveId of cveIds.slice(0, 3)) {
-        const epss = await epssLookup(cveId);
-        toolContext.push(`=== NVD: ${cveId} ===\n${await nvdLookup(cveId)}${epss ? '\n' + epss : ''}`);
-      }
+      for (const cveId of cveIds.slice(0, 3)) toolContext.push(`=== ${cveId} ===\n${await cveIntel(env, cveId)}`);
       for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP RDAP: ${ip} ===\n${await ipLookup(ip)}`);
-      for (const dom of (domains || []).slice(0, 2)) toolContext.push(`=== Domain RDAP: ${dom} ===\n${await domainLookup(dom)}`);
+      for (const dom of (domains || []).slice(0, 2)) toolContext.push(`=== Domain: ${dom} ===\n${await domainIntel(dom)}`);
       let chunks = await vectorRetrieve(env, q, body.topK || TOP_K);
       const usedVectorize = chunks !== null;
       if (!chunks) chunks = bm25Chunks(await getChunks(env), q, body.topK || TOP_K);
@@ -1137,12 +1219,9 @@ export default {
       try {
         const { cveIds, ips, domains, wantSearch } = analyseQuery(objective + ' ' + context);
         const toolContext = [];
-        for (const cveId of cveIds.slice(0, 3)) {
-          const epss = await epssLookup(cveId);
-          toolContext.push(`=== NVD: ${cveId} ===\n${await nvdLookup(cveId)}${epss ? '\n' + epss : ''}`);
-        }
+        for (const cveId of cveIds.slice(0, 3)) toolContext.push(`=== ${cveId} ===\n${await cveIntel(env, cveId)}`);
         for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP RDAP: ${ip} ===\n${await ipLookup(ip)}`);
-        for (const dom of (domains || []).slice(0, 2)) toolContext.push(`=== Domain RDAP: ${dom} ===\n${await domainLookup(dom)}`);
+        for (const dom of (domains || []).slice(0, 2)) toolContext.push(`=== Domain: ${dom} ===\n${await domainIntel(dom)}`);
         if (useSearch && wantSearch) {
           const s = await webSearch(cveIds.length ? `${cveIds[0]} exploit PoC advisory` : objective, braveKey);
           toolContext.push(s ? `=== Web Search ===\n${formatSearch(s)}` : '=== Search Unavailable ===\nDo NOT fabricate details; rely on corpus or state what is unknown.');
@@ -1196,14 +1275,12 @@ export default {
           const { cveIds, ips, domains, wantSearch } = analyseQuery(lastUser);
           const toolContext = [];
 
-          // NVD + EPSS lookups
+          // CVE intel — NVD + EPSS + CISA KEV
           for (const cveId of cveIds.slice(0, 3)) {
-            dbg('lookup_nvd', cveId);
-            const result = await nvdLookup(cveId);
-            const epss = await epssLookup(cveId);
-            dbg('nvd result', result.slice(0, 160));
-            if (epss) dbg('epss', epss);
-            toolContext.push(`=== NVD: ${cveId} ===\n${result}${epss ? '\n' + epss : ''}`);
+            dbg('cve_intel', cveId);
+            const intel = await cveIntel(env, cveId);
+            dbg('cve result', intel.slice(0, 160));
+            toolContext.push(`=== ${cveId} ===\n${intel}`);
           }
 
           // Passive IP ownership lookup (RDAP) — registration data only, no scanning
@@ -1214,12 +1291,12 @@ export default {
             toolContext.push(`=== IP RDAP: ${ip} ===\n${result}`);
           }
 
-          // Passive domain registration lookup (RDAP) — no scanning
+          // Passive domain intel — RDAP + DNS (DoH) + certificate transparency. No scanning.
           for (const dom of (domains || []).slice(0, 2)) {
-            dbg('domain_rdap', dom);
-            const result = await domainLookup(dom);
-            dbg('rdap result', result.slice(0, 160));
-            toolContext.push(`=== Domain RDAP: ${dom} ===\n${result}`);
+            dbg('domain_intel', dom);
+            const intel = await domainIntel(dom);
+            dbg('domain result', intel.slice(0, 160));
+            toolContext.push(`=== Domain: ${dom} ===\n${intel}`);
           }
 
           // Web search
