@@ -287,8 +287,18 @@ function analyseQuery(query) {
   const ips = [...new Set((query.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])
     .filter(ip => ip.split('.').every(o => +o >= 0 && +o <= 255))
     .filter(ip => !/^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(ip)))];
-  const wantSearch = SEARCH_TRIGGERS.some(t => q.includes(t)) || cveIds.length > 0;
-  return { cveIds, ips, wantSearch };
+  // Domains / URLs — for passive RDAP registration lookup (never scanning).
+  const domSet = new Set();
+  (query.match(/https?:\/\/([^\/\s)]+)/gi) || []).forEach(u => { try { domSet.add(new URL(u).hostname.toLowerCase()); } catch (_) {} });
+  (query.match(/\b(?:[a-z0-9-]+\.)+[a-z]{2,24}\b/gi) || []).forEach(d => domSet.add(d.toLowerCase()));
+  const BAD = /\.(md|txt|js|json|png|jpe?g|gif|svg|webp|exe|dll|so|sh|py|c|go|rs|html?|css|yml|yaml|toml|pdf|zip)$/i;
+  const domains = [...domSet]
+    .filter(d => !/^\d+\.\d+\.\d+\.\d+$/.test(d))
+    .filter(d => !BAD.test(d))
+    .filter(d => d !== 'garrettstimpson.ca' && !d.endsWith('.garrettstimpson.ca'))
+    .slice(0, 2);
+  const wantSearch = SEARCH_TRIGGERS.some(t => q.includes(t)) || cveIds.length > 0 || domains.length > 0;
+  return { cveIds, ips, domains, wantSearch };
 }
 
 // ── Tools ───────────────────────────────────────────────────────────────────────
@@ -352,6 +362,23 @@ async function ipLookup(ip) {
     const remarks = (d.remarks || []).flatMap(x => x.description || []).join(' ').slice(0, 200);
     return `RDAP ${ip} | name: ${d.name || '?'} | range: ${range} | country: ${d.country || '?'}\norg: ${org || '?'}${remarks ? '\nremarks: ' + remarks : ''}`;
   } catch (e) { return `RDAP lookup failed for ${ip}: ${e.message}`; }
+}
+
+// Passive domain registration lookup via RDAP (no scanning). Returns real
+// registrar/dates/nameservers, or an explicit UNKNOWN so the model won't invent.
+async function domainLookup(domain) {
+  try {
+    const r = await fetch(`https://rdap.org/domain/${domain}`,
+      { headers: { 'Accept': 'application/rdap+json', 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return `RDAP: no registration data returned for ${domain} (HTTP ${r.status}). Ownership is UNKNOWN — do not invent it.`;
+    const d = await r.json();
+    const events = (d.events || []).map(e => `${e.eventAction}: ${e.eventDate}`).join(', ');
+    const ns = (d.nameservers || []).map(n => n.ldhName).filter(Boolean).slice(0, 4).join(', ');
+    const reg = (d.entities || []).find(e => (e.roles || []).includes('registrar'));
+    const regName = reg ? (reg.vcardArray?.[1]?.find(x => x[0] === 'fn')?.[3] || reg.handle || '') : '';
+    const status = (d.status || []).join(', ');
+    return `RDAP domain ${domain} | registrar: ${regName || '?'} | status: ${status || '?'}\nevents: ${events || '?'}\nnameservers: ${ns || '?'}`;
+  } catch (e) { return `RDAP domain lookup failed for ${domain}: ${e.message}. Ownership is UNKNOWN — do not invent it.`; }
 }
 
 function ddgParse(html) {
@@ -433,7 +460,8 @@ const PERSONA = [
   'Your name is Agent Garrett, the AI research assistant for the security-research blog "{SITE}".',
   'You are software. "Agent Garrett" is your assistant name only — do not claim to be a human, and do not fabricate a biography, employer, certifications, or personal history for yourself.',
   'Ground every claim in the CORPUS and LIVE TOOL RESULTS provided below.',
-  'Never fabricate CVE IDs, CVSS scores, EPSS scores, affected versions, patch dates, or PoC URLs. If the answer is not in the corpus or tool results, say so plainly.',
+  'CRITICAL — never fabricate. Do not invent CVE IDs, CVSS/EPSS scores, affected versions, patch/registration dates, WHOIS or RDAP records, owner names, organizations, postal addresses, phone numbers, emails, ASNs, IP addresses, hostnames, file hashes, or URLs. If the CORPUS and LIVE TOOL RESULTS do not contain a fact, reply that you do not have it / it is UNKNOWN. Inventing any such detail is a critical failure.',
+  'When a tool result says data is UNKNOWN, missing, or that a lookup returned nothing, report exactly that — never fill the gap with a plausible-looking guess.',
   'Use clear markdown: ## headings, **bold** for key terms, `code` for identifiers/commands, fenced ```code blocks```, and bullet lists where helpful.',
   'Answer with technical precision. Cite the post title/URL when you draw from the corpus.',
 ].join(' ');
@@ -449,7 +477,7 @@ function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory }) 
       if (budget - block.length < 0) break;
       parts.push(block); budget -= block.length;
     }
-    corpusText = `CORPUS (top ${parts.length} chunks by relevance):\n${parts.join('\n\n---\n\n')}`;
+    corpusText = `CORPUS (top ${parts.length} chunks by relevance — use ONLY chunks that actually match the question; ignore unrelated ones):\n${parts.join('\n\n---\n\n')}`;
   }
   const toolSection = toolContext.length ? `LIVE TOOL RESULTS:\n${toolContext.join('\n\n').slice(0, TOOL_CHARS)}` : '';
   const memParts = [];
@@ -522,6 +550,8 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 .msg.agent li{margin:2px 0;}
 .msg.agent code{background:#0a140a;color:var(--blue);padding:1px 5px;border-radius:2px;font-size:12px;}
 .msg.agent pre{background:#070b07;border:1px solid var(--border);border-left:2px solid var(--green);padding:8px 10px;overflow-x:auto;margin:8px 0;border-radius:2px;}
+.msg.agent.jtaskout{border-left:2px solid var(--blue);padding-left:10px;opacity:.92;font-size:12.5px;}
+.msg.agent.jtaskout .jt-h{color:var(--blue);font-size:10px;text-transform:uppercase;letter-spacing:.08em;}
 .msg.agent pre code{background:none;color:var(--green);padding:0;}
 .msg.agent a{color:var(--blue);text-decoration:underline;}
 .msg.agent strong{color:#7fffb0;}
@@ -548,7 +578,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 #j-saved .sj-del{color:var(--muted);cursor:pointer;font-weight:700;}
 #j-saved .sj-del:hover{color:var(--err);}
 #wm{position:fixed;left:16px;bottom:60px;width:150px;height:150px;z-index:0;pointer-events:none;
-  background:url('https://garrettstimpson.ca/assets/img/agent-garrett-logo.png') no-repeat bottom left;
+  background:url('https://garrettstimpson.ca/assets/img/agent-garrett-logo.svg') no-repeat bottom left;
   background-size:contain;opacity:.13;filter:drop-shadow(0 0 8px rgba(0,212,255,.25));}
 @media (max-width:640px){#wm{width:96px;height:96px;bottom:54px;opacity:.1;}}
 </style>
@@ -871,9 +901,9 @@ var AGENT=(function(){
     if(template==='infra'){
       var t=ip||objective;
       return [
-        {id:'t1', title:'Ownership / ASN (RDAP)', prompt:'Who owns '+t+'? Give RDAP ownership, ASN, country, and abuse contact. Passive registration data only.'},
-        {id:'t2', title:'Known associations',      prompt:'Summarize anything in the research corpus or public sources associated with '+t+'. Passive OSINT only, no scanning.'},
-        {id:'t3', title:'Relevant services/CVEs',  prompt:'What services or CVEs are commonly relevant to infrastructure like '+t+' per the research? Defensive framing.', dep:['t1']}
+        {id:'t1', title:'Ownership / ASN (RDAP)', prompt:'Report ONLY the registration data present in the RDAP tool results for '+t+' (registrar, ASN, country, dates, nameservers, abuse contact). If the RDAP result says UNKNOWN or returned nothing, say exactly that. Do NOT invent WHOIS fields, owner names, addresses, phone numbers, or emails.'},
+        {id:'t2', title:'Known associations',      prompt:'Using ONLY the corpus and web-search results provided, list anything genuinely associated with '+t+'. If nothing is found, say "no associations found in available sources." Do not speculate. Passive OSINT only, no scanning.'},
+        {id:'t3', title:'Relevant services/CVEs',  prompt:'Based ONLY on the research corpus, what service or CVE classes are relevant to infrastructure like '+t+'? If the corpus has nothing specific, say so. Defensive framing.', dep:['t1']}
       ];
     }
     if(template==='malware'){
@@ -930,12 +960,15 @@ async function runSwarmToChat(objective, template){
       var batch=ready.slice(0,CONC);
       await Promise.all(batch.map(async function(t){
         jstatus(t.id,'running'); dbg('task running', t.title);
+        addMsg('system','> running task: '+t.title);
         try{
           var ctx=(t.dep||[]).map(function(d){ return '['+d+'] '+(results[d]||''); }).join('\\n\\n').slice(0,2000);
           var out=await callTask(t.prompt, ctx);
           results[t.id]=out; done[t.id]=true;
           MEM.add('['+(template||'job')+'] '+t.title+': '+out.slice(0,500),'finding');
           jstatus(t.id,'done');
+          var pd=addMsg('agent',''); pd.className='msg agent jtaskout';
+          pd.innerHTML='<div class="jt-h">task done - '+t.title+'</div>'+renderMarkdown(out);
         }catch(e){ done[t.id]=true; results[t.id]='(failed: '+e.message+')'; jstatus(t.id,'failed'); dbg('task failed', t.title+' '+e.message); }
       }));
       pending=pending.filter(function(t){ return !done[t.id]; });
@@ -1069,19 +1102,20 @@ export default {
     if (url.pathname === '/api/debug' && request.method === 'POST') {
       let body; try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }
       const q = body.message || '';
-      const { cveIds, ips, wantSearch } = analyseQuery(q);
+      const { cveIds, ips, domains, wantSearch } = analyseQuery(q);
       const toolContext = [];
       for (const cveId of cveIds.slice(0, 3)) {
         const epss = await epssLookup(cveId);
         toolContext.push(`=== NVD: ${cveId} ===\n${await nvdLookup(cveId)}${epss ? '\n' + epss : ''}`);
       }
       for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP RDAP: ${ip} ===\n${await ipLookup(ip)}`);
+      for (const dom of (domains || []).slice(0, 2)) toolContext.push(`=== Domain RDAP: ${dom} ===\n${await domainLookup(dom)}`);
       let chunks = await vectorRetrieve(env, q, body.topK || TOP_K);
       const usedVectorize = chunks !== null;
       if (!chunks) chunks = bm25Chunks(await getChunks(env), q, body.topK || TOP_K);
       const sys = buildSystemPrompt(env, { summary: '', chunks, toolContext });
       return json({
-        cveIds, ips, wantSearch, usedVectorize,
+        cveIds, ips, domains, wantSearch, usedVectorize,
         chunkCount: chunks.length,
         chunks: chunks.map(c => ({ title: c.title, score: c.score, chars: c.text.length })),
         systemChars: sys.length,
@@ -1101,13 +1135,14 @@ export default {
       const context   = (body.context || '').toString();
       const clientMemory = typeof body.memory === 'string' ? body.memory : '';
       try {
-        const { cveIds, ips, wantSearch } = analyseQuery(objective + ' ' + context);
+        const { cveIds, ips, domains, wantSearch } = analyseQuery(objective + ' ' + context);
         const toolContext = [];
         for (const cveId of cveIds.slice(0, 3)) {
           const epss = await epssLookup(cveId);
           toolContext.push(`=== NVD: ${cveId} ===\n${await nvdLookup(cveId)}${epss ? '\n' + epss : ''}`);
         }
         for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP RDAP: ${ip} ===\n${await ipLookup(ip)}`);
+        for (const dom of (domains || []).slice(0, 2)) toolContext.push(`=== Domain RDAP: ${dom} ===\n${await domainLookup(dom)}`);
         if (useSearch && wantSearch) {
           const s = await webSearch(cveIds.length ? `${cveIds[0]} exploit PoC advisory` : objective, braveKey);
           toolContext.push(s ? `=== Web Search ===\n${formatSearch(s)}` : '=== Search Unavailable ===\nDo NOT fabricate details; rely on corpus or state what is unknown.');
@@ -1158,7 +1193,7 @@ export default {
       (async () => {
         const t0 = Date.now();
         try {
-          const { cveIds, ips, wantSearch } = analyseQuery(lastUser);
+          const { cveIds, ips, domains, wantSearch } = analyseQuery(lastUser);
           const toolContext = [];
 
           // NVD + EPSS lookups
@@ -1177,6 +1212,14 @@ export default {
             const result = await ipLookup(ip);
             dbg('rdap result', result.slice(0, 160));
             toolContext.push(`=== IP RDAP: ${ip} ===\n${result}`);
+          }
+
+          // Passive domain registration lookup (RDAP) — no scanning
+          for (const dom of (domains || []).slice(0, 2)) {
+            dbg('domain_rdap', dom);
+            const result = await domainLookup(dom);
+            dbg('rdap result', result.slice(0, 160));
+            toolContext.push(`=== Domain RDAP: ${dom} ===\n${result}`);
           }
 
           // Web search
