@@ -30,6 +30,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
+      - name: Preflight — verify Cloudflare secrets are present
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          if [ -z "$CF_TOKEN" ]; then echo "::error::CLOUDFLARE_API_TOKEN secret is empty or not set"; missing=1; fi
+          if [ -z "$CF_ACCOUNT" ]; then echo "::error::CLOUDFLARE_ACCOUNT_ID secret is empty or not set"; missing=1; fi
+          if [ "$missing" = "1" ]; then
+            echo "Add them under: repo Settings -> Secrets and variables -> Actions -> New repository secret"
+            exit 1
+          fi
+          echo "Both secrets present (token length: ${#CF_TOKEN})."
+
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3
         with:
