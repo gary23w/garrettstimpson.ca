@@ -152,21 +152,32 @@ async function webSearch(query, braveKey) {
     } catch (_) { /* fall through */ }
   }
 
-  // ── Jina AI Search — free, no key required (default) ────────────────────────
-  try {
-    const r = await fetch(
-      `https://s.jina.ai/${encodeURIComponent(query)}`,
-      {
-        headers: { 'User-Agent': 'garrettstimpson-agent/3.0', 'Accept': 'text/plain' },
-        signal: AbortSignal.timeout(12000)
+  // ── SearXNG public instances — free, no key required ────────────────────────
+  const SEARX = [
+    'https://searx.be',
+    'https://search.disroot.org',
+    'https://searxng.site',
+  ];
+  for (const host of SEARX) {
+    try {
+      const r = await fetch(
+        `${host}/search?q=${encodeURIComponent(query)}&format=json&categories=general`,
+        {
+          headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/3.0' },
+          signal: AbortSignal.timeout(8000)
+        }
+      );
+      if (!r.ok) continue;
+      const data = await r.json();
+      const results = (data.results || []).slice(0, 6);
+      if (results.length) {
+        return '[Search Results]\n\n' + results.map((x, i) =>
+          `[${i + 1}] ${x.title}\n${x.url}\n${(x.content || '').slice(0, 300)}`
+        ).join('\n\n');
       }
-    );
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const text = (await r.text()).trim();
-    return text ? '[Jina AI Search]\n\n' + text.slice(0, 4000) : 'No search results found.';
-  } catch (e) {
-    return `Search failed: ${e.message}`;
+    } catch (_) { continue; }
   }
+  return null; // all providers failed — caller will warn the LLM
 }
 
 async function fetchUrl(url) {
@@ -193,7 +204,10 @@ async function getCorpusDocs(env) {
   if (cached) {
     try { return JSON.parse(await cached.text()); } catch {}
   }
-  const llmsUrl = env.LLMS_URL || 'https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/main/llms.txt';
+  // Always use raw GitHub URL — fetching garrettstimpson.ca from a CF Worker
+  // causes a CF-to-CF SSL loop (HTTP 526). raw.githubusercontent.com bypasses this.
+  const rawUrl  = 'https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/main/llms.txt';
+  const llmsUrl = (env.LLMS_URL || '').replace(/^https?:\/\/garrettstimpson\.ca/, rawUrl.replace('/llms.txt', '')) || rawUrl;
   const r = await fetch(llmsUrl, { signal: AbortSignal.timeout(15000) });
   if (!r.ok) throw new Error(`Corpus fetch failed: ${r.status}`);
   const docs = parseCorpus(await r.text());
@@ -240,7 +254,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 <div id="app">
   <header>
     <div class="h-title">${siteName}</div>
-    <div class="h-model">llama-3.1-8b · workers ai · BM25 RAG · NVD + Jina Search · Brave (optional)</div>
+    <div class="h-model">llama-3.1-8b · workers ai · BM25 RAG · NVD + SearXNG · Brave (optional)</div>
     <div class="h-meta" id="status">initialising…</div>
   </header>
   <div id="log"></div>
@@ -382,6 +396,65 @@ export default {
       }
     }
 
+    // ── POST /api/debug — returns built prompt WITHOUT calling AI ─────────────
+    if (url.pathname === '/api/debug' && request.method === 'POST') {
+      let body;
+      try { body = await request.json(); } catch {
+        return new Response('Bad JSON', { status: 400, headers: cors });
+      }
+      const userMessages = (body.messages || []).slice(-(HIST_MSGS));
+      const lastUser = [...userMessages].reverse().find(m => m.role === 'user')?.content || '';
+      const { cveIds, wantSearch } = analyseQuery(lastUser);
+      const toolContext = [];
+      for (const cveId of cveIds.slice(0, 3)) {
+        const result = await nvdLookup(cveId);
+        toolContext.push(`=== NVD: ${cveId} ===\n${result}`);
+      }
+      if (wantSearch) {
+        const q = cveIds.length ? `${cveIds[0]} exploit PoC` : lastUser;
+        const result = await webSearch(q, env.BRAVE_API_KEY || '');
+        if (result) {
+          toolContext.push(`=== Web Search ===\n${result}`);
+        } else {
+          toolContext.push(
+            `=== Search Unavailable ===\n` +
+            `All web search providers failed. ` +
+            `Do NOT fabricate CVE IDs, CVSS scores, affected versions, PoC URLs, ` +
+            `patch dates, or any exploit details.`
+          );
+        }
+      }
+      const docs    = await getCorpusDocs(env);
+      const topDocs = retrieve(docs, lastUser, TOP_K);
+      const toolSection = toolContext.length
+        ? `LIVE TOOL RESULTS:\n${toolContext.join('\n\n').slice(0, 3000)}`
+        : '';
+      const corpusSection = topDocs.length
+        ? `CORPUS (top ${topDocs.length} posts):\n${topDocs.map(formatDoc).join('\n\n---\n\n')}`
+        : '';
+      const sysPrompt = [
+        `You are a senior offensive security researcher for ${env.SITE_NAME || 'Garrett Stimpson Security Research'}.`,
+        `Answer with technical precision.`,
+        toolSection,
+        corpusSection,
+      ].filter(Boolean).join('\n\n');
+      const messages = [
+        { role: 'system', content: sysPrompt },
+        ...userMessages.filter(m => (m.role==='user'||m.role==='assistant') && typeof m.content==='string' && m.content.trim()),
+      ];
+      return new Response(JSON.stringify({
+        cveIds, wantSearch,
+        toolContextChars: toolContext.join('').length,
+        toolSectionChars: toolSection.length,
+        corpusSectionChars: corpusSection.length,
+        syspromptChars: sysPrompt.length,
+        totalChars: messages.reduce((s,m)=>s+m.content.length,0),
+        messageCount: messages.length,
+        syspromptPreview: sysPrompt.slice(0, 300),
+        corpusPreview: corpusSection.slice(0, 500),
+      }, null, 2), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
+
     // ── POST /api/chat ─────────────────────────────────────────────────────────
     if (url.pathname === '/api/chat' && request.method === 'POST') {
       let body;
@@ -417,8 +490,20 @@ export default {
             const q = cveIds.length ? `${cveIds[0]} exploit PoC` : lastUser;
             sendTool(`[search_web] ${q}`);
             const result = await webSearch(q, env.BRAVE_API_KEY || '');
-            sendTool(`[search result] ${result.slice(0, 120)}…`);
-            toolContext.push(`=== Web Search ===\n${result}`);
+            if (result) {
+              sendTool(`[search result] ${result.slice(0, 120)}…`);
+              toolContext.push(`=== Web Search ===\n${result}`);
+            } else {
+              sendTool(`[search result] all providers unavailable`);
+              // Hallucination guard — tell the LLM explicitly not to invent data
+              toolContext.push(
+                `=== Search Unavailable ===\n` +
+                `All web search providers failed. ` +
+                `IMPORTANT: Do NOT fabricate CVE IDs, CVSS scores, affected versions, PoC URLs, ` +
+                `patch dates, or any exploit details. ` +
+                `If the corpus below does not contain the answer, say so clearly instead of guessing.`
+              );
+            }
           }
 
           // 4. BM25 retrieval from corpus
