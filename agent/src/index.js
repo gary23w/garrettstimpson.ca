@@ -1,5 +1,5 @@
 /**
- * Garrett Stimpson — Security Research Agent  v4.0
+ * Agent Garrett — Security Research Agent  v4.1
  *
  * Canonical source: garrettstimpson.ca/agent/  (this repo).
  * garrettstimpson-agent is a CF deploy-bot template clone — do NOT hand-edit it.
@@ -8,8 +8,8 @@
  *   1. Semantic RAG — embed query (bge-base-en-v1.5), query Cloudflare Vectorize
  *      for the most relevant *chunks*. Falls back to in-worker BM25 over chunks
  *      when no Vectorize binding is present (keeps the one-click template working).
- *   2. Deterministic tools — regex CVE extraction → NVD lookup; web search
- *      (Brave → SearXNG → DuckDuckGo HTML fallback).
+ *   2. Deterministic tools — regex CVE extraction → NVD + EPSS lookup; passive
+ *      RDAP IP-ownership lookup (no scanning); web search (Brave → SearXNG → DuckDuckGo).
  *   3. Session memory — KV-backed conversation persistence + rolling summary of
  *      older turns. No-ops gracefully when no KV binding is present.
  *   4. Single streaming LLM call with a tight, budgeted prompt.
@@ -38,7 +38,7 @@ const SUMMARY_AT    = 10;    // summarise once a session exceeds this many turns
 const SESSION_TTL   = 60 * 60 * 24 * 30; // 30 days
 
 const CORPUS_TTL    = 3600;  // corpus cache TTL (seconds)
-const RAW_LLMS      = 'https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/main/llms.txt';
+const RAW_LLMS      = 'https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/refs/heads/main/llms.txt';
 
 // ── Corpus parsing + chunking ──────────────────────────────────────────────────
 
@@ -283,8 +283,12 @@ const SEARCH_TRIGGERS = [
 function analyseQuery(query) {
   const q = query.toLowerCase();
   const cveIds = [...new Set((query.match(/CVE-\d{4}-\d+/gi) || []).map(c => c.toUpperCase()))];
+  // Public IPv4 addresses only — used for passive RDAP ownership lookup, never scanning.
+  const ips = [...new Set((query.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])
+    .filter(ip => ip.split('.').every(o => +o >= 0 && +o <= 255))
+    .filter(ip => !/^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(ip)))];
   const wantSearch = SEARCH_TRIGGERS.some(t => q.includes(t)) || cveIds.length > 0;
-  return { cveIds, wantSearch };
+  return { cveIds, ips, wantSearch };
 }
 
 // ── Tools ───────────────────────────────────────────────────────────────────────
@@ -316,6 +320,38 @@ async function nvdLookup(cveId) {
   } catch (e) {
     return `NVD lookup failed: ${e.message}`;
   }
+}
+
+// EPSS — exploitation-probability score (FIRST.org). Read-only intel enrichment.
+async function epssLookup(cveId) {
+  try {
+    const r = await fetch(`https://api.first.org/data/v1/epss?cve=${cveId}`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(7000) });
+    const d = (await r.json())?.data?.[0];
+    if (!d) return null;
+    const pct = (parseFloat(d.epss) * 100).toFixed(2);
+    const prc = (parseFloat(d.percentile) * 100).toFixed(1);
+    return `EPSS: ${pct}% chance of exploitation in next 30d (percentile ${prc}%)`;
+  } catch { return null; }
+}
+
+// Passive IP ownership lookup via RDAP (registration data only — NOT a port
+// scan). Defensive OSINT: who owns an address, ASN, country, abuse contact.
+async function ipLookup(ip) {
+  try {
+    const r = await fetch(`https://rdap.org/ip/${ip}`,
+      { headers: { 'Accept': 'application/rdap+json', 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return `RDAP: no registration data for ${ip} (HTTP ${r.status}).`;
+    const d = await r.json();
+    const range = d.startAddress && d.endAddress ? `${d.startAddress} – ${d.endAddress}` : (d.handle || '');
+    const org = (d.entities || []).map(e => {
+      const v = e.vcardArray?.[1] || [];
+      const fn = v.find(x => x[0] === 'fn')?.[3];
+      return fn ? `${fn} (${(e.roles || []).join('/')})` : null;
+    }).filter(Boolean).slice(0, 3).join('; ');
+    const remarks = (d.remarks || []).flatMap(x => x.description || []).join(' ').slice(0, 200);
+    return `RDAP ${ip} | name: ${d.name || '?'} | range: ${range} | country: ${d.country || '?'}\norg: ${org || '?'}${remarks ? '\nremarks: ' + remarks : ''}`;
+  } catch (e) { return `RDAP lookup failed for ${ip}: ${e.message}`; }
 }
 
 function ddgParse(html) {
@@ -394,10 +430,11 @@ async function fetchUrl(url) {
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
-  'You are the AI research assistant for the security-research blog "{SITE}".',
-  'You are software, not a person — never invent a human name, biography, job title, or persona for yourself. If asked who you are, say you are this site\'s research assistant.',
+  'Your name is Agent Garrett, the AI research assistant for the security-research blog "{SITE}".',
+  'You are software. "Agent Garrett" is your assistant name only — do not claim to be a human, and do not fabricate a biography, employer, certifications, or personal history for yourself.',
   'Ground every claim in the CORPUS and LIVE TOOL RESULTS provided below.',
-  'Never fabricate CVE IDs, CVSS scores, affected versions, patch dates, or PoC URLs. If the answer is not in the corpus or tool results, say so plainly.',
+  'Never fabricate CVE IDs, CVSS scores, EPSS scores, affected versions, patch dates, or PoC URLs. If the answer is not in the corpus or tool results, say so plainly.',
+  'Use clear markdown: ## headings, **bold** for key terms, `code` for identifiers/commands, fenced ```code blocks```, and bullet lists where helpful.',
   'Answer with technical precision. Cite the post title/URL when you draw from the corpus.',
 ].join(' ');
 
@@ -427,21 +464,36 @@ function terminalUI(siteName) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${siteName} — Research Agent</title>
+<title>Agent Garrett — ${siteName}</title>
 <style>
 :root{--green:#00ff41;--blue:#00d4ff;--bg:#000;--panel:#0a0e0a;--border:#1a1a1a;--muted:#444;--warn:#ffb347;--err:#ff5555;}
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{height:100%;background:var(--bg);color:var(--green);font-family:'JetBrains Mono',Menlo,monospace;font-size:13px;}
+/* themed scrollbars */
+*{scrollbar-width:thin;scrollbar-color:#0f5a26 #050805;}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-track{background:#050805;}
+::-webkit-scrollbar-thumb{background:#0a3d1a;border:1px solid #0f5a26;border-radius:2px;}
+::-webkit-scrollbar-thumb:hover{background:#0f5a26;}
 #app{display:flex;flex-direction:column;height:100vh;max-width:980px;margin:0 auto;padding:12px;}
 header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10px;}
 .h-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
-.h-title{font-size:11px;color:var(--muted);letter-spacing:.15em;text-transform:uppercase;}
+.h-title{font-size:13px;color:var(--green);letter-spacing:.12em;text-transform:uppercase;font-weight:700;}
+.h-sub{font-size:10px;color:var(--muted);letter-spacing:.12em;}
 .h-model{color:var(--blue);font-size:10px;margin-top:3px;}
 .h-meta{font-size:10px;color:var(--muted);margin-top:2px;}
 .btns{display:flex;gap:6px;flex-shrink:0;}
 .btn{background:transparent;border:1px solid var(--border);color:var(--muted);font:inherit;font-size:10px;padding:3px 8px;cursor:pointer;border-radius:2px;}
 .btn:hover{color:var(--green);border-color:var(--green);}
 .btn.on{color:var(--blue);border-color:var(--blue);}
+#chatbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
+.chat-tab{display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:2px;padding:3px 7px;font-size:10px;color:var(--muted);cursor:pointer;max-width:220px;}
+.chat-tab:hover{border-color:var(--green);}
+.chat-tab.active{color:var(--green);border-color:var(--green);}
+.chat-tab .ct-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;}
+.chat-tab .ct-del{color:var(--muted);font-weight:700;}
+.chat-tab .ct-del:hover{color:var(--err);}
+.chat-count{font-size:9px;color:var(--muted);margin-left:4px;}
 #settings{display:none;border:1px solid var(--border);border-radius:3px;padding:10px;margin-bottom:10px;background:var(--panel);font-size:11px;}
 #settings.show{display:block;}
 #settings label{display:flex;align-items:center;gap:8px;margin:5px 0;color:#bbb;}
@@ -449,16 +501,27 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 #settings input[type=text],#settings input[type=password]{flex:1;background:#000;border:1px solid var(--border);color:var(--green);font:inherit;padding:2px 6px;}
 .set-val{color:var(--blue);min-width:34px;text-align:right;}
 #main{flex:1;display:flex;gap:10px;min-height:0;}
-#log{flex:1;overflow-y:auto;padding:4px 0;display:flex;flex-direction:column;gap:10px;}
+#log{flex:1;overflow-y:auto;padding:4px 6px 4px 0;display:flex;flex-direction:column;gap:10px;}
 #debug{display:none;width:320px;flex-shrink:0;overflow-y:auto;border-left:1px solid var(--border);padding-left:10px;font-size:10.5px;color:var(--blue);}
 #debug.show{display:block;}
 #debug .dh{color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-size:9px;margin:8px 0 3px;}
 #debug .de{white-space:pre-wrap;word-break:break-word;line-height:1.5;border-left:2px solid var(--border);padding-left:6px;margin-bottom:4px;opacity:.9;}
-.msg{line-height:1.65;white-space:pre-wrap;word-break:break-word;}
+.msg{line-height:1.65;word-break:break-word;}
+.msg.user{white-space:pre-wrap;color:#ccc;}
 .msg.user::before{content:'> ';color:var(--green);}
-.msg.user{color:#ccc;}
 .msg.agent{color:var(--green);}
 .msg.system{color:var(--muted);font-size:11px;font-style:italic;}
+.msg.agent.streaming{white-space:pre-wrap;}
+/* markdown rendering inside agent messages */
+.msg.agent h2,.msg.agent h3,.msg.agent h4{color:var(--blue);font-size:13px;margin:8px 0 4px;border-bottom:1px solid var(--border);padding-bottom:2px;}
+.msg.agent p{margin:6px 0;}
+.msg.agent ul,.msg.agent ol{margin:6px 0 6px 20px;}
+.msg.agent li{margin:2px 0;}
+.msg.agent code{background:#0a140a;color:var(--blue);padding:1px 5px;border-radius:2px;font-size:12px;}
+.msg.agent pre{background:#070b07;border:1px solid var(--border);border-left:2px solid var(--green);padding:8px 10px;overflow-x:auto;margin:8px 0;border-radius:2px;}
+.msg.agent pre code{background:none;color:var(--green);padding:0;}
+.msg.agent a{color:var(--blue);text-decoration:underline;}
+.msg.agent strong{color:#7fffb0;}
 #input-row{display:flex;gap:8px;margin-top:10px;border-top:1px solid var(--border);padding-top:10px;}
 #inp{flex:1;background:transparent;border:none;outline:none;color:var(--green);font:inherit;caret-color:var(--green);}
 #inp::placeholder{color:var(--muted);}
@@ -472,25 +535,28 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
   <header>
     <div class="h-row">
       <div>
-        <div class="h-title">${siteName}</div>
+        <div class="h-title">Agent Garrett</div>
+        <div class="h-sub">${siteName}</div>
         <div class="h-model" id="modeline">llama-3.1-8b · workers ai · loading…</div>
         <div class="h-meta" id="status">initialising…</div>
       </div>
       <div class="btns">
-        <button class="btn" id="btn-new" title="Start a new conversation">+ new</button>
+        <button class="btn" id="btn-new" title="Start a new conversation (max 3)">+ new</button>
         <button class="btn" id="btn-set" title="Settings">settings</button>
         <button class="btn" id="btn-dbg" title="Toggle debug pane">debug</button>
       </div>
     </div>
   </header>
 
+  <div id="chatbar"><span class="chat-count" id="chatcount"></span></div>
+
   <div id="settings">
-    <label><input type="checkbox" id="s-search" checked> web search (NVD + Brave/SearXNG/DuckDuckGo)</label>
+    <label><input type="checkbox" id="s-search" checked> web search (NVD + EPSS + RDAP + Brave/SearXNG/DuckDuckGo)</label>
     <label>temperature <input type="range" id="s-temp" min="0" max="1" step="0.1" value="0.3"><span class="set-val" id="s-temp-v">0.3</span></label>
     <label>top-K chunks <input type="range" id="s-topk" min="1" max="10" step="1" value="5"><span class="set-val" id="s-topk-v">5</span></label>
     <label><input type="checkbox" id="s-debug"> show debug pane by default</label>
     <label>brave api key (optional, stored in your browser) <input type="password" id="s-brave" placeholder="leave blank to skip"></label>
-    <div style="color:var(--muted);margin-top:6px;font-size:10px;">Settings persist locally. Session id: <span id="s-sid"></span></div>
+    <div style="color:var(--muted);margin-top:6px;font-size:10px;">Settings &amp; chats are saved in this browser. Up to 3 conversations are kept.</div>
   </div>
 
   <div id="main">
@@ -501,63 +567,137 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
   <div id="input-row">
     <span id="prompt">&gt;_</span>
     <input id="inp" autocomplete="off" autocorrect="off" spellcheck="false"
-           placeholder="ask about a CVE, exploit, technique…" autofocus>
+           placeholder="ask Agent Garrett about a CVE, exploit, technique, IP…" autofocus>
   </div>
 </div>
 <script>
-var log=document.getElementById('log'), inp=document.getElementById('inp'), stat=document.getElementById('status'),
-    modeline=document.getElementById('modeline'), dbgPane=document.getElementById('debug'),
-    settings=document.getElementById('settings');
-var MAX_HIST=6, busy=false;
-
-// ---- settings persistence (localStorage) ----
-function loadSettings(){
-  var s={};
-  try{ s=JSON.parse(localStorage.getItem('gsa_settings')||'{}'); }catch(e){}
-  return s;
-}
-function saveSettings(){
-  var s={search:el('s-search').checked, temp:el('s-temp').value, topk:el('s-topk').value,
-         debug:el('s-debug').checked, brave:el('s-brave').value};
-  try{ localStorage.setItem('gsa_settings', JSON.stringify(s)); }catch(e){}
-}
+var MAX_CHATS=3, MAX_HIST=6, busy=false;
 function el(id){return document.getElementById(id);}
-
-// ---- session id ----
-function sid(){
-  var id=null;
-  try{ id=localStorage.getItem('gsa_sid'); }catch(e){}
-  if(!id){ id='s_'+Math.random().toString(36).slice(2)+Date.now().toString(36);
-    try{ localStorage.setItem('gsa_sid', id); }catch(e){} }
-  return id;
-}
-var SID=sid();
-
+var log=el('log'), inp=el('inp'), stat=el('status'), modeline=el('modeline'),
+    dbgPane=el('debug'), settings=el('settings'), chatbar=el('chatbar');
 function ts(){ return new Date().toLocaleTimeString(); }
+
+// ---------- safe markdown renderer (escape-first, fixed tag whitelist) ----------
+function renderMarkdown(src){
+  var BT=String.fromCharCode(96);
+  var blocks=[];
+  src=src.replace(new RegExp(BT+BT+BT+'([^]*?)'+BT+BT+BT,'g'),function(m,code){
+    blocks.push(code.replace(/^[a-zA-Z0-9]*\\n/,'')); return '\\u0000CB'+(blocks.length-1)+'\\u0000';
+  });
+  function esc(t){ return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  src=esc(src);
+  src=src.replace(new RegExp(BT+'([^'+BT+']+)'+BT,'g'),'<code>$1</code>');
+  src=src.replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>');
+  src=src.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^)\\s"'<>]+)\\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  var lines=src.split('\\n'), out=[], inList=null;
+  function closeList(){ if(inList){ out.push('</'+inList+'>'); inList=null; } }
+  for(var i=0;i<lines.length;i++){
+    var ln=lines[i];
+    if(/^\\u0000CB\\d+\\u0000$/.test(ln.trim())){ closeList(); out.push(ln.trim()); continue; }
+    var h=ln.match(/^(#{1,4})\\s+(.*)$/);
+    if(h){ closeList(); var lvl=Math.min(h[1].length+1,6); out.push('<h'+lvl+'>'+h[2]+'</h'+lvl+'>'); continue; }
+    var ul=ln.match(/^\\s*[-*]\\s+(.*)$/);
+    var ol=ln.match(/^\\s*\\d+\\.\\s+(.*)$/);
+    if(ul){ if(inList!=='ul'){ closeList(); out.push('<ul>'); inList='ul'; } out.push('<li>'+ul[1]+'</li>'); continue; }
+    if(ol){ if(inList!=='ol'){ closeList(); out.push('<ol>'); inList='ol'; } out.push('<li>'+ol[1]+'</li>'); continue; }
+    if(ln.trim()===''){ closeList(); continue; }
+    closeList(); out.push('<p>'+ln+'</p>');
+  }
+  closeList();
+  var html=out.join('\\n');
+  html=html.replace(/\\u0000CB(\\d+)\\u0000/g,function(m,idx){ return '<pre><code>'+esc(blocks[+idx]||'')+'</code></pre>'; });
+  return html;
+}
+
+// ---------- settings persistence ----------
+function loadSettings(){ try{ return JSON.parse(localStorage.getItem('gsa_settings')||'{}'); }catch(e){ return {}; } }
+function saveSettings(){
+  try{ localStorage.setItem('gsa_settings', JSON.stringify({
+    search:el('s-search').checked, temp:el('s-temp').value, topk:el('s-topk').value,
+    debug:el('s-debug').checked, brave:el('s-brave').value })); }catch(e){}
+}
+
+// ---------- chats (memory on by default, max 3) ----------
+function newId(){ return 's_'+Math.random().toString(36).slice(2)+Date.now().toString(36); }
+function loadChats(){ try{ return JSON.parse(localStorage.getItem('gsa_chats')||'[]'); }catch(e){ return []; } }
+function saveChats(c){ try{ localStorage.setItem('gsa_chats', JSON.stringify(c)); }catch(e){} }
+function getActiveId(){ try{ return localStorage.getItem('gsa_active'); }catch(e){ return null; } }
+function setActiveId(id){ try{ localStorage.setItem('gsa_active', id); }catch(e){} }
+
+var chats=loadChats();
+function active(){
+  var id=getActiveId();
+  var c=chats.filter(function(x){return x.id===id;})[0];
+  if(!c){ c=chats[0]; if(c) setActiveId(c.id); }
+  if(!c){ c={id:newId(), title:'new chat', msgs:[]}; chats.unshift(c); setActiveId(c.id); saveChats(chats); }
+  return c;
+}
+
+function renderChats(){
+  var id=active().id;
+  while(chatbar.firstChild) chatbar.removeChild(chatbar.firstChild);
+  chats.forEach(function(c){
+    var tab=document.createElement('div'); tab.className='chat-tab'+(c.id===id?' active':'');
+    var t=document.createElement('span'); t.className='ct-title'; t.textContent=c.title||'new chat';
+    var x=document.createElement('span'); x.className='ct-del'; x.textContent='×'; x.title='Delete chat';
+    tab.appendChild(t); tab.appendChild(x);
+    tab.onclick=function(ev){ if(ev.target===x){ deleteChat(c.id); return; } switchChat(c.id); };
+    chatbar.appendChild(tab);
+  });
+  var cnt=document.createElement('span'); cnt.className='chat-count'; cnt.id='chatcount';
+  cnt.textContent=chats.length+'/'+MAX_CHATS+' chats';
+  chatbar.appendChild(cnt);
+}
+
+function renderLog(c){
+  while(log.firstChild) log.removeChild(log.firstChild);
+  if(!c.msgs.length){ addMsg('system','Agent Garrett online. Ask about any CVE, exploit technique, affected system, IP ownership, or PoC mechanics in the research.'); return; }
+  c.msgs.forEach(function(m){
+    if(m.role==='user') addMsg('user',m.content);
+    else{ var d=addMsg('agent',''); d.innerHTML=renderMarkdown(m.content); }
+  });
+}
+
+function switchChat(id){ if(busy) return; setActiveId(id); renderChats(); renderLog(active()); inp.focus(); }
+
+function deleteChat(id){
+  if(busy) return;
+  chats=chats.filter(function(x){return x.id!==id;});
+  saveChats(chats);
+  fetch('/api/session/'+encodeURIComponent(id),{method:'DELETE'}).catch(function(){});
+  if(getActiveId()===id){ setActiveId(chats[0]?chats[0].id:null); }
+  renderChats(); renderLog(active());
+}
+
+function newChat(){
+  if(busy) return;
+  if(chats.length>=MAX_CHATS){
+    chatbar.style.outline='1px solid var(--warn)';
+    setTimeout(function(){ chatbar.style.outline=''; }, 1200);
+    addMsg('system','You have '+MAX_CHATS+' saved chats — the maximum. Delete one (× on a chat tab above) before starting a new conversation.');
+    return;
+  }
+  var c={id:newId(), title:'new chat', msgs:[]}; chats.unshift(c); setActiveId(c.id); saveChats(chats);
+  renderChats(); renderLog(c); inp.focus();
+}
+
+// ---------- message rendering ----------
 function addMsg(role,text){
   var d=document.createElement('div'); d.className='msg '+role; d.textContent=text;
   log.appendChild(d); log.scrollTop=log.scrollHeight; return d;
 }
-function appendTo(el,chunk){ el.textContent+=chunk; log.scrollTop=log.scrollHeight; }
 function dbg(head,body){
   if(head){ var h=document.createElement('div'); h.className='dh'; h.textContent=ts()+' · '+head; dbgPane.appendChild(h); }
   if(body){ var e=document.createElement('div'); e.className='de'; e.textContent=body; dbgPane.appendChild(e); }
   dbgPane.scrollTop=dbgPane.scrollHeight;
 }
 
-// ---- wire up controls ----
+// ---------- controls ----------
 el('btn-set').onclick=function(){ settings.classList.toggle('show'); };
 el('btn-dbg').onclick=function(){ var on=dbgPane.classList.toggle('show'); el('btn-dbg').classList.toggle('on',on); };
-el('btn-new').onclick=function(){
-  if(busy) return;
-  try{ localStorage.removeItem('gsa_sid'); }catch(e){}
-  SID=sid(); el('s-sid').textContent=SID;
-  log.innerHTML=''; dbgPane.innerHTML='<div class="dh">debug log</div>';
-  fetch('/api/session/'+encodeURIComponent(SID),{method:'DELETE'}).catch(function(){});
-  addMsg('system','New conversation started.');
-};
+el('btn-new').onclick=newChat;
 ['s-search','s-temp','s-topk','s-debug','s-brave'].forEach(function(id){
-  var node=el(id); node.addEventListener('change',saveSettings); node.addEventListener('input',saveSettings);
+  var n=el(id); n.addEventListener('change',saveSettings); n.addEventListener('input',saveSettings);
 });
 el('s-temp').addEventListener('input',function(){ el('s-temp-v').textContent=el('s-temp').value; });
 el('s-topk').addEventListener('input',function(){ el('s-topk-v').textContent=el('s-topk').value; });
@@ -570,33 +710,32 @@ el('s-topk').addEventListener('input',function(){ el('s-topk-v').textContent=el(
   if('debug' in s) el('s-debug').checked=s.debug;
   if('brave' in s) el('s-brave').value=s.brave;
   if(s.debug){ dbgPane.classList.add('show'); el('btn-dbg').classList.add('on'); }
-  el('s-sid').textContent=SID;
 })();
 
 async function init(){
+  renderChats(); renderLog(active());
   try{
     var d=await (await fetch('/api/status')).json();
-    modeline.textContent='llama-3.1-8b · '+(d.retrieval||'?')+' RAG · '+(d.memory?'memory on':'memory off')+' · NVD + web search';
-    stat.textContent=ts()+' · corpus: '+d.docCount+' posts / '+(d.chunkCount||0)+' chunks · '+(d.totalChars||0).toLocaleString()+' chars';
+    modeline.textContent='llama-3.1-8b · '+(d.retrieval||'?')+' RAG · memory on · NVD+EPSS+RDAP+web';
+    stat.textContent=ts()+' · corpus: '+d.docCount+' posts / '+(d.chunkCount||0)+' chunks · '+(d.totalChars||0).toLocaleString()+' chars'+(d.memory?' · KV sync':'');
     if(d.docCount===0) stat.textContent+=' · WARNING corpus empty';
-    addMsg('system','Agent online. Ask about any CVE, exploit technique, affected system, detection strategy, or PoC mechanics covered in the research.');
-  }catch(e){
-    stat.textContent='corpus unavailable';
-    addMsg('system','Warning: status load failed — '+e.message);
-  }
+  }catch(e){ stat.textContent='status unavailable — '+e.message; }
 }
 
 inp.addEventListener('keydown', async function(e){
   if(e.key!=='Enter'||busy||!inp.value.trim()) return;
   var q=inp.value.trim(); inp.value=''; busy=true; inp.disabled=true;
+  var c=active();
+  if(!c.msgs.length){ c.title=q.slice(0,40); }
+  c.msgs.push({role:'user',content:q}); saveChats(chats); renderChats();
   addMsg('user',q);
-  var el2=addMsg('agent',''); var full='';
+  var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full='';
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
              topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'' };
   dbg('query', q+'  [search='+opts.webSearch+' temp='+opts.temperature+' topK='+opts.topK+']');
   try{
     var res=await fetch('/api/chat',{ method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ sessionId:SID, message:q, settings:opts }) });
+      body: JSON.stringify({ sessionId:c.id, message:q, messages:c.msgs.slice(-MAX_HIST), settings:opts }) });
     if(!res.ok) throw new Error('HTTP '+res.status);
     var reader=res.body.getReader(), decoder=new TextDecoder(), buf='';
     while(true){
@@ -611,10 +750,12 @@ inp.addEventListener('keydown', async function(e){
           dbg(sep>=0?p.slice(0,sep):p, sep>=0?p.slice(sep+1):''); continue;
         }
         if(line.indexOf('data: ')!==0) continue;
-        try{ var obj=JSON.parse(line.slice(6)); var t=obj.response||''; if(t){ full+=t; appendTo(el2,t);} }catch(e3){}
+        try{ var obj=JSON.parse(line.slice(6)); var t=obj.response||''; if(t){ full+=t; el2.textContent+=t; log.scrollTop=log.scrollHeight; } }catch(e3){}
       }
     }
-  }catch(e){ appendTo(el2,'[error] '+e.message); }
+  }catch(e){ full=(full||'')+'\\n[error] '+e.message; el2.textContent=full; }
+  el2.className='msg agent';
+  if(full.trim()){ el2.innerHTML=renderMarkdown(full); c.msgs.push({role:'assistant',content:full}); saveChats(chats); }
   busy=false; inp.disabled=false; inp.focus();
 });
 
@@ -690,15 +831,19 @@ export default {
     if (url.pathname === '/api/debug' && request.method === 'POST') {
       let body; try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }
       const q = body.message || '';
-      const { cveIds, wantSearch } = analyseQuery(q);
+      const { cveIds, ips, wantSearch } = analyseQuery(q);
       const toolContext = [];
-      for (const cveId of cveIds.slice(0, 3)) toolContext.push(`=== NVD: ${cveId} ===\n${await nvdLookup(cveId)}`);
+      for (const cveId of cveIds.slice(0, 3)) {
+        const epss = await epssLookup(cveId);
+        toolContext.push(`=== NVD: ${cveId} ===\n${await nvdLookup(cveId)}${epss ? '\n' + epss : ''}`);
+      }
+      for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP RDAP: ${ip} ===\n${await ipLookup(ip)}`);
       let chunks = await vectorRetrieve(env, q, body.topK || TOP_K);
       const usedVectorize = chunks !== null;
       if (!chunks) chunks = bm25Chunks(await getChunks(env), q, body.topK || TOP_K);
       const sys = buildSystemPrompt(env, { summary: '', chunks, toolContext });
       return json({
-        cveIds, wantSearch, usedVectorize,
+        cveIds, ips, wantSearch, usedVectorize,
         chunkCount: chunks.length,
         chunks: chunks.map(c => ({ title: c.title, score: c.score, chars: c.text.length })),
         systemChars: sys.length,
@@ -738,15 +883,25 @@ export default {
       (async () => {
         const t0 = Date.now();
         try {
-          const { cveIds, wantSearch } = analyseQuery(lastUser);
+          const { cveIds, ips, wantSearch } = analyseQuery(lastUser);
           const toolContext = [];
 
-          // NVD lookups
+          // NVD + EPSS lookups
           for (const cveId of cveIds.slice(0, 3)) {
             dbg('lookup_nvd', cveId);
             const result = await nvdLookup(cveId);
+            const epss = await epssLookup(cveId);
             dbg('nvd result', result.slice(0, 160));
-            toolContext.push(`=== NVD: ${cveId} ===\n${result}`);
+            if (epss) dbg('epss', epss);
+            toolContext.push(`=== NVD: ${cveId} ===\n${result}${epss ? '\n' + epss : ''}`);
+          }
+
+          // Passive IP ownership lookup (RDAP) — registration data only, no scanning
+          for (const ip of (ips || []).slice(0, 2)) {
+            dbg('ip_rdap', ip);
+            const result = await ipLookup(ip);
+            dbg('rdap result', result.slice(0, 160));
+            toolContext.push(`=== IP RDAP: ${ip} ===\n${result}`);
           }
 
           // Web search
