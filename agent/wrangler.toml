@@ -2,7 +2,8 @@ name = "garrettstimpson-agent"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
 
-# Workers AI — free tier, no API key required
+# Workers AI — free tier, no API key required. Used for both the chat model
+# (llama-3.1-8b) and the embedding model (bge-base-en-v1.5).
 [ai]
 binding = "AI"
 
@@ -10,5 +11,34 @@ binding = "AI"
 LLMS_URL  = "https://garrettstimpson.ca/llms.txt"
 SITE_NAME = "Garrett Stimpson Security Research"
 
-# Optional: add Brave Search API key via CF Dashboard → Workers → Settings → Variables & Secrets
-# BRAVE_API_KEY = ""
+# Daily reindex of the Vectorize index, 1h after llms.txt regenerates (06:00 UTC).
+# No-op when the VECTORIZE binding below is not enabled.
+[triggers]
+crons = ["0 7 * * *"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTIONAL — semantic RAG via Vectorize. The worker runs fine without this
+# (it falls back to in-worker BM25 over chunks). To enable full semantic search:
+#
+#   1) wrangler vectorize create gsa-corpus --dimensions=768 --metric=cosine
+#   2) uncomment the block below
+#   3) wrangler deploy
+#   4) curl -X POST https://<your-worker>/api/reindex     # one-time index build
+#
+# [[vectorize]]
+# binding    = "VECTORIZE"
+# index_name = "gsa-corpus"
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTIONAL — persistent conversation memory via Workers KV. Without this the
+# agent still works, but conversations live only in the browser tab. To enable:
+#
+#   1) wrangler kv namespace create SESSIONS
+#   2) paste the returned id below and uncomment the block
+#   3) wrangler deploy
+#
+# [[kv_namespaces]]
+# binding = "SESSIONS"
+# id      = "<paste-kv-namespace-id-here>"
+# ─────────────────────────────────────────────────────────────────────────────

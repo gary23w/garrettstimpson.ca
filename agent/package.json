@@ -1,8 +1,8 @@
 {
   "name": "garrettstimpson-agent",
-  "version": "1.0.0",
+  "version": "4.0.0",
   "private": true,
-  "description": "BM25 RAG research agent powered by Cloudflare Workers AI — deploy to your own account in one click.",
+  "description": "Security research agent \u2014 semantic RAG (Vectorize + bge embeddings) with BM25 fallback, KV-backed conversation memory, NVD + web search. Deploy to your own Cloudflare account in one click.",
   "cloudflare": {
     "bindings": [
       {
