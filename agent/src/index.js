@@ -632,16 +632,37 @@ function formatSearch(s) {
   return `[${s.provider}]\n\n` + s.results.map((x, i) => `[${i + 1}] ${x.title}\n${x.url}\n${x.content || ''}`).join('\n\n');
 }
 
+function isPrivateHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) return true;
+  if (h === '::1' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80')) return true;
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = +m[1], b = +m[2];
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;      // link-local incl. cloud metadata 169.254.169.254
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a >= 224) return true;                     // multicast / reserved
+  }
+  return false;
+}
+
+// fetch_url — CTF open mode: any public http(s) host; SSRF guard blocks internal targets.
 async function fetchUrl(url) {
-  let hostname;
-  try { hostname = new URL(url).hostname; } catch { return `Invalid URL: ${url}`; }
-  if (!FETCH_ALLOWLIST.some(d => hostname === d || hostname.endsWith('.' + d)))
-    return `fetch_url: ${hostname} not in security domain allowlist.`;
+  let u;
+  try { u = new URL(url); } catch { return `Invalid URL: ${url}`; }
+  if (!/^https?:$/.test(u.protocol)) return `fetch_url: only http/https URLs are allowed.`;
+  if (isPrivateHost(u.hostname)) return `fetch_url: ${u.hostname} is a private/internal address — blocked by SSRF guard.`;
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(8000) });
-    const text = await r.text();
-    return text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
-  } catch (e) { return `fetch failed: ${e.message}`; }
+    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
+    const ct = r.headers.get('content-type') || '';
+    const raw = await r.text();
+    const body = /html|xml/i.test(ct)
+      ? raw.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      : raw.trim();
+    return `fetch_url ${u.hostname} (HTTP ${r.status}, ${ct || 'unknown type'})\n\n${body.slice(0, 6000)}`;
+  } catch (e) { return `fetch_url ${u.hostname}: fetch failed (${e.message}).`; }
 }
 
 // ── CTF safe-mode tool wiring ─────────────────────────────────────────────────
@@ -665,6 +686,14 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'urlscan', category: 'osint', passive: true, description: 'urlscan.io public scan history for a domain' },
   { name: 'urlhaus', category: 'osint', passive: true, description: 'abuse.ch URLhaus malware-URL lookup by host' },
   { name: 'github_osint', category: 'osint', passive: true, description: 'GitHub public code search (anonymous, rate-limited)' },
+  { name: 'crtsh_subs', category: 'osint', passive: true, description: 'crt.sh certificate-transparency subdomain enumeration' },
+  { name: 'circl_cve', category: 'intel', passive: true, description: 'CIRCL keyless CVE detail (CVSS, summary, refs)' },
+  { name: 'greynoise', category: 'osint', passive: true, description: 'GreyNoise community — is an IP a known internet scanner' },
+  { name: 'wellknown', category: 'recon', passive: true, description: 'Fetch /.well-known/security.txt + /robots.txt for a host' },
+  { name: 'username_enum', category: 'people', passive: true, description: 'Username presence across GitHub/GitLab/Keybase/HN/Reddit' },
+  { name: 'github_user', category: 'people', passive: true, description: 'GitHub public user profile (name/company/location/links)' },
+  { name: 'gravatar', category: 'people', passive: true, description: 'Gravatar profile + avatar existence by email (sha256)' },
+  { name: 'email_recon', category: 'people', passive: true, description: 'Email format + MX (DoH) + gravatar presence' },
 ];
 
 function parseCsvSet(value) {
@@ -751,6 +780,14 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'urlscan')      return urlscanSearch(String(args.domain || ''));
   if (name === 'urlhaus')      return urlhausLookup(String(args.host || args.domain || args.ip || ''));
   if (name === 'github_osint') return githubOsint(String(args.query || ''));
+  if (name === 'crtsh_subs')   return crtshSubs(String(args.domain || args.target || ''));
+  if (name === 'circl_cve')    return circlCve(String(args.cveId || args.cve || ''));
+  if (name === 'greynoise')    return greynoise(String(args.ip || args.target || ''));
+  if (name === 'wellknown')    return wellKnown(String(args.target || args.domain || args.host || ''));
+  if (name === 'username_enum') return usernameEnum(String(args.username || args.user || args.target || ''));
+  if (name === 'github_user')  return githubUser(String(args.username || args.user || args.target || ''));
+  if (name === 'gravatar')     return gravatarLookup(String(args.email || args.target || ''));
+  if (name === 'email_recon')  return emailRecon(String(args.email || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -773,7 +810,9 @@ async function runBrokerTool(env, payload) {
   return out;
 }
 
-function validateToolAccess(policy, toolName, target) {
+function validateToolAccess(policy, toolName, target, confirmed) {
+  // CTF: a checked confirm box is the human-verification gate — it unlocks any tool/target.
+  if (confirmed) return { ok: true };
   if (policy.safeMode && policy.toolAllowlist.size && !policy.toolAllowlist.has(toolName)) {
     return { ok: false, status: 403, error: `Tool ${toolName} is not allowlisted in TOOL_ALLOWLIST.` };
   }
@@ -784,6 +823,165 @@ function validateToolAccess(policy, toolName, target) {
     }
   }
   return { ok: true };
+}
+
+async function sha256hex(s) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// crt.sh — subdomain/host enumeration via certificate transparency (passive).
+async function crtshSubs(domain) {
+  const d = String(domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+  if (!d) return 'crtsh_subs: a domain is required.';
+  try {
+    const r = await fetch(`https://crt.sh/?q=%25.${encodeURIComponent(d)}&output=json`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return `crt.sh ${d}: lookup failed (HTTP ${r.status}).`;
+    const rows = await r.json();
+    const set = new Set();
+    for (const row of rows) {
+      String(row.name_value || '').split(/\n+/).forEach(n => {
+        n = n.trim().toLowerCase().replace(/^\*\./, '');
+        if (n && n.endsWith(d) && !n.includes(' ')) set.add(n);
+      });
+    }
+    const subs = [...set].sort();
+    if (!subs.length) return `crt.sh ${d}: no certificates / subdomains found. UNKNOWN — do not invent.`;
+    return `crt.sh ${d}: ${subs.length} unique names (CT logs, passive)\n` + subs.slice(0, 60).join('\n') + (subs.length > 60 ? `\n…(+${subs.length - 60} more)` : '');
+  } catch (e) { return `crt.sh ${d}: lookup failed (${e.message}).`; }
+}
+
+// CIRCL CVE — keyless CVE detail (CVSS, summary, references).
+async function circlCve(cve) {
+  const id = String(cve || '').trim().toUpperCase();
+  if (!/^CVE-\d{4}-\d+$/.test(id)) return 'circl_cve: a CVE id like CVE-2024-1234 is required.';
+  try {
+    const r = await fetch(`https://cve.circl.lu/api/cve/${id}`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return `CIRCL ${id}: lookup failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    const cna = (d.containers && d.containers.cna) || {};
+    if (!d || (!d.summary && !d.cvss && !d.containers && !d.id)) return `CIRCL ${id}: no record. UNKNOWN — do not invent.`;
+    const summary = d.summary
+      || (cna.descriptions && cna.descriptions[0] && cna.descriptions[0].value)
+      || 'no summary';
+    let cvss = d.cvss != null ? d.cvss : '?';
+    if (cvss === '?' && Array.isArray(cna.metrics)) {
+      for (const mtc of cna.metrics) {
+        const cv = mtc.cvssV4_0 || mtc.cvssV3_1 || mtc.cvssV3_0 || mtc.cvssV2_0;
+        if (cv && cv.baseScore != null) { cvss = `${cv.baseScore}${cv.baseSeverity ? ' (' + cv.baseSeverity + ')' : ''}`; break; }
+      }
+    }
+    let refs = (d.references || []).map(x => typeof x === 'string' ? x : x.url);
+    if (!refs.length && Array.isArray(cna.references)) refs = cna.references.map(x => x.url);
+    refs = refs.filter(Boolean).slice(0, 6);
+    return `CIRCL ${id}\nCVSS: ${cvss}\n${summary}\n${refs.length ? 'refs:\n' + refs.join('\n') : ''}`.trim();
+  } catch (e) { return `CIRCL ${id}: lookup failed (${e.message}).`; }
+}
+
+// GreyNoise community — is this IP a known internet scanner? (keyless, passive)
+async function greynoise(ip) {
+  const v = String(ip || '').trim();
+  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(v)) return 'greynoise: a public IPv4 is required.';
+  try {
+    const r = await fetch(`https://api.greynoise.io/v3/community/${v}`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) });
+    if (r.status === 404) return `GreyNoise ${v}: not observed (no scanning activity recorded). UNKNOWN — do not invent.`;
+    if (!r.ok) return `GreyNoise ${v}: lookup failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    return `GreyNoise ${v} (community)\nnoise: ${d.noise} | riot: ${d.riot} | classification: ${d.classification || '?'}\nname: ${d.name || '?'}${d.last_seen ? ' | last seen: ' + d.last_seen : ''}`;
+  } catch (e) { return `GreyNoise ${v}: lookup failed (${e.message}).`; }
+}
+
+// .well-known recon — security.txt + robots.txt (passive fetch of a host's own files)
+async function wellKnown(target) {
+  const host = String(target || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+  if (!host) return 'wellknown: a domain or host is required.';
+  const grab = async (path) => {
+    try {
+      const r = await fetch(`https://${host}${path}`, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(7000) });
+      if (!r.ok) return `(${path}: HTTP ${r.status})`;
+      const t = (await r.text()).trim();
+      return t ? t.slice(0, 1200) : `(${path}: empty)`;
+    } catch (e) { return `(${path}: ${e.message})`; }
+  };
+  const [sec, rob] = await Promise.all([grab('/.well-known/security.txt'), grab('/robots.txt')]);
+  return `well-known ${host}\n=== /.well-known/security.txt ===\n${sec}\n\n=== /robots.txt ===\n${rob}`;
+}
+
+// Username enumeration across keyless JSON endpoints (passive presence check).
+async function usernameEnum(username) {
+  const u = String(username || '').trim().replace(/^@/, '');
+  if (!u || /[^A-Za-z0-9_.\-]/.test(u)) return 'username_enum: a plain username (letters/digits/_-.) is required.';
+  const sites = [
+    { name: 'GitHub',     api: `https://api.github.com/users/${u}`,                           profile: `https://github.com/${u}`,                 test: r => r.ok },
+    { name: 'GitLab',     api: `https://gitlab.com/api/v4/users?username=${u}`,               profile: `https://gitlab.com/${u}`,                 test: async r => r.ok && (await r.json()).length > 0 },
+    { name: 'Keybase',    api: `https://keybase.io/_/api/1.0/user/lookup.json?username=${u}`, profile: `https://keybase.io/${u}`,                  test: async r => { if (!r.ok) return false; const j = await r.json(); return !!(j && j.status && j.status.code === 0); } },
+    { name: 'HackerNews', api: `https://hacker-news.firebaseio.com/v0/user/${u}.json`,        profile: `https://news.ycombinator.com/user?id=${u}`, test: async r => r.ok && (await r.text()).trim() !== 'null' },
+    { name: 'Reddit',     api: `https://www.reddit.com/user/${u}/about.json`,                 profile: `https://www.reddit.com/user/${u}`,        test: r => r.ok },
+  ];
+  const out = await Promise.all(sites.map(async s => {
+    try {
+      const r = await fetch(s.api, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(7000) });
+      let found = false;
+      try { found = await s.test(r); } catch { found = false; }
+      return `${found ? 'FOUND' : 'none '}  ${s.name.padEnd(11)} ${found ? s.profile : '(no account / blocked)'}`;
+    } catch (e) { return `err    ${s.name.padEnd(11)} ${e.message}`; }
+  }));
+  return `username_enum "${u}" (passive presence check)\n${out.join('\n')}`;
+}
+
+// GitHub public user profile (keyless, rate-limited).
+async function githubUser(username) {
+  const u = String(username || '').trim().replace(/^@/, '');
+  if (!u) return 'github_user: a username is required.';
+  try {
+    const r = await fetch(`https://api.github.com/users/${u}`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/vnd.github+json' }, signal: AbortSignal.timeout(8000) });
+    if (r.status === 404) return `GitHub user ${u}: not found. UNKNOWN — do not invent.`;
+    if (r.status === 403) return `GitHub user ${u}: rate-limited (anonymous). Retry later.`;
+    if (!r.ok) return `GitHub user ${u}: lookup failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    return `GitHub @${d.login}\nname: ${d.name || '?'} | company: ${d.company || '?'} | location: ${d.location || '?'}\nblog: ${d.blog || '?'} | email: ${d.email || '?'} | twitter: ${d.twitter_username || '?'}\npublic repos: ${d.public_repos} | followers: ${d.followers} | created: ${d.created_at}\nbio: ${d.bio || '(none)'}`;
+  } catch (e) { return `GitHub user ${u}: lookup failed (${e.message}).`; }
+}
+
+// Gravatar by email (sha256) — avatar existence + public profile (keyless).
+async function gravatarLookup(email) {
+  const e = String(email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return 'gravatar: a valid email is required.';
+  const h = await sha256hex(e);
+  let has = false, prof = '';
+  try { const av = await fetch(`https://gravatar.com/avatar/${h}?d=404`, { signal: AbortSignal.timeout(7000) }); has = av.ok; } catch {}
+  try {
+    const r = await fetch(`https://api.gravatar.com/v3/profiles/${h}`, { headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(7000) });
+    if (r.ok) {
+      const d = await r.json();
+      if (!d || d.error) throw new Error('no profile');
+      prof = `name: ${d.display_name || '?'} | location: ${d.location || '?'} | job: ${d.job_title || '?'} | company: ${d.company || '?'}`;
+      if (d.description) prof += `\nbio: ${d.description}`;
+      if (Array.isArray(d.verified_accounts) && d.verified_accounts.length) prof += `\naccounts: ` + d.verified_accounts.map(a => `${a.service_label}:${a.url}`).join(', ');
+    }
+  } catch {}
+  return `Gravatar ${e}\nsha256: ${h}\navatar: ${has ? 'EXISTS' : 'none'}${prof ? '\n' + prof : '\nprofile: none/private'}`;
+}
+
+// Email recon — format + MX (DoH) + gravatar presence (passive).
+async function emailRecon(email) {
+  const e = String(email || '').trim().toLowerCase();
+  const m = e.match(/^[^@\s]+@([^@\s]+\.[^@\s]+)$/);
+  if (!m) return `email_recon: ${email} is not a valid email.`;
+  const dom = m[1];
+  let mx = 'UNKNOWN';
+  try {
+    const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${dom}&type=MX`, { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(6000) });
+    const d = await r.json();
+    const recs = (d.Answer || []).map(a => a.data).filter(Boolean);
+    mx = recs.length ? recs.join(', ') : 'none (no MX — may not receive mail)';
+  } catch (ex) { mx = `lookup failed (${ex.message})`; }
+  const grav = await gravatarLookup(e);
+  return `email_recon ${e}\ndomain: ${dom}\nMX: ${mx}\n--- gravatar ---\n${grav}`;
 }
 
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
@@ -953,6 +1151,24 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 .t-badge{font-size:9px;padding:1px 6px;border:1px solid var(--border);border-radius:2px;color:var(--muted);}
 .t-badge.safe{color:var(--green);border-color:var(--green);}
 .t-out{white-space:pre-wrap;word-break:break-word;border-left:2px solid var(--blue);padding-left:8px;margin-top:6px;color:#bbb;font-size:10.5px;}
+/* themed dropdowns — tools + agent + settings panels */
+#tools select,#jobs select,#settings select,#s-reason{
+  -webkit-appearance:none;-moz-appearance:none;appearance:none;
+  background-color:#0a140a;color:var(--green);
+  border:1px solid #0f5a26;border-radius:4px;
+  padding:6px 28px 6px 10px;font:inherit;font-size:11px;line-height:1.4;cursor:pointer;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%2300ff41' stroke-width='1.5'/></svg>");
+  background-repeat:no-repeat;background-position:right 10px center;
+  transition:border-color .15s,box-shadow .15s,background-color .15s;max-width:100%;
+}
+#tools select:hover,#jobs select:hover,#settings select:hover,#s-reason:hover{border-color:var(--green);background-color:#0c1a0c;}
+#tools select:focus,#jobs select:focus,#settings select:focus,#s-reason:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 2px rgba(0,212,255,.25);}
+#tools select option,#jobs select option,#settings select option,#s-reason option{background:#050805;color:var(--green);}
+#tools .trow,#jobs .row{align-items:center;}
+@media (max-width:640px){
+  #tools select,#jobs select,#tools input.t-arg,#jobs input[type=text]{width:100%;flex:1 1 100%;}
+  #tools .trow,#jobs .row{gap:6px;}
+}
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -985,7 +1201,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
     <label>temperature <input type="range" id="s-temp" min="0" max="1" step="0.1" value="0.3"><span class="set-val" id="s-temp-v">0.3</span></label>
     <label>top-K chunks <input type="range" id="s-topk" min="1" max="10" step="1" value="5"><span class="set-val" id="s-topk-v">5</span></label>
     <label>reasoning effort
-      <select id="s-reason" style="background:#000;border:1px solid var(--border);color:var(--green);font:inherit;padding:2px 6px;">
+      <select id="s-reason">
         <option value="off">off (fastest)</option>
         <option value="normal" selected>normal</option>
         <option value="deep">deep (2-pass)</option>
@@ -1415,11 +1631,11 @@ function startScheduler(){
 // ============ Agent-panel wiring ============
 el('btn-job').onclick=function(){ var on=el('jobs').classList.toggle('show'); el('btn-job').classList.toggle('on',on); };
 el('btn-tools').onclick=function(){ var on=el('tools').classList.toggle('show'); el('btn-tools').classList.toggle('on',on); if(on) loadCatalog(); };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
-    el('t-mode').textContent=(d.safeMode?'SAFE MODE on':'safe mode OFF')+(d.requireConfirm?' · confirm required':'')+(d.brokerConfigured?' · broker wired':' · no broker');
+    el('t-mode').textContent=(d.safeMode?'SAFE MODE on':'safe mode OFF')+(d.requireConfirm?' · confirm unlocks all tools':'')+(d.brokerConfigured?' · broker wired':' · no broker');
     el('t-mode').className='t-badge'+(d.safeMode?' safe':'');
     var cat=el('t-catalog'); cat.innerHTML=''; var sel=el('t-tool'); sel.innerHTML='';
     (d.tools||[]).forEach(function(t){
@@ -1554,7 +1770,7 @@ export default {
         return json({ ok: false, error: 'confirm=true is required in CTF safe mode' }, 400);
       }
 
-      const access = validateToolAccess(policy, tool, target);
+      const access = validateToolAccess(policy, tool, target, body.confirm === true);
       if (!access.ok) return json(access, access.status || 403);
 
       const known = toolCatalog(env).some(t => t.name === tool);
