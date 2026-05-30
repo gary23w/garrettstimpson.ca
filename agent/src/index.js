@@ -1426,6 +1426,7 @@ inp.addEventListener('keydown', async function(e){
   if(!c.msgs.length){ c.title=q.slice(0,40); }
   c.msgs.push({role:'user',content:q}); saveChats(chats); renderChats();
   addMsg('user',q);
+  { var od=detectOsint(q); if(od.isOsint){ try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
   var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full='';
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
              topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value };
@@ -1598,6 +1599,90 @@ async function runSwarmToChat(objective, template){
   busy=false; inp.disabled=false; inp.focus();
 }
 
+// ============ Autonomous OSINT (auto-detected from chat) ============
+function detectOsint(q){
+  var text=String(q||'').trim(), low=text.toLowerCase();
+  function uniq(a){ return a.filter(function(x,i){ return a.indexOf(x)===i; }); }
+  var emails=uniq(text.match(/[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}/g)||[]);
+  var ips=uniq((text.match(/\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b/g)||[]).filter(function(ip){ return ip.split('.').every(function(o){ return +o>=0&&+o<=255; }); }));
+  var cves=uniq((text.match(/CVE-\\d{4}-\\d+/ig)||[]).map(function(c){ return c.toUpperCase(); }));
+  var emailDoms={}; emails.forEach(function(e){ emailDoms[e.split('@')[1].toLowerCase()]=1; });
+  var domains=uniq((text.match(/\\b(?:[a-z0-9\\-]+\\.)+[a-z]{2,24}\\b/ig)||[]).map(function(d){ return d.toLowerCase(); })
+    .filter(function(d){ return !/\\.(md|txt|js|json|png|jpe?g|gif|svg|exe|dll|sh|py|html?|css|ya?ml|pdf|zip)$/.test(d); })
+    .filter(function(d){ return !emailDoms[d]; })
+    .filter(function(d){ return !/^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(d); }));
+  var handles=uniq((text.match(/(?:^|\\s)@([A-Za-z0-9_]{2,30})/g)||[]).map(function(s){ return s.trim().replace(/^@/,''); }));
+  var um=low.match(/\\b(?:username|handle|user|account|alias)\\s*[:=]?\\s*['"]?([a-z0-9_.\\-]{2,30})/);
+  if(um){ handles.push(um[1]); handles=uniq(handles); }
+  var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace'];
+  var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
+  var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
+  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length;
+  var soloEntity=(entityCount===1)&&(text.split(/\\s+/).length<=2);
+  var isOsint=(hasTrigger&&(entityCount>0||personHint))||soloEntity;
+  return { isOsint:!!isOsint, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, keyword:text };
+}
+function osintSummary(od){
+  var p=[];
+  if(od.emails.length) p.push('email:'+od.emails.join(','));
+  if(od.handles.length) p.push('user:'+od.handles.join(','));
+  if(od.domains.length) p.push('domain:'+od.domains.join(','));
+  if(od.ips.length) p.push('ip:'+od.ips.join(','));
+  if(od.cves.length) p.push('cve:'+od.cves.join(','));
+  return p.length?p.join(' | '):'keyword search';
+}
+async function runOsintTool(tool, arg){
+  var args={}, k=TOOL_ARGKEY[tool]||'target'; if(arg) args[k]=arg;
+  try{
+    var r=await fetch('/api/tools/run',{ method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tool:tool, args:args, target:arg, confirm:true, settings:curOpts() }) });
+    var d=await r.json();
+    if(!d.ok) return '('+tool+' failed: '+(d.error||('HTTP '+r.status))+')';
+    return typeof d.result==='string'?d.result:JSON.stringify(d.result,null,2);
+  }catch(e){ return '('+tool+' error: '+e.message+')'; }
+}
+async function runOsintFlow(q, od, c){
+  var FENCE=String.fromCharCode(96,96,96);
+  addMsg('system','> OSINT run started - '+osintSummary(od));
+  var jobs=[];
+  od.cves.forEach(function(x){ jobs.push(['CVE detail '+x,'circl_cve',x]); jobs.push(['KEV '+x,'kev_lookup',x]); jobs.push(['EPSS '+x,'epss_lookup',x]); });
+  od.ips.forEach(function(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); });
+  od.domains.forEach(function(x){ ['rdap_domain','dns_lookup','cert_ct','crtsh_subs','wellknown','urlscan','wayback','urlhaus'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); });
+  od.emails.forEach(function(x){ jobs.push(['email_recon '+x,'email_recon',x]); });
+  od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); });
+  jobs.push(['web_search','web_search',q]);
+  if(od.handles.length||od.emails.length||/\\b(person|people|name|who is|individual|identity)\\b/i.test(q)) jobs.push(['github code search','github_osint',(od.handles[0]||od.keyword)]);
+  jobs=jobs.slice(0,24);
+  var blocks=[], done=0;
+  var statusEl=addMsg('system','OSINT: running 0/'+jobs.length+' tools...');
+  var queue=jobs.slice();
+  async function worker(){
+    while(queue.length){
+      var j=queue.shift();
+      var out=await runOsintTool(j[1], j[2]);
+      blocks.push('=== '+j[0]+' ===\\n'+out);
+      done++; statusEl.textContent='OSINT: running '+done+'/'+jobs.length+' tools...';
+      dbg('osint '+j[1], (j[2]||'')+' -> '+out.slice(0,140));
+    }
+  }
+  await Promise.all([worker(),worker(),worker(),worker()]);
+  var evidence=blocks.join('\\n\\n');
+  var ev=addMsg('agent',''); ev.className='msg agent jtaskout';
+  ev.innerHTML='<div class="jt-h">collected evidence - '+jobs.length+' tools</div>'+renderMarkdown(FENCE+'\\n'+evidence.slice(0,9000)+'\\n'+FENCE);
+  statusEl.textContent='OSINT: '+jobs.length+' tools complete - synthesizing write-up...';
+  var synth=blocks.map(function(b){ return b.slice(0,700); }).join('\\n\\n').slice(0,9000);
+  var objective='Write a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence provided as context - never invent a fact that is not present in it; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary (3-5 sentences)\\n## Entities and Identifiers\\n## Findings (one subsection per entity/source; note which tool produced each fact)\\n## Pivots and Links (relationships or overlaps across the evidence)\\n## Gaps and Confidence (what is UNKNOWN and reliability notes)\\nBe precise and defensive in framing.';
+  var report;
+  try{ report=await callTask(objective, synth); }
+  catch(e){ report='# OSINT write-up: '+q+'\\n\\n(synthesis failed: '+e.message+')\\n\\n'+evidence; }
+  statusEl.textContent='OSINT run complete - '+jobs.length+' tools.';
+  var d2=addMsg('agent',''); d2.innerHTML=renderMarkdown(report);
+  c.msgs.push({role:'assistant',content:report});
+  if(c.msgs.length===1||(c.title||'').indexOf('[osint]')!==0) c.title='[osint] '+q.slice(0,30);
+  saveChats(chats); renderChats();
+  MEM.add('OSINT '+q+': '+report.slice(0,600),'finding');
+}
+
 // ============ Scheduler (browser-side; runs while tab open) ============
 function renderSaved(){
   var box=el('j-saved'); if(!box) return; box.innerHTML='';
@@ -1715,6 +1800,32 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
     const json = (obj, status = 200) =>
       new Response(JSON.stringify(obj), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+
+    // ── Access gate (custom login overlay) ──────────────────────────────────
+    const ACCESS_PW = String(env.ACCESS_PASSWORD || '');
+    if (ACCESS_PW) {
+      const expected = await sha256hex('gsa|' + ACCESS_PW);
+      const cookie = request.headers.get('Cookie') || '';
+      const authed = cookie.split(/;\s*/).some(c => c === 'gsa_auth=' + expected);
+      const setCookie = `gsa_auth=${expected}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400`;
+      if (url.pathname === '/api/login' && request.method === 'POST') {
+        let b = {}; try { b = await request.json(); } catch {}
+        const okUser = !env.ACCESS_USER || String(b.user || '') === String(env.ACCESS_USER);
+        if (okUser && String(b.password || '') === ACCESS_PW) {
+          return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...cors, 'Content-Type': 'application/json', 'Set-Cookie': setCookie } });
+        }
+        return json({ ok: false, error: 'Invalid credentials' }, 401);
+      }
+      if (url.pathname === '/api/logout') {
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...cors, 'Content-Type': 'application/json', 'Set-Cookie': 'gsa_auth=; Path=/; Max-Age=0' } });
+      }
+      if (!authed) {
+        if (url.pathname === '/' && request.method === 'GET') {
+          return new Response(loginUI(env.SITE_NAME || 'Security Research', !!env.ACCESS_USER), { status: 401, headers: { ...cors, 'Content-Type': 'text/html;charset=UTF-8' } });
+        }
+        return json({ ok: false, error: 'Authentication required' }, 401);
+      }
+    }
 
     // GET /
     if (url.pathname === '/') {
@@ -1881,10 +1992,10 @@ export default {
           const notes = await reasonPass(env, objective, toolContext, chunks, temp);
           if (notes) sysPrompt += `\n\nPRELIMINARY ANALYSIS (your private notes — verify, do not treat as fact):\n${notes}`;
         }
-        const userContent = context ? `${objective}\n\nContext from earlier steps:\n${context.slice(0, 2500)}` : objective;
+        const userContent = context ? `${objective}\n\nContext from earlier steps:\n${context.slice(0, 9000)}` : objective;
         const r = await env.AI.run(MODEL, {
           messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userContent }],
-          stream: false, max_tokens: 1024, temperature: temp,
+          stream: false, max_tokens: 1800, temperature: temp,
         });
         return json({ ok: true, text: (r.response || '').trim(), meta: { cveIds, ips, usedVectorize, chunkCount: chunks.length } });
       } catch (e) { return json({ ok: false, error: e.message }, 500); }
