@@ -8,7 +8,7 @@
       {
         "type": "plain_text",
         "name": "LLMS_URL",
-        "text": "https://garrettstimpson.ca/llms.txt",
+        "text": "https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/refs/heads/main/llms.txt",
         "description": "URL of your site llms.txt corpus (e.g. https://yoursite.com/llms.txt)"
       },
       {
