@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-05-29T20:35:29Z
+GENERATED    : 2026-05-30T00:11:43Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 17
+TOTAL POSTS  : 18
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -194,6 +194,100 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 <DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
+TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
+DATE       : 2026-05-29
+URL        : https://garrettstimpson.ca/posts/2026/05/29/miniplasma-cldflt-windows-lpe-unpatched/
+CVE        : CVE-2020-17103, CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, CVE-2026-45585
+CATEGORIES : exploits, windows
+TAGS       : windows, lpe, zero-day, cldflt, privilege-escalation, nightmare-eclipse, unpatched
+WORD_COUNT : 1434
+EXCERPT    : A Windows LPE 'fixed' in December 2020 still hands out SYSTEM on fully patched Windows 11 in May 2026 — and the person who proved it is threatening to drop RCEs on July 14.
+</FRONTMATTER>
+<BODY>
+Here's something that should bother you. In September 2020, Google Project Zero researcher James Forshaw reported a local privilege escalation bug in the Windows Cloud Files Mini Filter Driver, `cldflt.sys`. Microsoft patched it that December as CVE-2020-17103. The advisory went up, the KB shipped, the CVE closed. Done.
+
+Six years later, a researcher going by Nightmare-Eclipse published working PoC code on May 13, 2026, got SYSTEM on fully patched Windows 11, and posted the proof. Will Dormann verified it. ThreatLocker verified it. The bug was never actually fixed. The same routine, the same vulnerable code path, the same primitive. Closed ticket, live exploit.
+
+This is MiniPlasma.
+
+## What cldflt.sys Does and Why It Matters
+
+The Windows Cloud Files Mini Filter Driver ships on every modern Windows installation by default. It's the layer that makes OneDrive placeholder files work — those ghost files that show up in Explorer before you've actually synced anything. Because it has to manage the relationship between local placeholder metadata and remote cloud content, it runs with kernel-level privileges and mediates file system operations on behalf of user-mode processes.
+
+The specific function at fault is `HsmOsBlockPlaceholderAccess`. The bug is a race condition in how that routine handles an undocumented API call. By hitting it with an unexpected command at the right moment, a standard (unprivileged) user process can force a structured error path that bypasses the access checks that should be protecting the operation. That bypassed check then allows the process to create arbitrary registry keys inside the `.DEFAULT` user hive — the profile used by `SYSTEM` services — without any elevated privileges.
+
+From there, you pivot to SYSTEM. The path isn't short, but it's reliable enough. Researchers at ThreatLocker confirmed it works consistently on current Windows 11, and the PoC was validated across Windows 10, Windows Server 2022, and Windows Server 2025 as well.
+
+No admin rights. No special hardware. Standard user account, fully patched OS, working SYSTEM shell.
+
+```
+C:\> whoami
+desktop-lab\user
+
+[miniplasma.exe running]
+
+C:\> whoami
+nt authority\system
+```
+
+## The CVE-2020-17103 Problem
+
+What makes this interesting beyond the typical "new LPE" post is the history. This isn't a new discovery that Microsoft missed. James Forshaw found it and Microsoft "fixed" it. The fix just didn't fix the right thing.
+
+Nightmare-Eclipse's write-up claims the patch addressed a surface symptom rather than the root cause in `HsmOsBlockPlaceholderAccess`. When they went looking, the actual race window was still there. The undocumented API call still accepted the triggering command. The check was still bypassable.
+
+This happens more than people want to admit. A vendor patches the reported variant of a bug, ships the update, closes the case, and the researcher moves on. Nobody goes back to check whether the primitive itself is gone. CVE-2020-17103 gets marked "fixed" in every scanner in the industry, so nobody looks. Six years pass. A different researcher finds the same underlying issue and exploits it fresh.
+
+Microsoft has not assigned a new CVE to MiniPlasma as of today, May 29. No patch exists. Their advisory for CVE-2026-45585 (YellowKey, a different bug from the same researcher) lists exploitation as "more likely" given the public PoC — but MiniPlasma doesn't even have an advisory yet.
+
+## Who Is Nightmare-Eclipse and Why Do You Need to Know
+
+MiniPlasma is the sixth zero-day released by a researcher operating under the name Nightmare-Eclipse (also Chaotic Eclipse, Dead Eclipse) since early April 2026. The other five, in order: BlueHammer (CVE-2026-33825, a Defender TOCTOU+oplock LPE, patched April 14), RedSun (CVE-2026-41091, a second Defender link-following EoP, patched May 21), UnDefend (CVE-2026-45498, a Defender disruption primitive, patched May 21), YellowKey (CVE-2026-45585, a BitLocker bypass, unpatched), and GreenPlasma (a partial Windows LPE through a different subsystem, unpatched).
+
+Three of those six — BlueHammer, RedSun, and UnDefend — are confirmed actively exploited in the wild. Huntress Labs documented intrusions using the BlueHammer SYSTEM escalation as early as April 10, ten days after the PoC dropped. Activity was tracked to Russian-geolocated infrastructure. By the time Microsoft patched RedSun and UnDefend on May 21, attackers had already been chaining them with ransomware deployment for weeks.
+
+The researcher's stated motivation is personal. Their blog describes an agreement they say Microsoft violated. The posts are specific: their MSRC account was deleted, reports were credited to other researchers, they received no payment. "Someone violated our agreement and left me homeless with nothing." Whether that's accurate, embellished, or entirely fabricated, the exploit code works regardless of the backstory.
+
+GitHub banned the account around May 23. GitLab followed on May 26. On May 28, Microsoft published a blog invoking their Digital Crimes Unit and threatening legal action against anyone who releases uncoordinated PoC code for unpatched vulnerabilities — a position that security community veterans like Katie Moussouris and Kevin Beaumont both called tone-deaf, given that Microsoft's own statement simultaneously claims researchers "are compensated and publicly acknowledged" while responding to one who says they got neither.
+
+Nightmare-Eclipse responded with a promise: something described as a "bone shattering drop" on July 14, which is the next Patch Tuesday. Their exact words: "Mark this date July 14th, I will make sure your bones are shattered that day."
+
+They have also stated they possess RCE vulnerabilities they haven't released yet.
+
+## The Actual Risk Right Now
+
+MiniPlasma is a local privilege escalation. It needs an existing foothold — someone has to be logged in, or an attacker has to already have code execution as a low-privileged user. It doesn't help with initial access.
+
+What it does help with is everything that comes after initial access. A phishing payload running as a standard user gets SYSTEM. A contractor account with minimal rights gets SYSTEM. An EDR evasion payload that needs kernel interaction gets SYSTEM first. In a post-exploitation context, this is precisely what attackers need and exactly why Huntress saw BlueHammer integrated into ransomware chains within days of release.
+
+The scale matters too. Every Windows 10 and 11 machine, every Server 2022 and 2025 box, with no exceptions for patch level. OneDrive integration is on by default. `cldflt.sys` is loaded. The attack surface is essentially the entire Windows installed base.
+
+## What You Can Do Right Now
+
+There is no patch. That's the honest answer. Microsoft hasn't shipped a fix and hasn't committed to a timeline.
+
+What you can actually do:
+
+First, audit who has local interactive access to sensitive systems. MiniPlasma is a local privilege escalation, so reducing local foothold opportunities reduces your exposure. Shared workstations, developer machines with broad network access, systems where contractors authenticate locally — these are your highest-risk endpoints.
+
+Second, look at your OneDrive deployment. If you've disabled OneDrive and the Cloud Files driver isn't loaded, `cldflt.sys` won't be running. This is verifiable: `sc query cldflt` will tell you the driver state. Disabling OneDrive via Group Policy (`Computer Configuration > Administrative Templates > Windows Components > OneDrive > Prevent the usage of OneDrive for file storage`) should prevent the driver from loading on workstations that don't need it.
+
+Third, watch for the exploitation pattern. The MiniPlasma PoC creates registry keys under `HKEY_USERS\.DEFAULT`. Unexpected writes to that hive from user-mode processes are not normal behavior. Your EDR should be able to surface that. If it can't, that's a gap worth addressing before July 14.
+
+Fourth, stay current on Microsoft's patch release cycle. Whatever drops on July 14 may or may not include a MiniPlasma fix — but the threat of additional RCE disclosure makes that Patch Tuesday worth watching more closely than most. Apply updates fast when they arrive.
+
+The gap between Forshaw's 2020 report and today is a good reminder that "patched" on an advisory doesn't always mean what it says. Patch the variant, miss the primitive, close the ticket. Six years later, someone checks.
+
+---
+
+**References:** [Bleeping Computer - MiniPlasma](https://www.bleepingcomputer.com/news/microsoft/new-windows-miniplasma-zero-day-exploit-gives-system-access-poc-released/) | [ThreatLocker Analysis](https://www.threatlocker.com/blog/miniplasma-windows-privilege-escalation-zero-day-affects-fully-patched-systems) | [The Register - July 14 threat](https://www.theregister.com/security/2026/05/28/microsoft-0-day-feud-escalates-as-researcher-threatens-another-windows-exploit-dump/5248085) | [Barracuda - Nightmare-Eclipse profile](https://blog.barracuda.com/2026/05/19/nightmare-eclipse-zero-days-grudge) | [CSO Online - 2020 resurface](https://www.csoonline.com/article/4172320/patched-windows-bug-resurfaces-6-years-later-as-working-system-level-exploit.html)
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="003" type="security-research-post">
+<FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/lumma-stealer-clickfix-windows-terminal/
@@ -355,7 +449,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -513,7 +607,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -647,7 +741,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -869,7 +963,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -997,7 +1091,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -1204,7 +1298,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -1318,7 +1412,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -1502,12 +1596,12 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
+CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -1658,7 +1752,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -1811,7 +1905,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -1911,7 +2005,7 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
@@ -2062,12 +2156,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -2270,7 +2364,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -2385,7 +2479,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
@@ -2482,7 +2576,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -2629,5 +2723,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 17 documents — 2026-05-29T20:35:29Z
+END OF CORPUS — 18 documents — 2026-05-30T00:11:43Z
 ================================================================================
