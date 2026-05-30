@@ -39,6 +39,7 @@ const SESSION_TTL   = 60 * 60 * 24 * 30; // 30 days
 
 const CORPUS_TTL    = 3600;  // corpus cache TTL (seconds)
 const RAW_LLMS      = 'https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/refs/heads/main/llms.txt';
+const TOOL_RUN_TIMEOUT_MS = 15000;
 
 // ── Corpus parsing + chunking ──────────────────────────────────────────────────
 
@@ -513,6 +514,130 @@ async function fetchUrl(url) {
     const text = await r.text();
     return text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
   } catch (e) { return `fetch failed: ${e.message}`; }
+}
+
+// ── CTF safe-mode tool wiring ─────────────────────────────────────────────────
+
+const BUILTIN_TOOL_SPECS = [
+  { name: 'nvd_lookup', category: 'intel', passive: true, description: 'NVD CVE metadata lookup' },
+  { name: 'epss_lookup', category: 'intel', passive: true, description: 'FIRST.org EPSS lookup' },
+  { name: 'kev_lookup', category: 'intel', passive: true, description: 'CISA KEV status lookup' },
+  { name: 'rdap_ip', category: 'osint', passive: true, description: 'RDAP IP registration lookup' },
+  { name: 'rdap_domain', category: 'osint', passive: true, description: 'RDAP domain registration lookup' },
+  { name: 'dns_lookup', category: 'osint', passive: true, description: 'DNS over HTTPS lookup' },
+  { name: 'cert_ct', category: 'osint', passive: true, description: 'Certificate transparency lookup' },
+  { name: 'web_search', category: 'search', passive: true, description: 'Brave/SearXNG/DuckDuckGo search' },
+  { name: 'fetch_url', category: 'fetch', passive: true, description: 'Allowlisted source fetch and text extraction' },
+];
+
+function parseCsvSet(value) {
+  return new Set(
+    String(value || '')
+      .split(',')
+      .map(v => v.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function parseCustomTools(env) {
+  const fromCsv = String(env.CUSTOM_TOOL_NAMES || '')
+    .split(',')
+    .map(v => v.trim().toLowerCase())
+    .filter(Boolean);
+  let fromJson = [];
+  try {
+    if (env.CUSTOM_TOOL_NAMES_JSON) {
+      fromJson = JSON.parse(env.CUSTOM_TOOL_NAMES_JSON)
+        .map(v => String(v).trim().toLowerCase())
+        .filter(Boolean);
+    }
+  } catch {}
+  return [...new Set([...fromCsv, ...fromJson])];
+}
+
+function isTruthy(v, fallback = false) {
+  if (v === undefined || v === null || v === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase());
+}
+
+function normalizeTarget(target) {
+  const t = String(target || '').trim().toLowerCase();
+  if (!t) return '';
+  try { return new URL(t).hostname.toLowerCase(); }
+  catch { return t.replace(/^https?:\/\//, '').split('/')[0].trim(); }
+}
+
+function matchTarget(target, rule) {
+  if (!target || !rule) return false;
+  if (rule.startsWith('*.')) return target === rule.slice(2) || target.endsWith('.' + rule.slice(2));
+  return target === rule;
+}
+
+function getToolPolicy(env) {
+  const safeMode = isTruthy(env.CTF_SAFE_MODE, true);
+  const requireConfirm = isTruthy(env.CTF_REQUIRE_CONFIRM, true);
+  const toolAllowlist = parseCsvSet(env.TOOL_ALLOWLIST);
+  const targetAllowlist = parseCsvSet(env.CTF_TARGET_ALLOWLIST);
+  return { safeMode, requireConfirm, toolAllowlist, targetAllowlist };
+}
+
+function isBuiltinTool(name) {
+  return BUILTIN_TOOL_SPECS.some(t => t.name === name);
+}
+
+function toolCatalog(env) {
+  const custom = parseCustomTools(env).map(name => ({
+    name,
+    category: 'custom',
+    passive: false,
+    description: 'Custom tool wiring entry (execution delegated to broker if configured)',
+  }));
+  return [...BUILTIN_TOOL_SPECS, ...custom];
+}
+
+async function runBuiltinTool(env, name, args = {}) {
+  if (name === 'nvd_lookup')   return nvdLookup(String(args.cveId || args.cve || '').toUpperCase());
+  if (name === 'epss_lookup')  return epssLookup(String(args.cveId || args.cve || '').toUpperCase());
+  if (name === 'kev_lookup')   return kevLookup(env, String(args.cveId || args.cve || '').toUpperCase());
+  if (name === 'rdap_ip')      return ipLookup(String(args.ip || ''));
+  if (name === 'rdap_domain')  return domainLookup(String(args.domain || ''));
+  if (name === 'dns_lookup')   return dnsLookup(String(args.domain || ''));
+  if (name === 'cert_ct')      return certLookup(String(args.domain || ''));
+  if (name === 'web_search')   return formatSearch(await webSearch(String(args.query || ''), String(args.braveKey || '')) || { provider: 'none', results: [] });
+  if (name === 'fetch_url')    return fetchUrl(String(args.url || ''));
+  throw new Error(`Unknown builtin tool: ${name}`);
+}
+
+async function runBrokerTool(env, payload) {
+  const broker = String(env.TOOL_BROKER_URL || '').trim();
+  if (!broker) {
+    throw new Error('TOOL_BROKER_URL is not configured. Tool is wired but cannot execute yet.');
+  }
+  const r = await fetch(broker, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(env.TOOL_BROKER_TOKEN ? { Authorization: `Bearer ${env.TOOL_BROKER_TOKEN}` } : {}),
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(TOOL_RUN_TIMEOUT_MS),
+  });
+  if (!r.ok) throw new Error(`Broker error ${r.status}`);
+  const out = await r.json();
+  return out;
+}
+
+function validateToolAccess(policy, toolName, target) {
+  if (policy.safeMode && policy.toolAllowlist.size && !policy.toolAllowlist.has(toolName)) {
+    return { ok: false, status: 403, error: `Tool ${toolName} is not allowlisted in TOOL_ALLOWLIST.` };
+  }
+  if (policy.safeMode && policy.targetAllowlist.size && target) {
+    const allowed = [...policy.targetAllowlist].some(rule => matchTarget(target, rule));
+    if (!allowed) {
+      return { ok: false, status: 403, error: `Target ${target} is out of scope. Add it to CTF_TARGET_ALLOWLIST.` };
+    }
+  }
+  return { ok: true };
 }
 
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
@@ -1152,6 +1277,7 @@ export default {
       try {
         const chunks = await getChunks(env);
         const docIds = new Set(chunks.map(c => c.id.split('-')[0]));
+        const policy = getToolPolicy(env);
         return json({
           ok: true,
           docCount:   docIds.size,
@@ -1159,8 +1285,77 @@ export default {
           totalChars: chunks.reduce((s, c) => s + c.text.length, 0),
           retrieval:  env.VECTORIZE ? 'vectorize-semantic' : 'bm25-chunk',
           memory:     !!env.SESSIONS,
+          ctfSafeMode: policy.safeMode,
+          toolAllowlistCount: policy.toolAllowlist.size,
+          targetAllowlistCount: policy.targetAllowlist.size,
+          customToolCount: parseCustomTools(env).length,
         });
       } catch (e) { return json({ ok: false, error: e.message }, 500); }
+    }
+
+    // GET /api/tools/catalog — advertise wired tools and current policy state
+    if (url.pathname === '/api/tools/catalog' && request.method === 'GET') {
+      const policy = getToolPolicy(env);
+      return json({
+        ok: true,
+        safeMode: policy.safeMode,
+        requireConfirm: policy.requireConfirm,
+        allowlistedTools: [...policy.toolAllowlist],
+        targetAllowlist: [...policy.targetAllowlist],
+        tools: toolCatalog(env),
+        brokerConfigured: !!env.TOOL_BROKER_URL,
+      });
+    }
+
+    // POST /api/tools/run — guarded tool execution entrypoint for CTF workflows
+    if (url.pathname === '/api/tools/run' && request.method === 'POST') {
+      let body; try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }
+      const tool = String(body.tool || '').trim().toLowerCase();
+      const args = body.args && typeof body.args === 'object' ? body.args : {};
+      const target = normalizeTarget(body.target || args.target || args.url || args.domain || args.ip || '');
+      const policy = getToolPolicy(env);
+      if (!tool) return json({ ok: false, error: 'tool is required' }, 400);
+      if (policy.requireConfirm && body.confirm !== true) {
+        return json({ ok: false, error: 'confirm=true is required in CTF safe mode' }, 400);
+      }
+
+      const access = validateToolAccess(policy, tool, target);
+      if (!access.ok) return json(access, access.status || 403);
+
+      const known = toolCatalog(env).some(t => t.name === tool);
+      if (!known) return json({ ok: false, error: `Unknown tool: ${tool}` }, 404);
+
+      try {
+        const started = Date.now();
+        let result;
+        let via = 'builtin';
+        if (isBuiltinTool(tool)) {
+          result = await runBuiltinTool(env, tool, args);
+        } else {
+          via = 'broker';
+          result = await runBrokerTool(env, {
+            tool,
+            args,
+            target,
+            reason: String(body.reason || ''),
+            sessionId: String(body.sessionId || ''),
+            requestedAt: new Date().toISOString(),
+          });
+        }
+
+        console.log(JSON.stringify({
+          event: 'tool_run',
+          tool,
+          via,
+          target,
+          safeMode: policy.safeMode,
+          elapsedMs: Date.now() - started,
+        }));
+
+        return json({ ok: true, tool, via, target, result });
+      } catch (e) {
+        return json({ ok: false, tool, target, error: e.message }, 500);
+      }
     }
 
     // POST /api/reindex — rebuild the Vectorize index from llms.txt
