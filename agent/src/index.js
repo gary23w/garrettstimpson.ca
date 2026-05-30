@@ -443,6 +443,55 @@ async function domainIntel(domain) {
   return `${rd}\n${dns}\n${ct}`;
 }
 
+// Shodan InternetDB — pre-collected open ports / CVEs / hostnames for an IP.
+// Passive: Shodan already scanned the internet; we do NOT touch the target.
+async function shodanInternetDB(ip) {
+  try {
+    const r = await fetch(`https://internetdb.shodan.io/${ip}`,
+      { headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(8000) });
+    if (r.status === 404) return `Shodan InternetDB ${ip}: not previously observed (no data). UNKNOWN — do not invent.`;
+    if (!r.ok) return `Shodan InternetDB ${ip}: lookup failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    const ports = (d.ports || []).join(', ') || 'none';
+    const vulns = (d.vulns || []).slice(0, 14).join(', ') || 'none';
+    const host = (d.hostnames || []).slice(0, 4).join(', ') || 'none';
+    const tags = (d.tags || []).join(', ') || 'none';
+    return `Shodan InternetDB ${ip} (passive, pre-collected — no live scan)\nopen ports: ${ports}\nhostnames: ${host}\ntags: ${tags}\nknown CVEs: ${vulns}`;
+  } catch (e) { return `Shodan InternetDB ${ip}: lookup failed (${e.message}).`; }
+}
+
+// Reverse DNS (PTR) via DoH. Passive.
+async function reverseDns(ip) {
+  try {
+    const arpa = ip.split('.').reverse().join('.') + '.in-addr.arpa';
+    const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${arpa}&type=PTR`,
+      { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(6000) });
+    const d = await r.json();
+    const ptr = (d.Answer || []).map(a => a.data).filter(Boolean).slice(0, 4);
+    return ptr.length ? `Reverse DNS ${ip}: ${ptr.join(', ')}` : `Reverse DNS ${ip}: no PTR record.`;
+  } catch (e) { return `Reverse DNS ${ip}: lookup failed (${e.message}).`; }
+}
+
+// HTTP security-header inspection. Contacts the target with a single benign GET,
+// so it is gated behind /api/tools/run (confirm + scope) — not auto-invoked.
+async function httpHeaders(url) {
+  let u; try { u = new URL(url); } catch { return `Invalid URL: ${url}`; }
+  if (!/^https?:$/.test(u.protocol)) return `Unsupported protocol: ${url}`;
+  try {
+    const r = await fetch(u.toString(),
+      { method: 'GET', redirect: 'manual', headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(8000) });
+    const keys = ['server', 'content-type', 'strict-transport-security', 'content-security-policy', 'x-frame-options', 'x-content-type-options', 'referrer-policy', 'permissions-policy', 'set-cookie'];
+    const out = keys.map(k => { const v = r.headers.get(k); return v ? `${k}: ${v.slice(0, 180)}` : null; }).filter(Boolean);
+    return `HTTP ${r.status} ${u.hostname}\n${out.join('\n') || '(no notable security headers present)'}`;
+  } catch (e) { return `HTTP headers ${url}: fetch failed (${e.message}).`; }
+}
+
+// Combined passive IP intel (RDAP + reverse DNS + Shodan InternetDB).
+async function ipIntel(env, ip) {
+  const [rd, rev, sh] = await Promise.all([ipLookup(ip), reverseDns(ip), shodanInternetDB(ip)]);
+  return `${rd}\n${rev}\n${sh}`;
+}
+
 function ddgParse(html) {
   // Parse DuckDuckGo HTML endpoint result anchors.
   const out = [];
@@ -528,6 +577,9 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'cert_ct', category: 'osint', passive: true, description: 'Certificate transparency lookup' },
   { name: 'web_search', category: 'search', passive: true, description: 'Brave/SearXNG/DuckDuckGo search' },
   { name: 'fetch_url', category: 'fetch', passive: true, description: 'Allowlisted source fetch and text extraction' },
+  { name: 'shodan_internetdb', category: 'osint', passive: true, description: 'Shodan InternetDB — pre-collected open ports/CVEs/hostnames (no live scan)' },
+  { name: 'reverse_dns', category: 'osint', passive: true, description: 'Reverse DNS (PTR) lookup via DoH' },
+  { name: 'http_headers', category: 'recon', passive: false, description: 'Fetch a URL and report security-relevant HTTP headers (contacts target)' },
 ];
 
 function parseCsvSet(value) {
@@ -605,6 +657,9 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'cert_ct')      return certLookup(String(args.domain || ''));
   if (name === 'web_search')   return formatSearch(await webSearch(String(args.query || ''), String(args.braveKey || '')) || { provider: 'none', results: [] });
   if (name === 'fetch_url')    return fetchUrl(String(args.url || ''));
+  if (name === 'shodan_internetdb') return shodanInternetDB(String(args.ip || ''));
+  if (name === 'reverse_dns')  return reverseDns(String(args.ip || ''));
+  if (name === 'http_headers') return httpHeaders(String(args.url || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -652,7 +707,7 @@ const PERSONA = [
   'Answer with technical precision. Cite the post title/URL when you draw from the corpus.',
 ].join(' ');
 
-function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory }) {
+function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory, reasoning }) {
   const persona = PERSONA.replace('{SITE}', env.SITE_NAME || 'Garrett Stimpson Security Research');
   let corpusText = '';
   if (chunks.length) {
@@ -670,7 +725,29 @@ function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory }) 
   if (summary)      memParts.push(`Summary of earlier turns:\n${summary}`);
   if (clientMemory) memParts.push(`Relevant prior research/notes:\n${String(clientMemory).slice(0, 1500)}`);
   const memSection = memParts.length ? `MEMORY:\n${memParts.join('\n\n')}` : '';
-  return [persona, memSection, toolSection, corpusText].filter(Boolean).join('\n\n');
+  const reasonDirective = (reasoning === 'normal' || reasoning === 'deep')
+    ? 'REASONING: Work through the evidence step by step before answering — weigh the LIVE TOOL RESULTS against the CORPUS, surface any contradictions, and state your confidence. Reasoning must stay grounded; never let it turn into invented facts.'
+    : '';
+  return [persona, reasonDirective, memSection, toolSection, corpusText].filter(Boolean).join('\n\n');
+}
+
+// Preliminary reasoning pass (deep effort): the model drafts terse analysis notes
+// from the evidence only, which are fed back into the final answer.
+async function reasonPass(env, query, toolContext, chunks, temp) {
+  const ctx = [
+    toolContext.length ? 'TOOLS:\n' + toolContext.join('\n\n').slice(0, 1800) : '',
+    chunks.length ? 'CORPUS:\n' + chunks.map(formatChunk).join('\n\n').slice(0, 1800) : '',
+  ].filter(Boolean).join('\n\n');
+  try {
+    const r = await env.AI.run(MODEL, {
+      messages: [
+        { role: 'system', content: 'You are a meticulous security analyst. Think step by step using ONLY the evidence provided. Output 3-6 terse bullet points of reasoning and what the evidence does and does not support. Do NOT write a final answer. Do NOT invent any fact.' },
+        { role: 'user', content: query + '\n\n' + ctx },
+      ],
+      stream: false, max_tokens: 380, temperature: Math.min((temp || 0.3) + 0.1, 0.7),
+    });
+    return (r.response || '').trim();
+  } catch { return ''; }
 }
 
 // ── UI ──────────────────────────────────────────────────────────────────────────
@@ -770,6 +847,21 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
   background:url('https://garrettstimpson.ca/assets/img/agent-garrett-logo.png') no-repeat bottom left;
   background-size:contain;opacity:.5;mix-blend-mode:screen;}
 @media (max-width:640px){#wm{width:104px;height:104px;bottom:54px;opacity:.4;}}
+#tools{display:none;border:1px solid var(--border);border-radius:3px;padding:10px;margin-bottom:10px;background:var(--panel);font-size:11px;}
+#tools.show{display:block;}
+#tools .trow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:5px 0;}
+#tools input,#tools select{background:#000;border:1px solid var(--border);color:var(--green);font:inherit;padding:3px 6px;}
+#tools input.t-arg{flex:1;min-width:170px;}
+#tools .jbtn{border:1px solid var(--green);color:var(--green);background:transparent;font:inherit;font-size:10px;padding:3px 10px;cursor:pointer;border-radius:2px;}
+#tools .jbtn:hover{background:#0a2a12;}
+.tool-item{font-size:10.5px;color:#bbb;margin:2px 0;}
+.tool-item .tcat{color:var(--muted);}
+.tool-pill{display:inline-block;font-size:9px;border:1px solid var(--border);border-radius:8px;padding:1px 6px;margin-left:6px;}
+.tool-pill.passive{color:var(--green);border-color:var(--green);}
+.tool-pill.active{color:var(--warn);border-color:var(--warn);}
+.t-badge{font-size:9px;padding:1px 6px;border:1px solid var(--border);border-radius:2px;color:var(--muted);}
+.t-badge.safe{color:var(--green);border-color:var(--green);}
+.t-out{white-space:pre-wrap;word-break:break-word;border-left:2px solid var(--blue);padding-left:8px;margin-top:6px;color:#bbb;font-size:10.5px;}
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -790,6 +882,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
         <button class="btn" id="btn-set" title="Settings">settings</button>
         <button class="btn" id="btn-dbg" title="Toggle debug pane">debug</button>
         <button class="btn" id="btn-job" title="Agent mode — jobs &amp; swarms">agent</button>
+        <button class="btn" id="btn-tools" title="CTF tools &amp; policy">tools</button>
       </div>
     </div>
   </header>
@@ -800,6 +893,13 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
     <label><input type="checkbox" id="s-search" checked> web search (NVD + EPSS + RDAP + Brave/SearXNG/DuckDuckGo)</label>
     <label>temperature <input type="range" id="s-temp" min="0" max="1" step="0.1" value="0.3"><span class="set-val" id="s-temp-v">0.3</span></label>
     <label>top-K chunks <input type="range" id="s-topk" min="1" max="10" step="1" value="5"><span class="set-val" id="s-topk-v">5</span></label>
+    <label>reasoning effort
+      <select id="s-reason" style="background:#000;border:1px solid var(--border);color:var(--green);font:inherit;padding:2px 6px;">
+        <option value="off">off (fastest)</option>
+        <option value="normal" selected>normal</option>
+        <option value="deep">deep (2-pass)</option>
+      </select>
+    </label>
     <label><input type="checkbox" id="s-debug"> show debug pane by default</label>
     <label>brave api key (optional, stored in your browser) <input type="password" id="s-brave" placeholder="leave blank to skip"></label>
     <div style="color:var(--muted);margin-top:6px;font-size:10px;">Settings &amp; chats are saved in this browser. Up to 3 conversations are kept.</div>
@@ -834,6 +934,18 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
     </div>
     <div id="j-tasks"></div>
     <div id="j-saved"></div>
+  </div>
+
+  <div id="tools">
+    <div style="color:var(--muted);margin-bottom:6px;">CTF TOOLS — <span id="t-mode" class="t-badge">policy…</span> &nbsp;Passive tools run in-worker; active/custom tools require an operator broker. Runs are gated by confirm + target scope.</div>
+    <div id="t-catalog" style="margin:6px 0;"></div>
+    <div class="trow">
+      <select id="t-tool"></select>
+      <input class="t-arg" id="t-target" placeholder="arg: CVE / IP / domain / url">
+      <label style="font-size:10px;color:#bbb;"><input type="checkbox" id="t-confirm"> confirm</label>
+      <button class="jbtn" id="t-run">run tool</button>
+    </div>
+    <div id="t-result"></div>
   </div>
 
   <div id="main">
@@ -891,7 +1003,7 @@ function loadSettings(){ try{ return JSON.parse(localStorage.getItem('gsa_settin
 function saveSettings(){
   try{ localStorage.setItem('gsa_settings', JSON.stringify({
     search:el('s-search').checked, temp:el('s-temp').value, topk:el('s-topk').value,
-    debug:el('s-debug').checked, brave:el('s-brave').value })); }catch(e){}
+    debug:el('s-debug').checked, brave:el('s-brave').value, reason:el('s-reason').value })); }catch(e){}
 }
 
 // ---------- chats (memory on by default, max 3) ----------
@@ -973,7 +1085,7 @@ function dbg(head,body){
 el('btn-set').onclick=function(){ settings.classList.toggle('show'); };
 el('btn-dbg').onclick=function(){ var on=dbgPane.classList.toggle('show'); el('btn-dbg').classList.toggle('on',on); };
 el('btn-new').onclick=newChat;
-['s-search','s-temp','s-topk','s-debug','s-brave'].forEach(function(id){
+['s-search','s-temp','s-topk','s-debug','s-brave','s-reason'].forEach(function(id){
   var n=el(id); n.addEventListener('change',saveSettings); n.addEventListener('input',saveSettings);
 });
 el('s-temp').addEventListener('input',function(){ el('s-temp-v').textContent=el('s-temp').value; });
@@ -986,6 +1098,7 @@ el('s-topk').addEventListener('input',function(){ el('s-topk-v').textContent=el(
   if('topk' in s){ el('s-topk').value=s.topk; el('s-topk-v').textContent=s.topk; }
   if('debug' in s) el('s-debug').checked=s.debug;
   if('brave' in s) el('s-brave').value=s.brave;
+  if('reason' in s) el('s-reason').value=s.reason;
   if(s.debug){ dbgPane.classList.add('show'); el('btn-dbg').classList.add('on'); }
 })();
 
@@ -993,8 +1106,8 @@ async function init(){
   renderChats(); renderLog(active());
   try{
     var d=await (await fetch('/api/status')).json();
-    modeline.textContent='llama-3.1-8b · '+(d.retrieval||'?')+' RAG · memory on · NVD/EPSS/KEV · RDAP/DNS/CT · web';
-    stat.textContent=ts()+' · corpus: '+d.docCount+' posts / '+(d.chunkCount||0)+' chunks · '+(d.totalChars||0).toLocaleString()+' chars'+(d.memory?' · KV sync':'');
+    modeline.textContent='llama-3.1-8b · '+(d.retrieval||'?')+' RAG · memory on · NVD/EPSS/KEV · RDAP/DNS/CT/Shodan · web'+(d.ctfSafeMode?' · CTF safe':'');
+    stat.textContent=ts()+' · corpus: '+d.docCount+' posts / '+(d.chunkCount||0)+' chunks · '+(d.totalChars||0).toLocaleString()+' chars'+(d.memory?' · KV sync':'')+(d.ctfSafeMode?' · CTF safe-mode':'');
     if(d.docCount===0) stat.textContent+=' · WARNING corpus empty';
   }catch(e){ stat.textContent='status unavailable — '+e.message; }
 }
@@ -1008,7 +1121,7 @@ inp.addEventListener('keydown', async function(e){
   addMsg('user',q);
   var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full='';
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
-             topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'' };
+             topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value };
   dbg('query', q+'  [search='+opts.webSearch+' temp='+opts.temperature+' topK='+opts.topK+']');
   try{
     var res=await fetch('/api/chat',{ method:'POST', headers:{'Content-Type':'application/json'},
@@ -1114,7 +1227,7 @@ var AGENT=(function(){
 // ============ Swarm runner (browser orchestration) ============
 function curOpts(){
   return { webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
-           topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'' };
+           topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value };
 }
 async function callTask(objective, context){
   var res=await fetch('/api/task',{ method:'POST', headers:{'Content-Type':'application/json'},
@@ -1210,6 +1323,37 @@ function startScheduler(){
 
 // ============ Agent-panel wiring ============
 el('btn-job').onclick=function(){ var on=el('jobs').classList.toggle('show'); el('btn-job').classList.toggle('on',on); };
+el('btn-tools').onclick=function(){ var on=el('tools').classList.toggle('show'); el('btn-tools').classList.toggle('on',on); if(on) loadCatalog(); };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url' };
+async function loadCatalog(){
+  try{
+    var d=await (await fetch('/api/tools/catalog')).json();
+    el('t-mode').textContent=(d.safeMode?'SAFE MODE on':'safe mode OFF')+(d.requireConfirm?' · confirm required':'')+(d.brokerConfigured?' · broker wired':' · no broker');
+    el('t-mode').className='t-badge'+(d.safeMode?' safe':'');
+    var cat=el('t-catalog'); cat.innerHTML=''; var sel=el('t-tool'); sel.innerHTML='';
+    (d.tools||[]).forEach(function(t){
+      var row=document.createElement('div'); row.className='tool-item';
+      row.innerHTML=t.name+' <span class="tcat">('+t.category+')</span><span class="tool-pill '+(t.passive?'passive':'active')+'">'+(t.passive?'passive':'active')+'</span> '+(t.description||'');
+      cat.appendChild(row);
+      var o=document.createElement('option'); o.value=t.name; o.textContent=t.name; sel.appendChild(o);
+    });
+    if(d.targetAllowlist && d.targetAllowlist.length){ var sc=document.createElement('div'); sc.className='tool-item'; sc.style.marginTop='6px'; sc.textContent='in-scope targets: '+d.targetAllowlist.join(', '); cat.appendChild(sc); }
+  }catch(e){ el('t-catalog').textContent='catalog unavailable: '+e.message; }
+}
+el('t-run').onclick=async function(){
+  var tool=el('t-tool').value, val=el('t-target').value.trim();
+  var args={}; var k=TOOL_ARGKEY[tool]||'target'; if(val) args[k]=val;
+  var out=el('t-result'); out.innerHTML='<div class="t-out">running '+tool+'…</div>';
+  try{
+    var r=await fetch('/api/tools/run',{ method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tool:tool, args:args, target:val, confirm:el('t-confirm').checked, settings:curOpts() }) });
+    var d=await r.json();
+    if(!d.ok){ out.innerHTML=''; var er=document.createElement('div'); er.className='t-out'; er.textContent='error: '+(d.error||('HTTP '+r.status)); out.appendChild(er); return; }
+    var res=typeof d.result==='string'?d.result:JSON.stringify(d.result,null,2);
+    out.innerHTML=''; var pre=document.createElement('div'); pre.className='t-out';
+    pre.textContent='['+d.via+'] '+tool+(d.target?' ('+d.target+')':'')+'\\n\\n'+res; out.appendChild(pre);
+  }catch(e){ out.innerHTML=''; var er2=document.createElement('div'); er2.className='t-out'; er2.textContent='error: '+e.message; out.appendChild(er2); }
+};
 el('j-run').onclick=function(){ runSwarmToChat(el('j-obj').value.trim(), el('j-tpl').value); };
 var JOB_TEMPLATES=[
   {label:'CVE deep-dive', tpl:'cve', text:'Profile CVE-2026-2005: CVSS severity, EPSS score, CISA KEV status, affected PostgreSQL versions, the patched release, public PoC availability, and detection guidance.'},
@@ -1385,7 +1529,7 @@ export default {
       const { cveIds, ips, domains, wantSearch } = analyseQuery(q);
       const toolContext = [];
       for (const cveId of cveIds.slice(0, 3)) toolContext.push(`=== ${cveId} ===\n${await cveIntel(env, cveId)}`);
-      for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP RDAP: ${ip} ===\n${await ipLookup(ip)}`);
+      for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP: ${ip} ===\n${await ipIntel(env, ip)}`);
       for (const dom of (domains || []).slice(0, 2)) toolContext.push(`=== Domain: ${dom} ===\n${await domainIntel(dom)}`);
       let chunks = await vectorRetrieve(env, q, body.topK || TOP_K);
       const usedVectorize = chunks !== null;
@@ -1407,6 +1551,7 @@ export default {
       const topK      = Math.max(1, Math.min(10, opts.topK || TOP_K));
       const temp      = typeof opts.temperature === 'number' ? opts.temperature : 0.3;
       const useSearch = opts.webSearch !== false;
+      const reasoning = String(opts.reasoning || 'normal').toLowerCase();
       const braveKey  = opts.brave || env.BRAVE_API_KEY || '';
       const objective = (body.objective || body.message || '').toString();
       const context   = (body.context || '').toString();
@@ -1415,7 +1560,7 @@ export default {
         const { cveIds, ips, domains, wantSearch } = analyseQuery(objective + ' ' + context);
         const toolContext = [];
         for (const cveId of cveIds.slice(0, 3)) toolContext.push(`=== ${cveId} ===\n${await cveIntel(env, cveId)}`);
-        for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP RDAP: ${ip} ===\n${await ipLookup(ip)}`);
+        for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP: ${ip} ===\n${await ipIntel(env, ip)}`);
         for (const dom of (domains || []).slice(0, 2)) toolContext.push(`=== Domain: ${dom} ===\n${await domainIntel(dom)}`);
         if (useSearch && wantSearch) {
           const s = await webSearch(cveIds.length ? `${cveIds[0]} exploit PoC advisory` : objective, braveKey);
@@ -1424,7 +1569,11 @@ export default {
         let chunks = await vectorRetrieve(env, objective, topK);
         const usedVectorize = chunks !== null;
         if (!chunks) chunks = bm25Chunks(await getChunks(env), objective, topK);
-        const sysPrompt = buildSystemPrompt(env, { summary: '', chunks, toolContext, clientMemory });
+        let sysPrompt = buildSystemPrompt(env, { summary: '', chunks, toolContext, clientMemory, reasoning });
+        if (reasoning === 'deep') {
+          const notes = await reasonPass(env, objective, toolContext, chunks, temp);
+          if (notes) sysPrompt += `\n\nPRELIMINARY ANALYSIS (your private notes — verify, do not treat as fact):\n${notes}`;
+        }
         const userContent = context ? `${objective}\n\nContext from earlier steps:\n${context.slice(0, 2500)}` : objective;
         const r = await env.AI.run(MODEL, {
           messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userContent }],
@@ -1442,6 +1591,7 @@ export default {
       const topK      = Math.max(1, Math.min(10, opts.topK || TOP_K));
       const temp      = typeof opts.temperature === 'number' ? opts.temperature : 0.3;
       const useSearch = opts.webSearch !== false;
+      const reasoning = String(opts.reasoning || 'normal').toLowerCase();
       const braveKey  = opts.brave || env.BRAVE_API_KEY || '';
       const clientMemory = typeof body.memory === 'string' ? body.memory : '';
 
@@ -1478,12 +1628,12 @@ export default {
             toolContext.push(`=== ${cveId} ===\n${intel}`);
           }
 
-          // Passive IP ownership lookup (RDAP) — registration data only, no scanning
+          // Passive IP intel — RDAP + reverse DNS + Shodan InternetDB. No scanning by us.
           for (const ip of (ips || []).slice(0, 2)) {
-            dbg('ip_rdap', ip);
-            const result = await ipLookup(ip);
-            dbg('rdap result', result.slice(0, 160));
-            toolContext.push(`=== IP RDAP: ${ip} ===\n${result}`);
+            dbg('ip_intel', ip);
+            const intel = await ipIntel(env, ip);
+            dbg('ip result', intel.slice(0, 160));
+            toolContext.push(`=== IP: ${ip} ===\n${intel}`);
           }
 
           // Passive domain intel — RDAP + DNS (DoH) + certificate transparency. No scanning.
@@ -1514,7 +1664,12 @@ export default {
               chunks.map(c => (c.title || '?').slice(0, 24) + '(' + (c.score ?? '') + ')').join(', '));
 
           // Build prompt
-          const sysPrompt = buildSystemPrompt(env, { summary: sess?.summary || '', chunks, toolContext, clientMemory });
+          let sysPrompt = buildSystemPrompt(env, { summary: sess?.summary || '', chunks, toolContext, clientMemory, reasoning });
+          if (reasoning === 'deep') {
+            dbg('reasoning', 'deep analysis pass');
+            const notes = await reasonPass(env, lastUser, toolContext, chunks, temp);
+            if (notes) sysPrompt += `\n\nPRELIMINARY ANALYSIS (your private notes — verify against tools/corpus, do not treat as fact):\n${notes}`;
+          }
           const messages = [
             { role: 'system', content: sysPrompt },
             ...priorTurns.filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim()),
