@@ -1,0 +1,39 @@
+name: Deploy Agent (Cloudflare Worker)
+
+# Deterministic deploy: every push to main that touches agent/ runs `wrangler deploy`.
+# This replaces relying on the one-click "Deploy to Cloudflare" button for updates.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — token with "Edit Workers" permission for your account
+#   CLOUDFLARE_ACCOUNT_ID  — your Cloudflare account id
+#
+# Notes:
+#   - wrangler.toml keeps Vectorize/KV optional (commented), so deploy works with
+#     zero extra resources. Uncomment those blocks only after you create them.
+#   - If you ALSO have a Cloudflare Git integration ("Workers Builds") connected to
+#     this repo, disable one of the two to avoid double deploys.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "agent/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Deploy with Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: agent
+          command: deploy
