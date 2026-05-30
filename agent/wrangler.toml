@@ -8,7 +8,7 @@ compatibility_date = "2024-09-23"
 binding = "AI"
 
 [vars]
-LLMS_URL  = "https://garrettstimpson.ca/llms.txt"
+LLMS_URL  = "https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/refs/heads/main/llms.txt"
 SITE_NAME = "Garrett Stimpson Security Research"
 
 # Daily reindex of the Vectorize index, 1h after llms.txt regenerates (06:00 UTC).
