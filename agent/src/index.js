@@ -577,10 +577,10 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 #j-saved .sjob{display:flex;gap:8px;align-items:center;margin:2px 0;}
 #j-saved .sj-del{color:var(--muted);cursor:pointer;font-weight:700;}
 #j-saved .sj-del:hover{color:var(--err);}
-#wm{position:fixed;left:16px;bottom:60px;width:150px;height:150px;z-index:0;pointer-events:none;
-  background:url('https://garrettstimpson.ca/assets/img/agent-garrett-logo.svg') no-repeat bottom left;
-  background-size:contain;opacity:.13;filter:drop-shadow(0 0 8px rgba(0,212,255,.25));}
-@media (max-width:640px){#wm{width:96px;height:96px;bottom:54px;opacity:.1;}}
+#wm{position:fixed;left:16px;bottom:58px;width:160px;height:160px;z-index:0;pointer-events:none;
+  background:url('https://garrettstimpson.ca/assets/img/agent-garrett-logo.png') no-repeat bottom left;
+  background-size:contain;opacity:.5;mix-blend-mode:screen;}
+@media (max-width:640px){#wm{width:104px;height:104px;bottom:54px;opacity:.4;}}
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
