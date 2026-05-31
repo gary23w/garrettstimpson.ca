@@ -723,6 +723,8 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'breach_check', category: 'people', passive: true, description: 'Email breach exposure (XposedOrNot keyless; HIBP if HIBP_API_KEY set)' },
   { name: 'tech_fingerprint', category: 'recon', passive: false, description: 'Fetch site and fingerprint CMS/framework/server (Discourse, WordPress, ...) — contacts target' },
   { name: 'origin_ip', category: 'recon', passive: true, description: 'Find possible origin IP behind Cloudflare via passive subdomain DNS probing' },
+  { name: 'image_osint', category: 'osint', passive: true, description: 'Image OSINT: hash, type, EXIF (camera/GPS/timestamp) + reverse-image-search links' },
+  { name: 'onion_search', category: 'darkweb', passive: true, description: 'Dark-web exposure: Ahmia onion index (+ Tor broker if TOOL_BROKER_URL set)' },
 ];
 
 function parseCsvSet(value) {
@@ -820,6 +822,8 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'breach_check') return breachCheck(env, String(args.email || args.target || ''));
   if (name === 'tech_fingerprint') return techFingerprint(String(args.url || args.target || args.domain || ''));
   if (name === 'origin_ip')    return originIp(String(args.domain || args.target || ''));
+  if (name === 'image_osint')  return imageOsint(String(args.url || args.image || args.target || ''));
+  if (name === 'onion_search') return onionSearch(env, String(args.query || args.target || args.domain || args.email || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -952,6 +956,13 @@ async function usernameEnum(username) {
     { name: 'Keybase',    api: `https://keybase.io/_/api/1.0/user/lookup.json?username=${u}`, profile: `https://keybase.io/${u}`,                  test: async r => { if (!r.ok) return false; const j = await r.json(); return !!(j && j.status && j.status.code === 0); } },
     { name: 'HackerNews', api: `https://hacker-news.firebaseio.com/v0/user/${u}.json`,        profile: `https://news.ycombinator.com/user?id=${u}`, test: async r => r.ok && (await r.text()).trim() !== 'null' },
     { name: 'Reddit',     api: `https://www.reddit.com/user/${u}/about.json`,                 profile: `https://www.reddit.com/user/${u}`,        test: r => r.ok },
+    { name: 'Dev.to',     api: `https://dev.to/api/users/by_username?url=${u}`,               profile: `https://dev.to/${u}`,                     test: r => r.ok },
+    { name: 'npm',        api: `https://registry.npmjs.org/-/user/org.couchdb.user:${u}`,     profile: `https://www.npmjs.com/~${u}`,             test: async r => r.ok && !!(await r.json()).name },
+    { name: 'PyPI',       api: `https://pypi.org/user/${u}/`,                                 profile: `https://pypi.org/user/${u}/`,             test: r => r.ok },
+    { name: 'DockerHub',  api: `https://hub.docker.com/v2/users/${u}/`,                       profile: `https://hub.docker.com/u/${u}`,           test: r => r.ok },
+    { name: 'Codeberg',   api: `https://codeberg.org/api/v1/users/${u}`,                      profile: `https://codeberg.org/${u}`,               test: r => r.ok },
+    { name: 'Mastodon',   api: `https://mastodon.social/.well-known/webfinger?resource=acct:${u}@mastodon.social`, profile: `https://mastodon.social/@${u}`, test: r => r.ok },
+    { name: 'Lobsters',   api: `https://lobste.rs/u/${u}.json`,                               profile: `https://lobste.rs/u/${u}`,                test: r => r.ok },
   ];
   const out = await Promise.all(sites.map(async s => {
     try {
@@ -1135,6 +1146,122 @@ async function originIp(domain) {
   else if (fronted) res += `\nNo origin leaked via common subdomains. Origin is UNKNOWN — do not guess. (Pivot via crt.sh historical certs or paid passive-DNS.)`;
   else res += `\nDomain does not appear Cloudflare-fronted; the A records above are likely the real origin.`;
   return res;
+}
+
+async function sha256hexBytes(bytes) {
+  const b = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+// Minimal EXIF reader for JPEG (camera, timestamps, GPS). Returns {} or {error}.
+function readExifBytes(bytes) {
+  try {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (dv.getUint16(0) !== 0xFFD8) return { error: 'not a JPEG (EXIF read skipped)' };
+    let off = 2, app1 = -1;
+    while (off < dv.byteLength - 1) {
+      if (dv.getUint8(off) !== 0xFF) break;
+      const marker = dv.getUint8(off + 1), size = dv.getUint16(off + 2);
+      if (marker === 0xE1) { app1 = off + 4; break; }
+      if (marker === 0xDA) break;
+      off += 2 + size;
+    }
+    if (app1 < 0) return { error: 'no EXIF/APP1 segment' };
+    if (String.fromCharCode(dv.getUint8(app1), dv.getUint8(app1 + 1), dv.getUint8(app1 + 2), dv.getUint8(app1 + 3)) !== 'Exif') return { error: 'no Exif header' };
+    const tiff = app1 + 6;
+    const le = String.fromCharCode(dv.getUint8(tiff), dv.getUint8(tiff + 1)) === 'II';
+    const u16 = o => dv.getUint16(o, le), u32 = o => dv.getUint32(o, le);
+    const TYPE_SZ = { 1:1, 2:1, 3:2, 4:4, 5:8, 7:1, 9:4, 10:8 };
+    const rat = o => u32(o) / (u32(o + 4) || 1);
+    function readIFD(ifdOff) {
+      const out = {}; const n = u16(ifdOff); let p = ifdOff + 2;
+      for (let i = 0; i < n; i++, p += 12) {
+        const tag = u16(p), type = u16(p + 2), cnt = u32(p + 4);
+        const valOff = (TYPE_SZ[type] || 1) * cnt <= 4 ? p + 8 : tiff + u32(p + 8);
+        out[tag] = { type, cnt, valOff };
+      }
+      return out;
+    }
+    const str = e => { let s = ''; for (let i = 0; i < e.cnt; i++) { const c = dv.getUint8(e.valOff + i); if (c) s += String.fromCharCode(c); } return s.trim(); };
+    const ifd0 = readIFD(tiff + u32(tiff + 4));
+    const res = {};
+    if (ifd0[0x010F]) res.make = str(ifd0[0x010F]);
+    if (ifd0[0x0110]) res.model = str(ifd0[0x0110]);
+    if (ifd0[0x0132]) res.datetime = str(ifd0[0x0132]);
+    if (ifd0[0x8769]) { const ex = readIFD(tiff + u32(ifd0[0x8769].valOff)); if (ex[0x9003]) res.taken = str(ex[0x9003]); }
+    if (ifd0[0x8825]) {
+      const g = readIFD(tiff + u32(ifd0[0x8825].valOff));
+      const dms = e => { const o = e.valOff; return rat(o) + rat(o + 8) / 60 + rat(o + 16) / 3600; };
+      if (g[2] && g[4]) {
+        let lat = dms(g[2]), lon = dms(g[4]);
+        if (g[1] && str(g[1]) === 'S') lat = -lat;
+        if (g[3] && str(g[3]) === 'W') lon = -lon;
+        res.gps = { lat: +lat.toFixed(6), lon: +lon.toFixed(6) };
+      }
+    }
+    return res;
+  } catch (e) { return { error: 'EXIF parse failed (' + e.message + ')' }; }
+}
+
+// Image OSINT — hash, type, EXIF (camera/GPS/timestamp), reverse-image-search links.
+async function imageOsint(url) {
+  const u = String(url || '').trim();
+  let parsed; try { parsed = new URL(u); } catch { return 'image_osint: a direct image URL (jpg/png/...) is required.'; }
+  if (isPrivateHost(parsed.hostname)) return `image_osint: ${parsed.hostname} is private/internal — blocked.`;
+  try {
+    const r = await fetch(parsed.toString(), { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, redirect: 'follow', signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return `image_osint ${parsed.hostname}: fetch failed (HTTP ${r.status}).`;
+    const ct = r.headers.get('content-type') || '';
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    const hash = await sha256hexBytes(bytes);
+    const isJpeg = /jpe?g/i.test(ct) || (bytes[0] === 0xFF && bytes[1] === 0xD8);
+    const exif = isJpeg ? readExifBytes(bytes) : { error: 'EXIF only parsed for JPEG (this is ' + (ct || 'unknown') + ')' };
+    const enc = encodeURIComponent(u);
+    let out = `image_osint ${parsed.hostname}\ntype: ${ct || '?'} | bytes: ${bytes.length} | sha256: ${hash}`;
+    if (exif && !exif.error) {
+      const cam = [exif.make, exif.model].filter(Boolean).join(' ');
+      if (cam) out += `\ncamera: ${cam}`;
+      if (exif.taken || exif.datetime) out += `\ntaken: ${exif.taken || exif.datetime}`;
+      if (exif.gps) out += `\nGPS: ${exif.gps.lat}, ${exif.gps.lon}  (map: https://maps.google.com/?q=${exif.gps.lat},${exif.gps.lon})`;
+      if (!cam && !exif.gps && !exif.taken) out += `\nEXIF: present, but no camera/GPS/timestamp tags`;
+    } else if (exif && exif.error) { out += `\nEXIF: ${exif.error}`; }
+    out += `\nreverse-image search:\n` +
+      `Google Lens: https://lens.google.com/uploadbyurl?url=${enc}\n` +
+      `Yandex: https://yandex.com/images/search?rpt=imageview&url=${enc}\n` +
+      `Bing: https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:${enc}\n` +
+      `TinEye: https://tineye.com/search?url=${enc}`;
+    return out;
+  } catch (e) { return `image_osint ${parsed.hostname}: failed (${e.message}).`; }
+}
+
+// Dark-web exposure — Ahmia clearnet onion index (best-effort) + Tor broker if configured.
+async function onionSearch(env, query) {
+  const q = String(query || '').trim();
+  if (!q) return 'onion_search: a term (email, domain, handle, keyword) is required.';
+  const lines = [];
+  try {
+    const r = await fetch(`https://ahmia.fi/search/?q=${encodeURIComponent(q)}`,
+      { headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0', 'Accept': 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(12000) });
+    if (r.ok) {
+      const html = await r.text();
+      const seen = {}, hits = [];
+      const re = /([a-z2-7]{16}\.onion|[a-z2-7]{56}\.onion)/gi;
+      let m; while ((m = re.exec(html))) { const o = m[1].toLowerCase(); if (o.indexOf('juhanurmihxlp') === 0) continue; if (!seen[o]) { seen[o] = 1; hits.push(o); } }
+      lines.push(hits.length
+        ? `Ahmia (clearnet onion index): ${hits.length} onion site(s) referencing "${q}":\n` + hits.slice(0, 15).join('\n')
+        : `Ahmia: no indexed onion sites referencing "${q}" (or abuse-filtered).`);
+    } else lines.push(`Ahmia: unavailable (HTTP ${r.status}). Clearnet onion gateways frequently block datacenter/Workers IPs.`);
+  } catch (e) { lines.push(`Ahmia: unavailable (${e.message}).`); }
+  if (String((env && env.TOOL_BROKER_URL) || '')) {
+    try {
+      const out = await runBrokerTool(env, { tool: 'onion_search', args: { query: q }, target: q, reason: 'darkweb exposure', requestedAt: new Date().toISOString() });
+      const txt = typeof out === 'string' ? out : (out && (out.result || JSON.stringify(out)));
+      if (txt) lines.push(`Broker Tor search:\n${String(txt).slice(0, 2500)}`);
+    } catch (e) { lines.push(`Broker Tor search: ${e.message}`); }
+  } else {
+    lines.push('Live .onion crawl: not available in-worker (Cloudflare Workers cannot open Tor circuits). Set TOOL_BROKER_URL to a Tor-capable broker to enable real onion crawling.');
+  }
+  return `onion_search "${q}" (dark-web exposure monitoring)\n` + lines.join('\n\n') + '\n\nNote: index references surfaced for defensive exposure assessment only.';
 }
 
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
@@ -1581,7 +1708,7 @@ inp.addEventListener('keydown', async function(e){
   if(!c.msgs.length){ c.title=q.slice(0,40); }
   c.msgs.push({role:'user',content:q}); saveChats(chats); renderChats();
   addMsg('user',q);
-  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
+  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
   var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full='';
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
              topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value };
@@ -1758,35 +1885,39 @@ async function runSwarmToChat(objective, template){
 function detectOsint(q, prev){
   var text=String(q||'').trim(), low=text.toLowerCase();
   function uniq(a){ return a.filter(function(x,i){ return a.indexOf(x)===i; }); }
+  var images=uniq(text.match(/https?:\\/\\/[^\\s)]+?\\.(?:jpe?g|png|gif|webp|bmp|tiff?)(?:\\?[^\\s)]*)?/ig)||[]);
   var emails=uniq(text.match(/[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}/g)||[]);
   var ips=uniq((text.match(/\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b/g)||[]).filter(function(ip){ return ip.split('.').every(function(o){ return +o>=0&&+o<=255; }); }));
   var cves=uniq((text.match(/CVE-\\d{4}-\\d+/ig)||[]).map(function(c){ return c.toUpperCase(); }));
   var emailDoms={}; emails.forEach(function(e){ emailDoms[e.split('@')[1].toLowerCase()]=1; });
+  var imgHosts={}; images.forEach(function(x){ try{ imgHosts[new URL(x).hostname.toLowerCase()]=1; }catch(e){} });
   var domains=uniq((text.match(/\\b(?:[a-z0-9\\-]+\\.)+[a-z]{2,24}\\b/ig)||[]).map(function(d){ return d.toLowerCase(); })
-    .filter(function(d){ return !/\\.(md|txt|js|json|png|jpe?g|gif|svg|exe|dll|sh|py|html?|css|ya?ml|pdf|zip)$/.test(d); })
-    .filter(function(d){ return !emailDoms[d]; })
+    .filter(function(d){ return !/\\.(md|txt|js|json|png|jpe?g|gif|svg|webp|bmp|tiff?|exe|dll|sh|py|html?|css|ya?ml|pdf|zip)$/.test(d); })
+    .filter(function(d){ return !emailDoms[d] && !imgHosts[d]; })
     .filter(function(d){ return !/^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(d); }));
   var handles=uniq((text.match(/(?:^|\\s)@([A-Za-z0-9_]{2,30})/g)||[]).map(function(s){ return s.trim().replace(/^@/,''); }));
   var um=low.match(/\\b(?:username|handle|user|account|alias)\\s*[:=]?\\s*['"]?([a-z0-9_.\\-]{2,30})/);
   if(um){ handles.push(um[1]); handles=uniq(handles); }
-  var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind'];
+  var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate'];
   var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
   var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
-  var refPrev=/\\b(it|its|that|this|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization))\\b/i.test(low);
-  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length;
+  var refPrev=/\\b(it|its|that|this|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo))\\b/i.test(low);
+  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length;
   var soloEntity=(entityCount===1)&&(text.split(/\\s+/).length<=2);
   if(entityCount===0 && prev && (hasTrigger||refPrev||personHint)){
-    emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice();
-    entityCount=emails.length+ips.length+domains.length+handles.length+cves.length;
+    emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice(); images=(prev.images||[]).slice();
+    entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length;
   }
   var intent='full';
-  if(/\\b(origin|behind|real ip|true ip|bypass|unmask)\\b/.test(low)) intent='origin';
+  if(images.length || /\\b(image|photo|picture|exif|reverse image|geoloc)\\b/.test(low)) intent='image';
+  else if(/\\b(onion|dark ?web|tor network|leaked on|paste dump)\\b/.test(low)) intent='darkweb';
+  else if(/\\b(origin|behind|real ip|true ip|bypass|unmask)\\b/.test(low)) intent='origin';
   else if(/\\b(discourse|wordpress|drupal|joomla|cms|tech stack|framework|fingerprint|built with|built on|powered by|running|is it a|is it an)\\b/.test(low)) intent='tech';
   else if(/\\b(breach|pwned|leaked|leak|exposed|hibp|compromis)\\b/.test(low)) intent='breach';
   var hasIntent=intent!=='full';
   var actionable=hasTrigger||hasIntent||(refPrev&&!!prev);
   var isOsint=(entityCount>0&&actionable)||soloEntity||(hasTrigger&&personHint);
-  return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, keyword:text };
+  return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, keyword:text };
 }
 
 function osintSummary(od){
@@ -1796,6 +1927,7 @@ function osintSummary(od){
   if(od.domains.length) p.push('domain:'+od.domains.join(','));
   if(od.ips.length) p.push('ip:'+od.ips.join(','));
   if(od.cves.length) p.push('cve:'+od.cves.join(','));
+  if(od.images && od.images.length) p.push('image:'+od.images.length);
   return p.length?p.join(' | '):'keyword search';
 }
 async function runOsintTool(tool, arg){
@@ -1814,7 +1946,15 @@ async function runOsintFlow(q, od, c){
   var jobs=[];
   function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
   function addDomainFull(x){ ['rdap_domain','dns_lookup','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint')?('https://'+x):x]); }); }
-  if(od.intent==='origin'){
+  if(od.intent==='image'){
+    (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
+    if(!(od.images||[]).length) addMsg('system','OSINT(image): no image URL found - paste a direct image link (jpg/png/...).');
+  } else if(od.intent==='darkweb'){
+    var dterms=[]; (od.emails||[]).forEach(function(x){ dterms.push(x); }); (od.domains||[]).forEach(function(x){ dterms.push(x); }); (od.handles||[]).forEach(function(x){ dterms.push(x); });
+    if(!dterms.length) dterms.push(od.keyword);
+    dterms.slice(0,4).forEach(function(x){ jobs.push(['onion_search '+x,'onion_search',x]); });
+    (od.emails||[]).forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); });
+  } else if(od.intent==='origin'){
     od.domains.forEach(function(x){ jobs.push(['origin_ip '+x,'origin_ip',x]); jobs.push(['dns_lookup '+x,'dns_lookup',x]); jobs.push(['crtsh_subs '+x,'crtsh_subs',x]); });
     od.ips.forEach(addIpFull);
   } else if(od.intent==='tech'){
@@ -1828,10 +1968,13 @@ async function runOsintFlow(q, od, c){
     od.domains.forEach(addDomainFull);
     od.emails.forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); });
     od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); });
+    (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
+    var oterm=(od.emails[0]||od.domains[0]||od.handles[0]||q);
+    jobs.push(['onion_search','onion_search',oterm]);
     jobs.push(['web_search','web_search',q]);
   }
   if(!jobs.length){ addMsg('system','OSINT: no actionable entity detected.'); return; }
-  jobs=jobs.slice(0,28);
+  jobs=jobs.slice(0,30);
   var blocks=[], done=0;
   var statusEl=addMsg('system','OSINT: running 0/'+jobs.length+' tools...');
   var queue=jobs.slice();
@@ -1850,7 +1993,7 @@ async function runOsintFlow(q, od, c){
   ev.innerHTML='<div class="jt-h">collected evidence - '+jobs.length+' tools</div>'+renderMarkdown(FENCE+'\\n'+evidence.slice(0,9000)+'\\n'+FENCE);
   statusEl.textContent='OSINT: '+jobs.length+' tools complete - synthesizing write-up...';
   var synth=blocks.map(function(b){ return b.slice(0,700); }).join('\\n\\n').slice(0,9000);
-  var objective='Write a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence provided as context - never invent a fact that is not present in it; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary (3-5 sentences)\\n## Entities and Identifiers\\n## Findings (one subsection per entity/source; note which tool produced each fact)\\n## Pivots and Links (relationships or overlaps across the evidence)\\n## Gaps and Confidence (what is UNKNOWN and reliability notes)\\nBe precise and defensive in framing.';
+  var objective='Write a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence provided as context - never invent a fact that is not present in it; mark anything missing as UNKNOWN. Include any dark-web/onion and image/EXIF findings present in the evidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences)\\n## Entities and Identifiers\\n## Findings (one subsection per entity/source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaks - or state none found)\\n## Pivots and Links\\n## Gaps and Confidence (what is UNKNOWN and reliability notes)\\nBe precise and defensive in framing.';
   var report;
   try{ report=await callTask(objective, synth); }
   catch(e){ report='# OSINT write-up: '+q+'\\n\\n(synthesis failed: '+e.message+')\\n\\n'+evidence; }
@@ -1895,7 +2038,7 @@ function startScheduler(){
 // ============ Agent-panel wiring ============
 el('btn-job').onclick=function(){ var on=el('jobs').classList.toggle('show'); el('btn-job').classList.toggle('on',on); };
 el('btn-tools').onclick=function(){ var on=el('tools').classList.toggle('show'); el('btn-tools').classList.toggle('on',on); if(on) loadCatalog(); };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
