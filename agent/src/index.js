@@ -766,6 +766,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'archive_urls', category: 'osint', passive: true, description: 'Wayback historical URLs/endpoints for a domain (forgotten paths)' },
   { name: 'favicon_hash', category: 'recon', passive: false, description: 'Shodan/FOFA favicon-hash pivot — find other servers sharing a site favicon' },
   { name: 'crawl', category: 'recon', passive: false, description: 'Crawl a website: extract & follow links/files, download linked text files, scan for exposed secrets' },
+  { name: 'disclosure_draft', category: 'recon', passive: true, description: 'Find a domain security contact (security.txt/abuse) and DRAFT a responsible-disclosure email (does not send)' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
   { name: 'decode', category: 'malware', passive: true, description: 'Recursive multi-layer decode (base64/hex/url/gzip) + refang + IOCs' },
@@ -891,6 +892,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'archive_urls') return archiveUrls(String(args.domain || args.target || ''));
   if (name === 'favicon_hash') return faviconHash(String(args.url || args.target || ''));
   if (name === 'crawl')        return crawl(String(args.url || args.target || ''));
+  if (name === 'disclosure_draft') return disclosureDraft(env, String(args.target || args.domain || ''));
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
   if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
@@ -2175,6 +2177,27 @@ async function crawl(url) {
   } catch (e) { return `crawl ${u.hostname}: failed (${e.message}).`; }
 }
 
+// Responsible-disclosure DRAFT — finds a domain's security contact and composes a
+// blue-team notification email for a HUMAN to review and send. Never sends; never anonymous.
+async function disclosureDraft(env, target) {
+  const parts = String(target || '').split('|');
+  const d = parts[0].trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+  const finding = (parts[1] || '').trim();
+  if (!d || d.indexOf('.') < 0) return 'disclosure_draft: a domain is required (optionally "domain | brief finding").';
+  const contacts = [];
+  try {
+    const r = await fetch('https://' + d + '/.well-known/security.txt', { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(7000) });
+    if (r.ok) { const t = await r.text(); (t.match(/Contact:\s*([^\s]+)/ig) || []).forEach(c => contacts.push(c.replace(/Contact:\s*/i, '').replace(/^mailto:/i, '').trim())); }
+  } catch (e) {}
+  try { const rd = await domainLookup(d); const em = (String(rd).match(/[a-z0-9._%+\-]*abuse[a-z0-9._%+\-]*@[a-z0-9.\-]+\.[a-z]{2,}/i) || String(rd).match(/[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/i) || [])[0]; if (em) contacts.push(em); } catch (e) {}
+  let to = [...new Set(contacts.filter(c => /@/.test(c)))];
+  if (!to.length) to = ['security@' + d, 'abuse@' + d];
+  const who = String((env && env.DISCLOSURE_FROM) || '[your name / handle — set DISCLOSURE_FROM]');
+  const subject = `Responsible disclosure: potential security issue on ${d}`;
+  const body = `Hello,\n\nMy name is ${who} and I am reaching out in good faith about a potential security issue I observed on ${d} during passive, non-intrusive analysis (a blue-team / responsible-disclosure courtesy).\n\nObservation:\n${finding || '[describe the specific issue — e.g., missing SPF/DMARC, an exposed file, a takeover-able subdomain, weak security headers]'}\n\nNo systems were accessed or exploited; this is based only on publicly available information. Please treat it as a heads-up so your team can verify and remediate. I am happy to provide details and coordinate.\n\nRegards,\n${who}`;
+  return `disclosure_draft ${d}\nsuggested recipient(s): ${to.slice(0, 3).join(', ')}\n\n--- SUBJECT ---\n${subject}\n\n--- BODY ---\n${body}\n\nNOTE: DRAFT only — Agent Garrett does not send email. Review and send from your own verified, attributable address. Responsible disclosure should never be anonymous.`;
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -3146,7 +3169,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
