@@ -770,6 +770,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'favicon_hash', category: 'recon', passive: false, description: 'Shodan/FOFA favicon-hash pivot — find other servers sharing a site favicon' },
   { name: 'crawl', category: 'recon', passive: false, description: 'Crawl a website: extract & follow links/files, download linked text files, scan for exposed secrets' },
   { name: 'subdomains', category: 'recon', passive: true, description: 'DNS-brute common subdomains (DoH) — complements crt.sh' },
+  { name: 'vuln_scan', category: 'recon', passive: false, description: 'Passive vuln indication: detect software versions -> candidate CVEs (NVD) + Shodan CVE tags (no active exploitation)' },
   { name: 'jwt', category: 'recon', passive: true, description: 'Decode/inspect a JWT (claims, alg:none, expiry) — no verification' },
   { name: 'cidr', category: 'recon', passive: true, description: 'IPv4 CIDR math: network/broadcast/mask/range/host count' },
   { name: 'hash_id', category: 'malware', passive: true, description: 'Identify likely hash type by format (MD5/SHA/NTLM/bcrypt/...)' },
@@ -905,6 +906,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'favicon_hash') return faviconHash(String(args.url || args.target || ''));
   if (name === 'crawl')        return crawl(String(args.url || args.target || ''));
   if (name === 'subdomains')   return subdomains(String(args.domain || args.target || ''));
+  if (name === 'vuln_scan')    return vulnScan(String(args.target || args.url || args.domain || ''));
   if (name === 'jwt')          return jwtDecode(String(args.token || args.target || args.input || ''));
   if (name === 'cidr')         return cidrTool(String(args.input || args.cidr || args.target || ''));
   if (name === 'hash_id')      return hashId(String(args.hash || args.target || args.input || ''));
@@ -2375,6 +2377,44 @@ function timestampDecode(input) {
   return 'timestamp: provide a unix epoch (10 or 13 digits) or a UUID.';
 }
 
+// Passive vulnerability indication: detect software/versions from banners, map to
+// candidate CVEs (NVD) + Shodan's pre-collected CVE tags. NOT active exploitation.
+async function vulnScan(target) {
+  let u; try { u = new URL(/^https?:\/\//i.test(target) ? target : 'https://' + target); } catch { return 'vuln_scan: a domain or URL is required.'; }
+  if (isPrivateHost(u.hostname)) return `vuln_scan: ${u.hostname} is private/internal — blocked.`;
+  const products = new Set(); const lines = [];
+  try {
+    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
+    const html = await r.text(); const hd = n => r.headers.get(n) || '';
+    lines.push(`fingerprint: server=${hd('server') || '?'} | x-powered-by=${hd('x-powered-by') || '?'}`);
+    [hd('server'), hd('x-powered-by')].forEach(sv => { (String(sv).match(/[A-Za-z][A-Za-z0-9.\-]*\/\d+\.\d+(?:\.\d+)?/g) || []).forEach(p => products.add(p.replace('/', ' '))); });
+    const gen = (html.match(/<meta name="generator" content="([^"]+)"/i) || [])[1];
+    if (gen) { lines.push(`generator: ${gen}`); if (/\d/.test(gen)) products.add(gen); }
+    (html.match(/([a-z][a-z0-9_]{2,20})[\-\/](\d+\.\d+\.\d+)(?:\.min)?\.js/ig) || []).slice(0, 6).forEach(js => { const m = js.match(/([a-z][a-z0-9_]{2,20})[\-\/](\d+\.\d+\.\d+)/i); if (m) products.add(m[1] + ' ' + m[2]); });
+  } catch (e) { return `vuln_scan ${u.hostname}: fetch failed (${e.message}).`; }
+  const plist = [...products].filter(p => /\d/.test(p)).slice(0, 3);
+  if (!plist.length) lines.push('no versioned software banners exposed (server hides versions — good hardening).');
+  for (const p of plist) {
+    try {
+      const r = await fetch(`https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=${encodeURIComponent(p)}&resultsPerPage=5`, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(12000) });
+      if (!r.ok) { lines.push(`\n${p}: NVD lookup HTTP ${r.status}`); continue; }
+      const d = await r.json();
+      const v = (d.vulnerabilities || []).slice(0, 5).map(x => {
+        const c = x.cve; let sc = '?';
+        try { const m = c.metrics || {}; const cv = (m.cvssMetricV31 || m.cvssMetricV30 || m.cvssMetricV2 || [])[0]; if (cv && cv.cvssData) sc = cv.cvssData.baseScore + ' ' + (cv.cvssData.baseSeverity || ''); } catch (e) {}
+        return `  ${c.id} [CVSS ${sc}]`;
+      });
+      lines.push(`\n${p} -> ${d.totalResults || 0} NVD matches (version-match CANDIDATES):\n${v.join('\n') || '  none'}`);
+    } catch (e) { lines.push(`\n${p}: NVD ${e.message}`); }
+  }
+  try {
+    const dr = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(u.hostname)}&type=A`, { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(6000) });
+    const j = await dr.json(); const ip = ((j.Answer || []).filter(a => a.type === 1).map(a => a.data))[0];
+    if (ip) { const sh = await shodanInternetDB(ip); lines.push(`\nShodan InternetDB (${ip} — pre-scanned, real observed CVEs/ports):\n${sh}`); }
+  } catch (e) {}
+  return `vuln_scan ${u.hostname}\n${lines.join('\n')}\n\nNOTE: passive banner/version matching. The NVD entries are CANDIDATE CVEs for the detected software — NOT confirmed exploitable on this host (the patch level/config is unknown, and the IP may be a CDN/WAF edge). Confirming exploitability requires AUTHORIZED active testing, which Agent Garrett does not perform.`;
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -3232,7 +3272,7 @@ async function runOsintFlow(q, od, c){
     od.domains.forEach(function(x){ jobs.push(['origin_ip '+x,'origin_ip',x]); jobs.push(['dns_lookup '+x,'dns_lookup',x]); jobs.push(['crtsh_subs '+x,'crtsh_subs',x]); });
     od.ips.forEach(addIpFull);
   } else if(od.intent==='tech'){
-    od.domains.forEach(function(x){ jobs.push(['tech_fingerprint '+x,'tech_fingerprint','https://'+x]); jobs.push(['http_headers '+x,'http_headers','https://'+x]); jobs.push(['wellknown '+x,'wellknown',x]); });
+    od.domains.forEach(function(x){ jobs.push(['tech_fingerprint '+x,'tech_fingerprint','https://'+x]); jobs.push(['vuln_scan '+x,'vuln_scan','https://'+x]); jobs.push(['http_headers '+x,'http_headers','https://'+x]); jobs.push(['wellknown '+x,'wellknown',x]); });
   } else if(od.intent==='breach'){
     od.emails.forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); jobs.push(['leakcheck '+x,'leakcheck',x]); });
     od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); });
@@ -3419,7 +3459,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
