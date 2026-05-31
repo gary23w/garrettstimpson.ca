@@ -3,7 +3,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends tor curl radare
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py entrypoint.sh ./
+COPY app.py entrypoint.sh rules.yar ./
 RUN chmod +x entrypoint.sh
 EXPOSE 8080
 CMD ["./entrypoint.sh"]
