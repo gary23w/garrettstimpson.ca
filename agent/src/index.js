@@ -893,6 +893,17 @@ async function runBuiltinTool(env, name, args = {}) {
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
+// Cache-API wrapper for builtin tool results (10-min TTL) — speeds the agentic loop
+// and OSINT fan-out, and reduces upstream API rate-limit pressure.
+async function runBuiltinCached(env, tool, args) {
+  let cache; try { cache = caches.default; } catch (e) { cache = null; }
+  const key = 'https://toolcache.local/' + tool + '?a=' + encodeURIComponent(JSON.stringify(args || {})).slice(0, 800);
+  if (cache) { try { const hit = await cache.match(key); if (hit) return await hit.text(); } catch (e) {} }
+  const v = String(await runBuiltinTool(env, tool, args));
+  if (cache) { try { await cache.put(key, new Response(v, { headers: { 'Cache-Control': 'max-age=600' } })); } catch (e) {} }
+  return v;
+}
+
 async function runBrokerTool(env, payload) {
   const broker = String(env.TOOL_BROKER_URL || '').trim();
   if (!broker) {
@@ -3260,7 +3271,7 @@ export default {
         let result;
         let via = 'builtin';
         if (isBuiltinTool(tool)) {
-          result = await runBuiltinTool(env, tool, args);
+          result = await runBuiltinCached(env, tool, args);
         } else {
           via = 'broker';
           result = await runBrokerTool(env, {
@@ -3455,7 +3466,7 @@ export default {
               try {
                 let result;
                 if (isBuiltinTool(tool)) {
-                  result = await runBuiltinTool(env, tool, { target: arg, url: arg, domain: arg, ip: arg, email: arg, hash: arg, query: arg, vector: arg, input: arg, text: arg, username: arg, host: arg, cveId: arg, address: arg, onion: arg });
+                  result = await runBuiltinCached(env, tool, { target: arg, url: arg, domain: arg, ip: arg, email: arg, hash: arg, query: arg, vector: arg, input: arg, text: arg, username: arg, host: arg, cveId: arg, address: arg, onion: arg });
                 } else {
                   const out = await runBrokerTool(env, { tool, args: { target: arg, url: arg, query: arg }, target: arg, requestedAt: new Date().toISOString() });
                   result = typeof out === 'string' ? out : (out && (out.result || JSON.stringify(out)));
