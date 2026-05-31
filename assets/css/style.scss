@@ -854,3 +854,17 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   transition: color .15s, border-color .15s, box-shadow .15s !important;
 }
 .share-btn:hover { color: var(--green) !important; border-color: var(--border) !important; box-shadow: 0 0 8px var(--green-glow) !important; }
+
+/* ============================================================
+   SITE SEARCH
+   ============================================================ */
+.search-box {
+  width: 100% !important; font-family: var(--font-mono) !important; font-size: 14px !important;
+  background: var(--bg-card) !important; color: var(--green) !important;
+  border: 1px solid var(--border) !important; border-radius: 6px !important;
+  padding: 12px 14px !important; margin: 8px 0 10px 0 !important; outline: none !important;
+}
+.search-box:focus { border-color: var(--blue-accent) !important; box-shadow: 0 0 0 2px rgba(0,212,255,0.2) !important; }
+.search-box::placeholder { color: var(--text-muted) !important; }
+.search-count { font-size: 11px !important; color: var(--text-muted) !important; margin-bottom: 18px !important; }
+.search-results .post-card { margin-bottom: 14px !important; }
