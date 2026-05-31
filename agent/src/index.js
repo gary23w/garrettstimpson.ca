@@ -758,6 +758,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'decode', category: 'malware', passive: true, description: 'Recursive multi-layer decode (base64/hex/url/gzip) + refang + IOCs' },
   { name: 'ioc_extract', category: 'malware', passive: true, description: 'Extract + defang all IOCs (IP/domain/URL/email/hash/CVE/crypto) from pasted text' },
   { name: 'cvss', category: 'intel', passive: true, description: 'CVSS v3.1 base-score calculator from a vector string' },
+  { name: 'unshorten', category: 'recon', passive: true, description: 'Trace a shortened/redirecting URL to its real destination (phishing analysis)' },
 ];
 
 function parseCsvSet(value) {
@@ -874,6 +875,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
   if (name === 'ioc_extract')  return iocExtract(String(args.text || args.input || args.target || ''));
   if (name === 'cvss')         return cvssCalc(String(args.vector || args.target || ''));
+  if (name === 'unshorten')    return unshorten(String(args.url || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1853,6 +1855,27 @@ function cvssCalc(vector) {
   return `cvss ${v}\nbase score: ${base.toFixed(1)} (${sev})\nimpact sub-score: ${impact.toFixed(2)} | exploitability: ${expl.toFixed(2)}`;
 }
 
+// Trace a shortened/redirecting URL to its real destination (phishing analysis).
+async function unshorten(url) {
+  let u; try { u = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch { return 'unshorten: a URL is required.'; }
+  if (isPrivateHost(u.hostname)) return `unshorten: ${u.hostname} is private/internal — blocked.`;
+  const chain = [u.toString()]; let cur = u.toString(), hops = 0;
+  try {
+    while (hops < 10) {
+      const r = await fetch(cur, { method: 'GET', redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, signal: AbortSignal.timeout(9000) });
+      const loc = r.headers.get('location');
+      if (r.status >= 300 && r.status < 400 && loc) {
+        const next = new URL(loc, cur).toString();
+        chain.push(`-> [${r.status}] ${next}`);
+        if (isPrivateHost(new URL(next).hostname)) { chain.push('(redirects to a private host — stopped)'); cur = next; break; }
+        cur = next; hops++;
+      } else { chain.push(`(final: HTTP ${r.status})`); break; }
+    }
+    if (hops >= 10) chain.push('(stopped: too many redirects)');
+  } catch (e) { chain.push(`(error: ${e.message})`); }
+  return `unshorten (${hops} redirect${hops === 1 ? '' : 's'})\n` + chain.join('\n') + `\nfinal destination: ${cur}`;
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -1888,7 +1911,7 @@ function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory, re
   const reasonDirective = (reasoning === 'normal' || reasoning === 'deep')
     ? 'REASONING: Work through the evidence step by step before answering — weigh the LIVE TOOL RESULTS against the CORPUS, surface any contradictions, and state your confidence. Reasoning must stay grounded; never let it turn into invented facts.'
     : '';
-  const capabilities = 'PLATFORM CAPABILITIES: This site runs ~43 passive OSINT/recon tools (CVE/EPSS/KEV intel, RDAP/DNS/cert-transparency, IP geo/ASN/Shodan/GreyNoise/Tor-exit, breach checks, dark-web/onion exposure, image EXIF+GPS, username enumeration across many sites, GitHub harvesting, SPF/DMARC email-security, typosquat & subdomain-takeover detection, cloud-bucket exposure, crypto-address intel, and more). For an OSINT request the user names an email, domain, @handle, IP, CVE, image URL, or crypto address and an autonomous multi-round investigation runs automatically and produces a formal write-up with an exposure-risk score. IMPORTANT: you do NOT execute these tools yourself inside a chat reply — only the LIVE TOOL RESULTS shown above are real. If a full investigation would help, tell the user to name the target and the autonomous OSINT run will trigger. Never claim to have run a tool whose result is not present above.';
+  const capabilities = 'PLATFORM CAPABILITIES: This site runs 51 OSINT, malware & recon/recon tools (CVE/EPSS/KEV intel, RDAP/DNS/cert-transparency, IP geo/ASN/Shodan/GreyNoise/Tor-exit, breach checks, dark-web/onion exposure, image EXIF+GPS, username enumeration across many sites, GitHub harvesting, SPF/DMARC email-security, typosquat & subdomain-takeover detection, cloud-bucket exposure, crypto-address intel, and more). For an OSINT request the user names an email, domain, @handle, IP, CVE, image URL, or crypto address and an autonomous multi-round investigation runs automatically and produces a formal write-up with an exposure-risk score. IMPORTANT: you do NOT execute these tools yourself inside a chat reply — only the LIVE TOOL RESULTS shown above are real. If a full investigation would help, tell the user to name the target and the autonomous OSINT run will trigger. Never claim to have run a tool whose result is not present above.';
   return [persona, capabilities, reasonDirective, memSection, toolSection, corpusText].filter(Boolean).join('\n\n');
 }
 
@@ -2801,7 +2824,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
