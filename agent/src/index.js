@@ -4070,8 +4070,27 @@ export default {
       try {
         if (body.grounded === true) {
           const sysG = 'You are a precise intelligence-report writer. Write the report STRICTLY from the FINDINGS / CONTEXT supplied by the user below - those tool results are the ONLY permitted source. Do NOT use outside knowledge, training data, blog/corpus content, or prior reports. NEVER invent or borrow files, filenames, hashes, malware names/families, loaders, payloads, CVEs, IPs, emails, domains, or attributions that do not appear verbatim in the FINDINGS. If the findings contain no malware/exploit evidence, do NOT mention malware at all. Mark anything not present as UNKNOWN. Where practical, attribute each claim to the tool that produced it.';
-          const rG = await env.AI.run(MODEL, { messages: [{ role: 'system', content: sysG }, { role: 'user', content: objective + '\n\nFINDINGS / CONTEXT (the ONLY source you may use):\n' + context }], stream: false, max_tokens: 2048, temperature: 0.2 });
-          return json({ ok: true, text: (rG.response || '').trim(), meta: { grounded: true } });
+          const baseUserG = objective + '\n\nFINDINGS / CONTEXT (the ONLY source you may use):\n' + context;
+          // Continuation loop: the 8B model caps each call at MAX_TOK tokens, which truncated long
+          // reports mid-sentence. Feed back what it has written and ask it to continue until it
+          // emits <<END>> or returns a clearly-complete (short) chunk; cap parts to bound cost.
+          const MAX_TOK = 2048, MAX_PARTS = 5;
+          let full = '', parts = 0, finished = false;
+          while (parts < MAX_PARTS && !finished) {
+            const msgsG = [{ role: 'system', content: sysG }, { role: 'user', content: baseUserG }];
+            if (full) {
+              msgsG.push({ role: 'assistant', content: full });
+              msgsG.push({ role: 'user', content: 'Continue the report from EXACTLY where you stopped. Do not repeat any text already written, do not restart sections, do not add a preamble. If the report is already complete, reply with only: <<END>>' });
+            }
+            let rG; try { rG = await env.AI.run(MODEL, { messages: msgsG, stream: false, max_tokens: MAX_TOK, temperature: 0.2 }); } catch (e) { break; }
+            let chunk = (rG.response || '').trim();
+            if (/<<END>>/.test(chunk)) { full += chunk.replace(/<<END>>/g, '').trim(); finished = true; break; }
+            if (!chunk) { finished = true; break; }
+            full += (full ? ' ' : '') + chunk;
+            parts++;
+            if (chunk.length < 5500) finished = true;
+          }
+          return json({ ok: true, text: full.trim(), meta: { grounded: true, parts: parts } });
         }
         const { cveIds, ips, domains, wantSearch } = analyseQuery(objective + ' ' + context);
         const toolContext = [];
