@@ -3269,9 +3269,9 @@ function curOpts(){
   return { webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
            topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value, aiTools:(el('s-aitools')?el('s-aitools').checked:true) };
 }
-async function callTask(objective, context){
+async function callTask(objective, context, grounded){
   var res=await fetch('/api/task',{ method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ objective:objective, context:context||'', memory:MEM.retrieve(objective,4), settings:curOpts() }) });
+    body: JSON.stringify({ objective:objective, context:context||'', memory:grounded?'':MEM.retrieve(objective,4), grounded:!!grounded, settings:curOpts() }) });
   if(!res.ok) throw new Error('HTTP '+res.status);
   var d=await res.json(); if(!d.ok) throw new Error(d.error||'task failed');
   return d.text||'';
@@ -3607,7 +3607,7 @@ async function runOsintFlow(q, od, c){
   if(od.intent==='cve') objective='Write a FORMAL VULNERABILITY REPORT for: "'+q+'". Use ONLY the tool evidence; never invent CVSS/EPSS scores, affected versions, or dates. Use this markdown structure:\\n## Summary\\n## Severity (CVSS vector + base score, EPSS exploitation probability)\\n## Exploitation Status (CISA KEV listing, public PoC availability with links, any in-the-wild evidence)\\n## Affected & Fixed Versions\\n## Detection & Mitigation\\n## References\\nIMPORTANT: the NVD evidence often states affected/fixed versions inline (e.g. \"Versions before X, Y, Z are affected\") - extract those verbatim into Affected & Fixed Versions; only write UNKNOWN if no version string appears anywhere in the evidence.';
   if(od.intent==='darkweb') objective='Write a FORMAL DARK-WEB EXPOSURE report for: "'+q+'". Use ONLY the tool evidence; never invent; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary (overall exposure verdict)\\n## Stealer-Log / Infostealer Exposure (HudsonRock: infected hosts, dates, credential counts at risk)\\n## Breaches & Leaked Data (which breaches, exposed data classes, password exposure)\\n## Dark-Web / Onion Mentions\\n## Exposure Timeline (order breach/stealer dates oldest->newest)\\n## Cross-Selector Pivots (other emails/usernames/domains surfaced + what to search next)\\n## Risk & Remediation (passwords to rotate, accounts at risk, monitoring advice)\\nBe precise and defensive.';
   var report;
-  try{ report=await callTask(objective, synth); }
+  try{ report=await callTask(objective, synth, true); }
   catch(e){ report='# OSINT write-up: '+q+'\\n\\n(synthesis failed: '+e.message+')\\n\\n'+evidence; }
   synStatus.textContent='OSINT run complete - '+blocks.length+' tool results across '+(od.intent==='full'?'2 rounds':'1 round')+'.';
   if(stopBtn) stopBtn.style.display='none';
@@ -4023,6 +4023,11 @@ export default {
       const context   = (body.context || '').toString();
       const clientMemory = typeof body.memory === 'string' ? body.memory : '';
       try {
+        if (body.grounded === true) {
+          const sysG = 'You are a precise intelligence-report writer. Write the report STRICTLY from the FINDINGS / CONTEXT supplied by the user below - those tool results are the ONLY permitted source. Do NOT use outside knowledge, training data, blog/corpus content, or prior reports. NEVER invent or borrow files, filenames, hashes, malware names/families, loaders, payloads, CVEs, IPs, emails, domains, or attributions that do not appear verbatim in the FINDINGS. If the findings contain no malware/exploit evidence, do NOT mention malware at all. Mark anything not present as UNKNOWN. Where practical, attribute each claim to the tool that produced it.';
+          const rG = await env.AI.run(MODEL, { messages: [{ role: 'system', content: sysG }, { role: 'user', content: objective + '\n\nFINDINGS / CONTEXT (the ONLY source you may use):\n' + context }], stream: false, max_tokens: 2048, temperature: 0.2 });
+          return json({ ok: true, text: (rG.response || '').trim(), meta: { grounded: true } });
+        }
         const { cveIds, ips, domains, wantSearch } = analyseQuery(objective + ' ' + context);
         const toolContext = [];
         for (const cveId of cveIds.slice(0, 3)) toolContext.push(`=== ${cveId} ===\n${await cveIntel(env, cveId)}`);
