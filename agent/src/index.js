@@ -735,6 +735,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'bucket_finder', category: 'recon', passive: false, description: 'Check S3/GCS/Azure for an exposed storage bucket by name (contacts providers)' },
   { name: 'email_permutations', category: 'people', passive: true, description: 'Generate likely email addresses from a name + domain (MX-checked, not verified)' },
   { name: 'cors_check', category: 'recon', passive: false, description: 'Test a URL for permissive/misconfigured CORS (Origin reflection)' },
+  { name: 'subdomain_takeover', category: 'recon', passive: false, description: 'Detect dangling CNAMEs to deprovisioned services (subdomain takeover risk)' },
 ];
 
 function parseCsvSet(value) {
@@ -844,6 +845,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'bucket_finder') return bucketFinder(String(args.name || args.target || args.domain || ''));
   if (name === 'email_permutations') return emailPermutations(String(args.input || args.name || args.target || ''));
   if (name === 'cors_check')   return corsCheck(String(args.url || args.target || ''));
+  if (name === 'subdomain_takeover') return subdomainTakeover(String(args.domain || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1547,6 +1549,53 @@ async function corsCheck(url) {
     else verdict = 'no CORS headers (same-origin only).';
     return `cors_check ${u.hostname} (HTTP ${r.status})\nAccess-Control-Allow-Origin: ${acao || '(none)'}\nAccess-Control-Allow-Credentials: ${acac || '(none)'}\nverdict: ${verdict}`;
   } catch (e) { return `cors_check ${u.hostname}: failed (${e.message}).`; }
+}
+
+// Subdomain-takeover check — dangling CNAMEs to deprovisioned services (defensive).
+async function subdomainTakeover(domain) {
+  const d = String(domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+  if (!d || d.indexOf('.') < 0) return 'subdomain_takeover: a domain is required.';
+  const SIGS = [
+    { svc: 'GitHub Pages', cname: /github\.io$/, sig: /There isn't a GitHub Pages site here|For root URLs.*must be configured/i },
+    { svc: 'Heroku', cname: /herokudns\.com$|herokuapp\.com$|herokussl\.com$/, sig: /No such app|there's nothing here/i },
+    { svc: 'AWS S3', cname: /s3[.-][^.]*\.amazonaws\.com$|s3\.amazonaws\.com$/, sig: /NoSuchBucket|The specified bucket does not exist/i },
+    { svc: 'Azure', cname: /azurewebsites\.net$|cloudapp\.net$|trafficmanager\.net$|azureedge\.net$/, sig: /404 Web Site not found|The resource you are looking for has been removed/i },
+    { svc: 'Fastly', cname: /fastly\.net$/, sig: /Fastly error: unknown domain/i },
+    { svc: 'Shopify', cname: /myshopify\.com$/, sig: /Sorry, this shop is currently unavailable/i },
+    { svc: 'Surge', cname: /surge\.sh$/, sig: /project not found/i },
+    { svc: 'Pantheon', cname: /pantheonsite\.io$/, sig: /The gods are wise|404 error unknown site/i },
+    { svc: 'Tumblr', cname: /domains\.tumblr\.com$/, sig: /Whatever you were looking for doesn't currently exist/i },
+    { svc: 'Readthedocs', cname: /readthedocs\.io$/, sig: /unknown to Read the Docs/i },
+    { svc: 'Wordpress', cname: /wordpress\.com$/, sig: /Do you want to register/i },
+    { svc: 'Ghost', cname: /ghost\.io$/, sig: /The thing you were looking for is no longer here/i },
+  ];
+  const candidates = ['www', 'blog', 'dev', 'staging', 'test', 'app', 'mail', 'shop', 'docs', 'status', 'cdn', 'assets', 'api', 'support', 'help', 'portal', 'beta', 'm', 'cname', 'go'].map(s => s + '.' + d);
+  const cnameLookup = async (host) => {
+    try {
+      const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=CNAME`,
+        { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(6000) });
+      const j = await r.json();
+      return (j.Answer || []).filter(a => a.type === 5).map(a => String(a.data).replace(/\.$/, ''));
+    } catch { return []; }
+  };
+  const findings = [];
+  await Promise.all(candidates.map(async host => {
+    const cns = await cnameLookup(host);
+    for (const c of cns) {
+      const m = SIGS.find(x => x.cname.test(c));
+      if (!m) continue;
+      let danger = false, note = `points to ${m.svc} (${c})`;
+      try {
+        const r = await fetch('https://' + host, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(8000) });
+        const t = await r.text();
+        if (m.sig.test(t)) { danger = true; note = `${m.svc} takeover signature present (HTTP ${r.status}) — claimable`; }
+        else note = `${m.svc} (HTTP ${r.status}, no takeover signature)`;
+      } catch (e) { danger = true; note = `${m.svc} CNAME but host unreachable (${e.message}) — likely dangling/claimable`; }
+      findings.push(`${danger ? 'VULNERABLE' : 'note      '} ${host} -> ${c} [${note}]`);
+    }
+  }));
+  if (!findings.length) return `subdomain_takeover ${d}: no dangling/known-service CNAMEs found among ${candidates.length} common subdomains. (Run crtsh_subs for a wider list.)`;
+  return `subdomain_takeover ${d}:\n` + findings.join('\n');
 }
 
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
@@ -2326,7 +2375,7 @@ async function runOsintFlow(q, od, c){
   window.__osintAbort=false; var stopBtn=el('btn-stop'); if(stopBtn){ stopBtn.style.display=''; stopBtn.textContent='stop'; }
   var jobs=[];
   function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise','tor_exit'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
-  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check')?('https://'+x):x]); }); }
+  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check','subdomain_takeover'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check')?('https://'+x):x]); }); }
   if(od.intent==='image'){
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
     if(!(od.images||[]).length) addMsg('system','OSINT(image): no image URL found - paste a direct image link (jpg/png/...).');
@@ -2473,18 +2522,23 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
     el('t-mode').textContent=(d.safeMode?'SAFE MODE on':'safe mode OFF')+(d.requireConfirm?' · confirm unlocks all tools':'')+(d.brokerConfigured?' · broker wired':' · no broker');
     el('t-mode').className='t-badge'+(d.safeMode?' safe':'');
     var cat=el('t-catalog'); cat.innerHTML=''; var sel=el('t-tool'); sel.innerHTML='';
-    (d.tools||[]).forEach(function(t){
+    var tools=(d.tools||[]).slice().sort(function(a,b){ return (a.category+a.name).localeCompare(b.category+b.name); });
+    var hdr=document.createElement('div'); hdr.className='tool-item'; hdr.style.color='var(--blue)'; hdr.style.marginBottom='4px';
+    hdr.textContent=tools.length+' tools available (confirm box unlocks any of them)'; cat.appendChild(hdr);
+    var curCat='';
+    tools.forEach(function(t){
+      if(t.category!==curCat){ curCat=t.category; var ch=document.createElement('div'); ch.className='tool-item'; ch.style.color='var(--muted)'; ch.style.textTransform='uppercase'; ch.style.letterSpacing='.08em'; ch.style.marginTop='6px'; ch.textContent='— '+curCat+' —'; cat.appendChild(ch); }
       var row=document.createElement('div'); row.className='tool-item';
-      row.innerHTML=t.name+' <span class="tcat">('+t.category+')</span><span class="tool-pill '+(t.passive?'passive':'active')+'">'+(t.passive?'passive':'active')+'</span> '+(t.description||'');
+      row.innerHTML='<strong style="color:#bbb">'+t.name+'</strong> <span class="tool-pill '+(t.passive?'passive':'active')+'">'+(t.passive?'passive':'active')+'</span> '+(t.description||'');
       cat.appendChild(row);
-      var o=document.createElement('option'); o.value=t.name; o.textContent=t.name; sel.appendChild(o);
+      var o=document.createElement('option'); o.value=t.name; o.textContent=t.name+'  ('+t.category+')'; sel.appendChild(o);
     });
     if(d.targetAllowlist && d.targetAllowlist.length){ var sc=document.createElement('div'); sc.className='tool-item'; sc.style.marginTop='6px'; sc.textContent='in-scope targets: '+d.targetAllowlist.join(', '); cat.appendChild(sc); }
   }catch(e){ el('t-catalog').textContent='catalog unavailable: '+e.message; }
