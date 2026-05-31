@@ -816,7 +816,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'greynoise')    return greynoise(String(args.ip || args.target || ''));
   if (name === 'wellknown')    return wellKnown(String(args.target || args.domain || args.host || ''));
   if (name === 'username_enum') return usernameEnum(String(args.username || args.user || args.target || ''));
-  if (name === 'github_user')  return githubUser(String(args.username || args.user || args.target || ''));
+  if (name === 'github_user')  return githubUser(env, String(args.username || args.user || args.target || ''));
   if (name === 'gravatar')     return gravatarLookup(String(args.email || args.target || ''));
   if (name === 'email_recon')  return emailRecon(String(args.email || args.target || ''));
   if (name === 'breach_check') return breachCheck(env, String(args.email || args.target || ''));
@@ -966,27 +966,54 @@ async function usernameEnum(username) {
   ];
   const out = await Promise.all(sites.map(async s => {
     try {
-      const r = await fetch(s.api, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(7000) });
+      const r = await fetch(s.api, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) });
       let found = false;
       try { found = await s.test(r); } catch { found = false; }
-      return `${found ? 'FOUND' : 'none '}  ${s.name.padEnd(11)} ${found ? s.profile : '(no account / blocked)'}`;
-    } catch (e) { return `err    ${s.name.padEnd(11)} ${e.message}`; }
+      const tag = found ? 'FOUND' : (r.status === 403 || r.status === 429 ? 'BLOCK' : (r.status >= 500 ? 'err  ' : 'none '));
+      return `${tag}  ${s.name.padEnd(11)} ${found ? s.profile : '(' + (r.status === 403 || r.status === 429 ? 'datacenter-blocked HTTP ' + r.status : 'no account, HTTP ' + r.status) + ')'}`;
+    } catch (e) { return `err    ${s.name.padEnd(11)} (${e.message})`; }
   }));
   return `username_enum "${u}" (passive presence check)\n${out.join('\n')}`;
 }
 
 // GitHub public user profile (keyless, rate-limited).
-async function githubUser(username) {
+async function githubUser(env, username) {
   const u = String(username || '').trim().replace(/^@/, '');
   if (!u) return 'github_user: a username is required.';
+  const token = String((env && env.GITHUB_TOKEN) || '');
+  const headers = { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/vnd.github+json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
-    const r = await fetch(`https://api.github.com/users/${u}`,
-      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/vnd.github+json' }, signal: AbortSignal.timeout(8000) });
+    const r = await fetch(`https://api.github.com/users/${u}`, { headers, signal: AbortSignal.timeout(8000) });
     if (r.status === 404) return `GitHub user ${u}: not found. UNKNOWN — do not invent.`;
-    if (r.status === 403) return `GitHub user ${u}: rate-limited (anonymous). Retry later.`;
+    if (r.status === 403) return `GitHub user ${u}: rate-limited (403). Set GITHUB_TOKEN to raise limits.`;
     if (!r.ok) return `GitHub user ${u}: lookup failed (HTTP ${r.status}).`;
     const d = await r.json();
-    return `GitHub @${d.login}\nname: ${d.name || '?'} | company: ${d.company || '?'} | location: ${d.location || '?'}\nblog: ${d.blog || '?'} | email: ${d.email || '?'} | twitter: ${d.twitter_username || '?'}\npublic repos: ${d.public_repos} | followers: ${d.followers} | created: ${d.created_at}\nbio: ${d.bio || '(none)'}`;
+    let extra = '';
+    // Pivot fuel 1: commit author emails leaked via public push events.
+    try {
+      const ev = await fetch(`https://api.github.com/users/${u}/events/public?per_page=50`, { headers, signal: AbortSignal.timeout(8000) });
+      if (ev.ok) {
+        const evs = await ev.json();
+        const emails = new Set();
+        (evs || []).forEach(e => { if (e.payload && Array.isArray(e.payload.commits)) e.payload.commits.forEach(co => { const em = co.author && co.author.email; if (em && !/noreply|users\.noreply\.github/i.test(em)) emails.add(em); }); });
+        if (emails.size) extra += `\ncommit emails (from public events): ${[...emails].slice(0, 6).join(', ')}`;
+      }
+    } catch {}
+    // Pivot fuel 2: recent repos + their homepage domains.
+    try {
+      const rp = await fetch(`https://api.github.com/users/${u}/repos?per_page=12&sort=updated`, { headers, signal: AbortSignal.timeout(8000) });
+      if (rp.ok) {
+        const repos = await rp.json();
+        const names = (repos || []).map(x => x.name).filter(Boolean);
+        const homes = [...new Set((repos || []).map(x => x.homepage).filter(h => h && /^https?:\/\//i.test(h)))];
+        const langs = [...new Set((repos || []).map(x => x.language).filter(Boolean))];
+        if (names.length) extra += `\ntop repos: ${names.slice(0, 10).join(', ')}`;
+        if (langs.length) extra += `\nlanguages: ${langs.slice(0, 8).join(', ')}`;
+        if (homes.length) extra += `\nrepo homepages: ${homes.slice(0, 5).join(', ')}`;
+      }
+    } catch {}
+    return `GitHub @${d.login}\nname: ${d.name || '?'} | company: ${d.company || '?'} | location: ${d.location || '?'}\nblog: ${d.blog || '?'} | email: ${d.email || '?'} | twitter: ${d.twitter_username || '?'}\npublic repos: ${d.public_repos} | followers: ${d.followers} | created: ${d.created_at}\nbio: ${d.bio || '(none)'}${extra}`;
   } catch (e) { return `GitHub user ${u}: lookup failed (${e.message}).`; }
 }
 
@@ -1980,6 +2007,38 @@ async function runOsintTool(tool, arg){
     return typeof d.result==='string'?d.result:JSON.stringify(d.result,null,2);
   }catch(e){ return '('+tool+' error: '+e.message+')'; }
 }
+async function runJobs(jobs, blocks, statusEl, label){
+  var done=0, queue=jobs.slice();
+  async function worker(){
+    while(queue.length){
+      var j=queue.shift();
+      var out=await runOsintTool(j[1], j[2]);
+      blocks.push('=== '+j[0]+' ===\\n'+out);
+      done++; statusEl.textContent='OSINT: '+label+' - '+done+'/'+jobs.length+' tools...';
+      dbg('osint '+j[1], (j[2]||'')+' -> '+out.slice(0,140));
+    }
+  }
+  await Promise.all([worker(),worker(),worker(),worker()]);
+}
+function harvestPivots(text, known){
+  function uniq(a){ return a.filter(function(x,i){ return a.indexOf(x)===i; }); }
+  var kEmails=(known.emails||[]).map(function(x){ return x.toLowerCase(); });
+  var kDomains=(known.domains||[]).map(function(x){ return x.toLowerCase(); });
+  var emails=uniq((text.match(/[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}/g)||[]).map(function(x){ return x.toLowerCase(); }))
+    .filter(function(e){ return kEmails.indexOf(e)<0 && !/noreply|@example\\.com/.test(e); });
+  var doms=[];
+  emails.forEach(function(e){ doms.push(e.split('@')[1]); });
+  (text.match(/(?:blog|repo homepages|homepage):\\s*([^\\n|]+)/ig)||[]).forEach(function(seg){
+    (seg.match(/https?:\\/\\/[^\\s,|]+|\\b[a-z0-9.\\-]+\\.[a-z]{2,}\\b/ig)||[]).forEach(function(d){
+      try{ d=new URL(/^https?:/i.test(d)?d:'https://'+d).hostname; }catch(e){}
+      doms.push(String(d).toLowerCase());
+    });
+  });
+  var PLAT=/(github\\.com|githubusercontent|gitlab\\.com|pypi\\.org|npmjs|ycombinator|keybase\\.io|reddit\\.com|dev\\.to|hub\\.docker|docker\\.com|codeberg\\.org|mastodon|lobste\\.rs|gravatar|twitter\\.com|x\\.com|linkedin|facebook|google\\.|archive\\.org|crt\\.sh|abuse\\.ch|shodan|greynoise|ahmia|wikipedia|duckduckgo|bing\\.com|yandex|tineye)/i;
+  doms=uniq(doms.filter(function(d){ return d && /\\./.test(d) && !PLAT.test(d) && kDomains.indexOf(d)<0; }));
+  var names=uniq((text.match(/\\bname:\\s*([A-Z][A-Za-z'\\-]+(?:\\s+[A-Z][A-Za-z'\\-]+){1,2})/g)||[]).map(function(x){ return x.replace(/name:\\s*/i,'').trim(); }));
+  return { emails:emails, domains:doms.slice(0,4), names:names.slice(0,2) };
+}
 async function runOsintFlow(q, od, c){
   var FENCE=String.fromCharCode(96,96,96);
   addMsg('system','> OSINT run ('+(od.intent||'full')+') - '+osintSummary(od));
@@ -2001,43 +2060,53 @@ async function runOsintFlow(q, od, c){
     od.domains.forEach(function(x){ jobs.push(['tech_fingerprint '+x,'tech_fingerprint','https://'+x]); jobs.push(['http_headers '+x,'http_headers','https://'+x]); jobs.push(['wellknown '+x,'wellknown',x]); });
   } else if(od.intent==='breach'){
     od.emails.forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); });
-    od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); });
+    od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); });
   } else {
     od.cves.forEach(function(x){ jobs.push(['CVE detail '+x,'circl_cve',x]); jobs.push(['KEV '+x,'kev_lookup',x]); jobs.push(['EPSS '+x,'epss_lookup',x]); });
     od.ips.forEach(addIpFull);
     od.domains.forEach(addDomainFull);
-    od.emails.forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); });
+    od.emails.forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); jobs.push(['gravatar '+x,'gravatar',x]); });
     od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); });
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
+    var sterms=[];
+    (od.handles||[]).forEach(function(h){ sterms.push('"'+h+'"'); });
+    (od.emails||[]).forEach(function(e){ sterms.push('"'+e+'"'); });
+    (od.domains||[]).forEach(function(d){ sterms.push(d); });
+    (od.ips||[]).forEach(function(i){ sterms.push('"'+i+'"'); });
+    (od.cves||[]).forEach(function(cv){ sterms.push(cv+' exploit advisory'); });
+    if(!sterms.length) sterms.push(q);
+    sterms.slice(0,3).forEach(function(tm){ jobs.push(['web_search '+tm,'web_search',tm]); });
     var oterm=(od.emails[0]||od.domains[0]||od.handles[0]||q);
-    jobs.push(['onion_search','onion_search',oterm]);
-    jobs.push(['web_search','web_search',q]);
+    jobs.push(['onion_search '+oterm,'onion_search',oterm]);
   }
   if(!jobs.length){ addMsg('system','OSINT: no actionable entity detected.'); return; }
-  jobs=jobs.slice(0,30);
-  var blocks=[], done=0;
-  var statusEl=addMsg('system','OSINT: running 0/'+jobs.length+' tools...');
-  var queue=jobs.slice();
-  async function worker(){
-    while(queue.length){
-      var j=queue.shift();
-      var out=await runOsintTool(j[1], j[2]);
-      blocks.push('=== '+j[0]+' ===\\n'+out);
-      done++; statusEl.textContent='OSINT: running '+done+'/'+jobs.length+' tools...';
-      dbg('osint '+j[1], (j[2]||'')+' -> '+out.slice(0,140));
-    }
+  var blocks=[];
+  var st1=addMsg('system','OSINT: round 1 - 0/'+Math.min(jobs.length,30)+' tools...');
+  await runJobs(jobs.slice(0,30), blocks, st1, 'round 1');
+  st1.textContent='OSINT: round 1 complete ('+blocks.length+' tools).';
+  if(od.intent==='full'){
+    var pv=harvestPivots(blocks.join('\\n'), od);
+    var pjobs=[];
+    pv.emails.forEach(function(e){ pjobs.push(['breach_check '+e,'breach_check',e]); pjobs.push(['gravatar '+e,'gravatar',e]); pjobs.push(['email_recon '+e,'email_recon',e]); pjobs.push(['onion_search '+e,'onion_search',e]); });
+    pv.domains.forEach(function(d){ pjobs.push(['tech_fingerprint '+d,'tech_fingerprint','https://'+d]); pjobs.push(['rdap_domain '+d,'rdap_domain',d]); pjobs.push(['dns_lookup '+d,'dns_lookup',d]); pjobs.push(['crtsh_subs '+d,'crtsh_subs',d]); });
+    pv.names.forEach(function(nm){ pjobs.push(['web_search '+nm,'web_search','"'+nm+'"']); });
+    if(pjobs.length){
+      addMsg('system','> pivot: discovered '+[].concat(pv.emails,pv.domains,pv.names).slice(0,8).join(', ')+' - digging deeper ('+Math.min(pjobs.length,18)+' tools)');
+      var st2=addMsg('system','OSINT: round 2 (pivots) - 0/'+Math.min(pjobs.length,18)+' tools...');
+      await runJobs(pjobs.slice(0,18), blocks, st2, 'round 2 (pivots)');
+      st2.textContent='OSINT: round 2 complete.';
+    } else { addMsg('system','> no new pivots surfaced from round 1.'); }
   }
-  await Promise.all([worker(),worker(),worker(),worker()]);
   var evidence=blocks.join('\\n\\n');
   var ev=addMsg('agent',''); ev.className='msg agent jtaskout';
-  ev.innerHTML='<div class="jt-h">collected evidence - '+jobs.length+' tools</div>'+renderMarkdown(FENCE+'\\n'+evidence.slice(0,9000)+'\\n'+FENCE);
-  statusEl.textContent='OSINT: '+jobs.length+' tools complete - synthesizing write-up...';
-  var synth=blocks.map(function(b){ return b.slice(0,700); }).join('\\n\\n').slice(0,9000);
-  var objective='Write a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence provided as context - never invent a fact that is not present in it; mark anything missing as UNKNOWN. Include any dark-web/onion and image/EXIF findings present in the evidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences)\\n## Entities and Identifiers\\n## Findings (one subsection per entity/source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaks - or state none found)\\n## Pivots and Links\\n## Gaps and Confidence (what is UNKNOWN and reliability notes)\\nBe precise and defensive in framing.';
+  ev.innerHTML='<div class="jt-h">collected evidence - '+blocks.length+' tool results</div>'+renderMarkdown(FENCE+'\\n'+evidence.slice(0,12000)+'\\n'+FENCE);
+  var synStatus=addMsg('system','OSINT: synthesizing write-up from '+blocks.length+' results...');
+  var synth=blocks.map(function(b){ return b.slice(0,900); }).join('\\n\\n').slice(0,13500);
+  var objective='You are writing a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence in the context - never invent a fact not present in it; mark anything missing as UNKNOWN. Do NOT merely restate tool output: ANALYZE it - infer the subject likely identity, connect accounts/emails/domains/repos that plausibly belong to the same person, and weigh your confidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences with your assessment)\\n## Entities and Identifiers\\n## Findings (per source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaked/commit emails - or state none found)\\n## Pivots and Links (how discovered emails/domains/repos connect and what they reveal)\\n## Gaps and Confidence (what is UNKNOWN, reliability, plus 3-5 concrete recommended next OSINT steps)\\nBe precise, defensive in framing, and analytical.';
   var report;
   try{ report=await callTask(objective, synth); }
   catch(e){ report='# OSINT write-up: '+q+'\\n\\n(synthesis failed: '+e.message+')\\n\\n'+evidence; }
-  statusEl.textContent='OSINT run complete - '+jobs.length+' tools.';
+  synStatus.textContent='OSINT run complete - '+blocks.length+' tool results across '+(od.intent==='full'?'2 rounds':'1 round')+'.';
   var d2=addMsg('agent',''); d2.innerHTML=renderMarkdown(report);
   c.msgs.push({role:'assistant',content:report});
   if(c.msgs.length===1||(c.title||'').indexOf('[osint]')!==0) c.title='[osint] '+q.slice(0,30);
@@ -2368,10 +2437,10 @@ export default {
           const notes = await reasonPass(env, objective, toolContext, chunks, temp);
           if (notes) sysPrompt += `\n\nPRELIMINARY ANALYSIS (your private notes — verify, do not treat as fact):\n${notes}`;
         }
-        const userContent = context ? `${objective}\n\nContext from earlier steps:\n${context.slice(0, 9000)}` : objective;
+        const userContent = context ? `${objective}\n\nContext from earlier steps:\n${context.slice(0, 14000)}` : objective;
         const r = await env.AI.run(MODEL, {
           messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userContent }],
-          stream: false, max_tokens: 1800, temperature: temp,
+          stream: false, max_tokens: 2048, temperature: temp,
         });
         return json({ ok: true, text: (r.response || '').trim(), meta: { cveIds, ips, usedVectorize, chunkCount: chunks.length } });
       } catch (e) { return json({ ok: false, error: e.message }, 500); }
