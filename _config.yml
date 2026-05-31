@@ -30,8 +30,21 @@ plugins:
 
 permalink: /posts/:year/:month/:day/:title/
 
+header_pages:
+  - about.md
+  - policy.md
+  - tags.md
+  - search.md
+
 exclude:
-  - README.
+  - README.md
+  - README
+  - agent/
+  - broker/
+  - build_llms.py
+  - Gemfile
+  - Gemfile.lock
+  - "*.py"
 
 # Giscus comments (GitHub Discussions). Enable Discussions on the repo, install the
 # giscus app (https://giscus.app), then paste repo_id + category_id below.
