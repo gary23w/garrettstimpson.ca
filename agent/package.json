@@ -65,6 +65,34 @@
         "name": "DISCLOSURE_FROM",
         "text": "",
         "description": "Your name/handle used to sign responsible-disclosure drafts (disclosure_draft). Drafts only — nothing is sent."
+      },
+      {
+        "type": "plain_text",
+        "name": "DISCLOSURE_SEND_ENABLED",
+        "text": "false",
+        "description": "Set to true to allow human-confirmed disclosure sending (off by default). Requires a verified provider below."
+      },
+      {
+        "type": "plain_text",
+        "name": "DISCLOSURE_FROM_EMAIL",
+        "text": "",
+        "description": "Verified sender email (e.g. security@yourdomain) for disclosure sends — must be verified with your provider. Never anonymous."
+      },
+      {
+        "type": "secret_text",
+        "name": "RESEND_API_KEY",
+        "description": "Resend API key for sending disclosure emails (simplest). Requires a verified domain."
+      },
+      {
+        "type": "secret_text",
+        "name": "MAILGUN_API_KEY",
+        "description": "Alternative to Resend: Mailgun API key (with MAILGUN_DOMAIN)."
+      },
+      {
+        "type": "plain_text",
+        "name": "MAILGUN_DOMAIN",
+        "text": "",
+        "description": "Mailgun sending domain (used with MAILGUN_API_KEY)."
       }
     ]
   }
