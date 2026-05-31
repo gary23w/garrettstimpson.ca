@@ -728,6 +728,9 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'email_security', category: 'recon', passive: true, description: 'SPF / DMARC / MX / DNSSEC posture for a domain (spoofability check)' },
   { name: 'typosquat', category: 'recon', passive: true, description: 'Generate lookalike domains and flag registered ones (phishing / brand abuse)' },
   { name: 'crypto_addr', category: 'osint', passive: true, description: 'BTC/ETH address balance + transaction activity (threat-intel)' },
+  { name: 'dns_records', category: 'osint', passive: true, description: 'Full DNS record dump (A/AAAA/MX/NS/TXT/CAA/SOA) via DoH' },
+  { name: 'tor_exit', category: 'osint', passive: true, description: 'Is an IP a known Tor relay / exit node (onionoo)' },
+  { name: 'pwned_password', category: 'people', passive: true, description: 'Check a password against Have I Been Pwned (k-anonymity; only a hash prefix is sent)' },
 ];
 
 function parseCsvSet(value) {
@@ -830,6 +833,9 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'email_security') return emailSecurity(String(args.domain || args.target || ''));
   if (name === 'typosquat')    return typosquat(String(args.domain || args.target || ''));
   if (name === 'crypto_addr')  return cryptoAddr(String(args.address || args.addr || args.target || ''));
+  if (name === 'dns_records')  return dnsRecords(String(args.domain || args.target || ''));
+  if (name === 'tor_exit')     return torExit(String(args.ip || args.target || ''));
+  if (name === 'pwned_password') return pwnedPassword(String(args.password || args.pw || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1386,6 +1392,63 @@ async function cryptoAddr(addr) {
   return `crypto_addr: "${a}" is not a recognized BTC or ETH address.`;
 }
 
+async function sha1hex(s) {
+  const b = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+// Full DNS record dump (A/AAAA/MX/NS/TXT/CAA/SOA) via DoH.
+async function dnsRecords(domain) {
+  const d = String(domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+  if (!d || d.indexOf('.') < 0) return 'dns_records: a domain is required.';
+  const doh = async (type) => {
+    try {
+      const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(d)}&type=${type}`,
+        { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(7000) });
+      const j = await r.json(); return (j.Answer || []).map(a => a.data);
+    } catch { return []; }
+  };
+  const types = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'CAA', 'SOA'];
+  const res = await Promise.all(types.map(doh));
+  const fmt = (label, arr) => `${label}: ${arr.length ? arr.slice(0, 8).join(' | ') : 'none'}`;
+  return `dns_records ${d}\n` + types.map((t, i) => fmt(t, t === 'TXT' ? res[i].map(x => String(x).slice(0, 90)) : res[i])).join('\n');
+}
+
+// Is an IP a known Tor relay / exit node (onionoo, keyless).
+async function torExit(ip) {
+  const v = String(ip || '').trim();
+  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(v)) return 'tor_exit: a public IPv4 is required.';
+  try {
+    const r = await fetch(`https://onionoo.torproject.org/details?search=${v}&type=relay`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return `tor_exit ${v}: lookup failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    const relays = d.relays || [];
+    if (!relays.length) return `tor_exit ${v}: not a known Tor relay.`;
+    const x = relays[0]; const flags = x.flags || [];
+    return `tor_exit ${v}: KNOWN TOR RELAY${flags.indexOf('Exit') >= 0 ? ' (EXIT NODE)' : ''}\nnickname: ${x.nickname || '?'} | flags: ${flags.join(', ')}\nfirst seen: ${x.first_seen || '?'} | AS: ${x.as || '?'} ${x.as_name || ''}`;
+  } catch (e) { return `tor_exit ${v}: lookup failed (${e.message}).`; }
+}
+
+// Check a password against Have I Been Pwned (k-anonymity: only a 5-char hash prefix leaves).
+async function pwnedPassword(pw) {
+  const p = String(pw || '');
+  if (!p) return 'pwned_password: provide a password to check. Only the first 5 chars of its SHA-1 hash are sent (k-anonymity).';
+  try {
+    const h = await sha1hex(p);
+    const prefix = h.slice(0, 5), suffix = h.slice(5);
+    const r = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Add-Padding': 'true' }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return `pwned_password: lookup failed (HTTP ${r.status}).`;
+    const text = await r.text();
+    const line = text.split('\n').map(l => l.trim()).find(l => l.indexOf(suffix) === 0);
+    const count = line ? parseInt(line.split(':')[1], 10) : 0;
+    return count > 0
+      ? `pwned_password: COMPROMISED — this exact password appears in ${count.toLocaleString()} known breaches. Do NOT use it anywhere.`
+      : `pwned_password: not found in the Have I Been Pwned breach corpus (absence is not proof of strength).`;
+  } catch (e) { return `pwned_password: lookup failed (${e.message}).`; }
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -1631,6 +1694,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
         <button class="btn" id="btn-dbg" title="Toggle debug pane">debug</button>
         <button class="btn" id="btn-job" title="Agent mode — jobs &amp; swarms">agent</button>
         <button class="btn" id="btn-tools" title="CTF tools &amp; policy">tools</button>
+        <button class="btn" id="btn-stop" title="Stop the running OSINT run" style="display:none;color:var(--err);border-color:var(--err);">stop</button>
       </div>
     </div>
   </header>
@@ -2110,6 +2174,7 @@ async function runJobs(jobs, blocks, statusEl, label){
   var done=0, queue=jobs.slice();
   async function worker(){
     while(queue.length){
+      if(window.__osintAbort) return;
       var j=queue.shift();
       var out=await runOsintTool(j[1], j[2]);
       blocks.push('=== '+j[0]+' ===\\n'+out);
@@ -2141,9 +2206,10 @@ function harvestPivots(text, known){
 async function runOsintFlow(q, od, c){
   var FENCE=String.fromCharCode(96,96,96);
   addMsg('system','> OSINT run ('+(od.intent||'full')+') - '+osintSummary(od));
+  window.__osintAbort=false; var stopBtn=el('btn-stop'); if(stopBtn){ stopBtn.style.display=''; stopBtn.textContent='stop'; }
   var jobs=[];
-  function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
-  function addDomainFull(x){ ['rdap_domain','dns_lookup','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint')?('https://'+x):x]); }); }
+  function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise','tor_exit'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
+  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint')?('https://'+x):x]); }); }
   if(od.intent==='image'){
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
     if(!(od.images||[]).length) addMsg('system','OSINT(image): no image URL found - paste a direct image link (jpg/png/...).');
@@ -2184,7 +2250,7 @@ async function runOsintFlow(q, od, c){
   var st1=addMsg('system','OSINT: round 1 - 0/'+Math.min(jobs.length,30)+' tools...');
   await runJobs(jobs.slice(0,30), blocks, st1, 'round 1');
   st1.textContent='OSINT: round 1 complete ('+blocks.length+' tools).';
-  if(od.intent==='full'){
+  if(od.intent==='full' && !window.__osintAbort){
     var pv=harvestPivots(blocks.join('\\n'), od);
     var pjobs=[];
     pv.emails.forEach(function(e){ pjobs.push(['breach_check '+e,'breach_check',e]); pjobs.push(['gravatar '+e,'gravatar',e]); pjobs.push(['email_recon '+e,'email_recon',e]); pjobs.push(['onion_search '+e,'onion_search',e]); });
@@ -2200,6 +2266,7 @@ async function runOsintFlow(q, od, c){
   var evidence=blocks.join('\\n\\n');
   var ev=addMsg('agent',''); ev.className='msg agent jtaskout';
   ev.innerHTML='<div class="jt-h">collected evidence - '+blocks.length+' tool results</div>'+renderMarkdown(FENCE+'\\n'+evidence.slice(0,12000)+'\\n'+FENCE);
+  if(window.__osintAbort){ if(stopBtn) stopBtn.style.display='none'; addMsg('system','OSINT run stopped - '+blocks.length+' partial result(s) shown above; synthesis skipped.'); return; }
   var synStatus=addMsg('system','OSINT: synthesizing write-up from '+blocks.length+' results...');
   var synth=blocks.map(function(b){ return b.slice(0,900); }).join('\\n\\n').slice(0,13500);
   var objective='You are writing a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence in the context - never invent a fact not present in it; mark anything missing as UNKNOWN. Do NOT merely restate tool output: ANALYZE it - infer the subject likely identity, connect accounts/emails/domains/repos that plausibly belong to the same person, and weigh your confidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences with your assessment)\\n## Entities and Identifiers\\n## Findings (per source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaked/commit emails - or state none found)\\n## Pivots and Links (how discovered emails/domains/repos connect and what they reveal)\\n## Gaps and Confidence (what is UNKNOWN, reliability, plus 3-5 concrete recommended next OSINT steps)\\nBe precise, defensive in framing, and analytical.';
@@ -2207,6 +2274,7 @@ async function runOsintFlow(q, od, c){
   try{ report=await callTask(objective, synth); }
   catch(e){ report='# OSINT write-up: '+q+'\\n\\n(synthesis failed: '+e.message+')\\n\\n'+evidence; }
   synStatus.textContent='OSINT run complete - '+blocks.length+' tool results across '+(od.intent==='full'?'2 rounds':'1 round')+'.';
+  if(stopBtn) stopBtn.style.display='none';
   var d2=addMsg('agent',''); d2.innerHTML=renderMarkdown(report);
   c.msgs.push({role:'assistant',content:report});
   if(c.msgs.length===1||(c.title||'').indexOf('[osint]')!==0) c.title='[osint] '+q.slice(0,30);
@@ -2247,6 +2315,7 @@ function startScheduler(){
 // ============ Agent-panel wiring ============
 el('btn-job').onclick=function(){ var on=el('jobs').classList.toggle('show'); el('btn-job').classList.toggle('on',on); };
 el('btn-tools').onclick=function(){ var on=el('tools').classList.toggle('show'); el('btn-tools').classList.toggle('on',on); if(on) loadCatalog(); };
+el('btn-stop').onclick=function(){ window.__osintAbort=true; el('btn-stop').textContent='stopping...'; };
 el('btn-export').onclick=function(){
   var data={ app:'Agent Garrett', exportedAt:new Date().toISOString(), schema:1,
     chats:(function(){ try{ return JSON.parse(localStorage.getItem('gsa_chats')||'[]'); }catch(e){ return chats; } })(),
@@ -2277,7 +2346,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
