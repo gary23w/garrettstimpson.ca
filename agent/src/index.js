@@ -755,6 +755,8 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'onion_fetch', category: 'darkweb', passive: true, description: 'Fetch .onion content over clearnet via free tor2web gateways (no Tor needed)' },
   { name: 'stealer_check', category: 'darkweb', passive: true, description: 'Infostealer / stealer-log exposure for email/username/domain (HudsonRock, keyless)' },
   { name: 'leakcheck', category: 'darkweb', passive: true, description: 'Public breach-index record count + exposed data types (LeakCheck, keyless)' },
+  { name: 'paste_search', category: 'darkweb', passive: true, description: 'Search public paste dumps (psbdmp) for an email/domain/keyword' },
+  { name: 'dork', category: 'search', passive: true, description: 'Generate + run Google dorks for a domain/email/name (recon)' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
   { name: 'decode', category: 'malware', passive: true, description: 'Recursive multi-layer decode (base64/hex/url/gzip) + refang + IOCs' },
@@ -874,6 +876,8 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'onion_fetch')  return onionFetch(env, String(args.url || args.onion || args.target || ''));
   if (name === 'stealer_check') return stealerCheck(String(args.target || args.email || args.username || args.domain || ''));
   if (name === 'leakcheck')    return leakCheck(String(args.target || args.email || args.username || ''));
+  if (name === 'paste_search') return pasteSearch(String(args.target || args.term || args.query || ''));
+  if (name === 'dork')         return dorkTool(env, String(args.target || args.query || ''));
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
   if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
@@ -1935,6 +1939,45 @@ async function leakCheck(target) {
   } catch (e) { return `leakcheck ${t}: lookup failed (${e.message}).`; }
 }
 
+// Public paste-dump search — psbdmp (best-effort, keyless).
+async function pasteSearch(term) {
+  const t = String(term || '').trim();
+  if (!t) return 'paste_search: a term (email / domain / keyword) is required.';
+  try {
+    const r = await fetch('https://psbdmp.ws/api/v3/search/' + encodeURIComponent(t),
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return `paste_search ${t}: lookup failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    const data = d.data || [];
+    if (!data.length) return `paste_search ${t}: no public paste dumps found referencing the term.`;
+    const rows = data.slice(0, 12).map(p => 'https://psbdmp.ws/' + (p.id || p) + (p.time ? '  (' + p.time + ')' : ''));
+    return `paste_search ${t}: ${data.length} paste(s) reference the term\n${rows.join('\n')}`;
+  } catch (e) { return `paste_search ${t}: lookup failed (${e.message}).`; }
+}
+
+// Google-dork generator + runner for a domain / email / name (recon).
+async function dorkTool(env, target) {
+  const t = String(target || '').trim();
+  if (!t) return 'dork: a domain, email, or name is required.';
+  let dorks;
+  if (/@/.test(t)) {
+    dorks = [`"${t}"`, `"${t}" (password OR leak OR dump)`, `site:pastebin.com "${t}"`, `site:github.com "${t}"`];
+  } else if (/\./.test(t) && !/\s/.test(t)) {
+    const d = t.replace(/^https?:\/\//, '').split('/')[0];
+    dorks = [`site:${d} (confidential OR internal OR password)`, `site:pastebin.com ${d}`, `"${d}" (leak OR breach OR dump)`, `intext:"@${d}" (password OR login)`, `site:${d} ext:pdf OR ext:xls OR ext:doc`];
+  } else {
+    dorks = [`"${t}"`, `"${t}" (linkedin OR github OR twitter)`, `"${t}" (email OR contact OR profile)`];
+  }
+  const out = [`dork "${t}" — generated dorks (open in a search engine):`];
+  dorks.forEach(dk => out.push('https://www.google.com/search?q=' + encodeURIComponent(dk)));
+  out.push('\nlive results for the top dorks:');
+  for (let i = 0; i < Math.min(2, dorks.length); i++) {
+    try { const s = await webSearch(dorks[i], (env && env.BRAVE_API_KEY) || '', env); out.push(`\n# ${dorks[i]}\n` + (s ? formatSearch(s).slice(0, 1200) : '(no results)')); }
+    catch (e) { out.push(`\n# ${dorks[i]}: ${e.message}`); }
+  }
+  return out.join('\n');
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -2735,14 +2778,14 @@ async function runOsintFlow(q, od, c){
   window.__osintAbort=false; var stopBtn=el('btn-stop'); if(stopBtn){ stopBtn.style.display=''; stopBtn.textContent='stop'; }
   var jobs=[];
   function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise','tor_exit'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
-  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check','subdomain_takeover'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check')?('https://'+x):x]); }); }
+  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check','subdomain_takeover','stealer_check'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check')?('https://'+x):x]); }); }
   if(od.intent==='image'){
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
     if(!(od.images||[]).length) addMsg('system','OSINT(image): no image URL found - paste a direct image link (jpg/png/...).');
   } else if(od.intent==='darkweb'){
     var dterms=[]; (od.emails||[]).forEach(function(x){ dterms.push(x); }); (od.domains||[]).forEach(function(x){ dterms.push(x); }); (od.handles||[]).forEach(function(x){ dterms.push(x); });
     if(!dterms.length) dterms.push(od.keyword);
-    dterms.slice(0,4).forEach(function(x){ jobs.push(['onion_search '+x,'onion_search',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); jobs.push(['leakcheck '+x,'leakcheck',x]); });
+    dterms.slice(0,4).forEach(function(x){ jobs.push(['onion_search '+x,'onion_search',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); jobs.push(['leakcheck '+x,'leakcheck',x]); jobs.push(['paste_search '+x,'paste_search',x]); });
     (od.onions||[]).forEach(function(x){ jobs.push(['onion_fetch '+x,'onion_fetch',x]); });
     (od.emails||[]).forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); });
   } else if(od.intent==='malware'){
@@ -2890,7 +2933,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
