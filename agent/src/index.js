@@ -770,6 +770,8 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'favicon_hash', category: 'recon', passive: false, description: 'Shodan/FOFA favicon-hash pivot — find other servers sharing a site favicon' },
   { name: 'crawl', category: 'recon', passive: false, description: 'Crawl a website: extract & follow links/files, download linked text files, scan for exposed secrets' },
   { name: 'subdomains', category: 'recon', passive: true, description: 'DNS-brute common subdomains (DoH) — complements crt.sh' },
+  { name: 'jwt', category: 'recon', passive: true, description: 'Decode/inspect a JWT (claims, alg:none, expiry) — no verification' },
+  { name: 'cidr', category: 'recon', passive: true, description: 'IPv4 CIDR math: network/broadcast/mask/range/host count' },
   { name: 'disclosure_draft', category: 'recon', passive: true, description: 'Find a domain security contact (security.txt/abuse) and DRAFT a responsible-disclosure email (does not send)' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
@@ -900,6 +902,8 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'favicon_hash') return faviconHash(String(args.url || args.target || ''));
   if (name === 'crawl')        return crawl(String(args.url || args.target || ''));
   if (name === 'subdomains')   return subdomains(String(args.domain || args.target || ''));
+  if (name === 'jwt')          return jwtDecode(String(args.token || args.target || args.input || ''));
+  if (name === 'cidr')         return cidrTool(String(args.input || args.cidr || args.target || ''));
   if (name === 'disclosure_draft') return disclosureDraft(env, String(args.target || args.domain || ''));
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
@@ -2278,6 +2282,39 @@ async function subdomains(domain) {
   return `subdomains ${d}: ${live.length}/${words.length} common subdomains resolve\n` + live.sort().join('\n');
 }
 
+// JWT decoder/inspector (no verification — flags alg:none, expiry).
+function b64urlDecode(x) { let t = String(x || '').replace(/-/g, '+').replace(/_/g, '/'); while (t.length % 4) t += '='; try { return atob(t); } catch (e) { return ''; } }
+function jwtDecode(token) {
+  const t = String(token || '').trim().replace(/^Bearer\s+/i, '');
+  const parts = t.split('.');
+  if (parts.length < 2 || !/^[A-Za-z0-9_-]{4,}$/.test(parts[0])) return 'jwt: provide a JWT (header.payload.signature).';
+  let hdr; try { hdr = JSON.parse(b64urlDecode(parts[0])); } catch (e) { return 'jwt: header is not valid base64url JSON.'; }
+  let pl; try { pl = JSON.parse(b64urlDecode(parts[1])); } catch (e) { pl = { _raw: b64urlDecode(parts[1]).slice(0, 200) }; }
+  const notes = [];
+  if (String(hdr.alg).toLowerCase() === 'none') notes.push('alg=none — signature is NOT verified (critical if the server accepts it)');
+  if (pl.exp) notes.push('expires ' + new Date(pl.exp * 1000).toISOString() + (Date.now() > pl.exp * 1000 ? '  (EXPIRED)' : ''));
+  if (pl.iat) notes.push('issued ' + new Date(pl.iat * 1000).toISOString());
+  if (pl.iss) notes.push('issuer: ' + pl.iss);
+  return `jwt decode\nheader: ${JSON.stringify(hdr)}\nclaims: ${JSON.stringify(pl).slice(0, 1400)}\nsignature: ${parts[2] ? '(present — NOT verified; needs the signing key)' : '(none)'}` + (notes.length ? '\nnotes:\n- ' + notes.join('\n- ') : '');
+}
+
+// IPv4 CIDR math.
+function cidrTool(input) {
+  const m = String(input || '').trim().match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/);
+  if (!m) return 'cidr: provide an IPv4 CIDR like 192.168.1.0/24.';
+  const bits = +m[2];
+  if (m[1].split('.').some(o => +o > 255) || bits > 32) return 'cidr: invalid IP or prefix.';
+  const ipToInt = ip => ip.split('.').reduce((a, o) => ((a << 8) + (+o)) >>> 0, 0) >>> 0;
+  const intToIp = n => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
+  const ip = ipToInt(m[1]);
+  const mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0;
+  const net = (ip & mask) >>> 0;
+  const bcast = (net | (~mask >>> 0)) >>> 0;
+  const total = Math.pow(2, 32 - bits);
+  const usable = bits >= 31 ? total : total - 2;
+  return `cidr ${m[1]}/${bits}\nnetwork: ${intToIp(net)} | broadcast: ${intToIp(bcast)}\nmask: ${intToIp(mask)}\nrange: ${intToIp(net)} - ${intToIp(bcast)}\ntotal addresses: ${total} | usable hosts: ${usable}`;
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -3318,7 +3355,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
