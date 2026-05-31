@@ -178,5 +178,21 @@
     });
   })();
   </script>
+
+  <!-- Post table of contents -->
+  <script>
+  (function(){
+    var content=document.querySelector('.post-content'); if(!content) return;
+    var heads=content.querySelectorAll('h2, h3'); if(heads.length<3) return;
+    var toc=document.createElement('nav'); toc.className='post-toc';
+    var html='<span class="toc-title">// contents</span><ul>';
+    heads.forEach(function(h,i){
+      if(!h.id){ h.id='s-'+i+'-'+(h.textContent||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40); }
+      html+='<li class="toc-'+h.tagName.toLowerCase()+'"><a href="#'+h.id+'">'+(h.textContent||'')+'</a></li>';
+    });
+    html+='</ul>'; toc.innerHTML=html;
+    content.insertBefore(toc, content.firstChild);
+  })();
+  </script>
 </body>
 </html>
