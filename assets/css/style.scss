@@ -141,16 +141,62 @@ body {
   text-shadow: 0 0 8px rgba(0, 255, 65, 0.5) !important;
 }
 
-/* Mobile nav */
+/* --- Nav: desktop --- */
+.site-nav { position: relative !important; }
 .site-nav .menu-icon > svg path { fill: var(--green) !important; }
+.site-nav .nav-trigger { display: none !important; }
+.site-nav label[for="nav-trigger"] { display: none !important; }   /* hamburger hidden on desktop */
+.site-nav .trigger { display: flex !important; align-items: center !important; gap: 2px !important; }
 
-@media screen and (max-width: 600px) {
-  .site-nav {
-    background: var(--bg-card) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 4px !important;
+/* --- Nav: mobile (hamburger) --- */
+@media screen and (max-width: 700px) {
+  .site-header .wrapper { padding: 12px 18px !important; }
+  .site-nav label[for="nav-trigger"] {
+    display: inline-flex !important; align-items: center !important; justify-content: center !important;
+    width: 42px !important; height: 36px !important; cursor: pointer !important;
+    border: 1px solid var(--border) !important; border-radius: 5px !important;
+    background: var(--bg-card) !important; transition: background .15s, box-shadow .15s !important;
   }
-  .site-nav .page-link { color: var(--text) !important; }
+  .site-nav label[for="nav-trigger"]:hover { box-shadow: 0 0 10px var(--green-glow) !important; }
+  .site-nav .nav-trigger:checked ~ label[for="nav-trigger"] { background: var(--green-glow) !important; border-color: var(--green-dim) !important; }
+  .site-nav .menu-icon { display: flex !important; align-items: center !important; }
+
+  .site-nav .trigger {
+    display: none !important;
+    position: absolute !important; right: 0 !important; top: calc(100% + 12px) !important;
+    flex-direction: column !important; align-items: stretch !important; gap: 4px !important;
+    min-width: 230px !important; padding: 10px !important;
+    background: rgba(0,0,0,0.985) !important;
+    border: 1px solid var(--border) !important; border-radius: 8px !important;
+    box-shadow: 0 10px 34px rgba(0,0,0,0.65), 0 0 18px var(--green-glow) !important;
+    backdrop-filter: blur(10px) !important; z-index: 300 !important;
+  }
+  .site-nav .nav-trigger:checked ~ .trigger { display: flex !important; }
+  .site-nav .page-link {
+    display: block !important; width: 100% !important; color: var(--text) !important;
+    padding: 11px 12px !important; border: 1px solid transparent !important; border-radius: 4px !important;
+  }
+  .site-nav .page-link:hover { color: var(--green) !important; border-color: var(--border) !important; background: var(--green-glow) !important; }
+  .site-nav .trigger > a[href*="deploy.workers"] {
+    margin: 8px 0 2px 0 !important; padding-top: 10px !important;
+    border-top: 1px solid var(--border-dim) !important; justify-content: center !important;
+  }
+}
+
+/* ============================================================
+   POST COMMENTS (giscus)
+   ============================================================ */
+.post-comments {
+  margin-top: 56px !important;
+  padding-top: 24px !important;
+  border-top: 1px solid var(--border) !important;
+}
+.post-comments .comments-title {
+  font-size: 1.2em !important; color: var(--green) !important;
+  text-shadow: 0 0 10px rgba(0,255,65,0.3) !important; margin-bottom: 4px !important;
+}
+.post-comments .comments-sub {
+  color: var(--text-muted) !important; font-size: 12px !important; margin: 0 0 18px 0 !important;
 }
 
 /* ============================================================
