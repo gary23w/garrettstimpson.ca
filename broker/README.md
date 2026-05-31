@@ -10,6 +10,9 @@ social recon uses the in-worker `username_enum`. **Defensive / educational use o
 - `onion_search` — Ahmia search over Tor
 - `sherlock` — username across 400+ sites (sherlock-project)
 - `holehe` — which sites a given email is registered on
+- `re_analyze` — RE triage of a sample (file, sha256, strings, radare2 imports, capa capabilities)
+- `ole_macros` — extract/decode Office macros (olevba)
+- `exif` — full EXIF/metadata (exiftool)
 
 ## Run (Docker)
 ```bash
@@ -26,7 +29,7 @@ In the Cloudflare Worker (dashboard → Settings → Variables, or wrangler.toml
 ```
 TOOL_BROKER_URL    = https://your-host:8080/run      # put it behind HTTPS!
 TOOL_BROKER_TOKEN  = <the same BROKER_TOKEN>
-CUSTOM_TOOL_NAMES  = sherlock,holehe                  # makes them appear/run in the UI
+CUSTOM_TOOL_NAMES  = sherlock,holehe,re_analyze,ole_macros,exif                  # makes them appear/run in the UI
 ```
 `onion_fetch` / `onion_search` automatically prefer the broker when configured.
 
