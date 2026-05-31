@@ -10,10 +10,10 @@ binding = "AI"
 [vars]
 LLMS_URL  = "https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/refs/heads/main/llms.txt"
 SITE_NAME = "Garrett Stimpson Security Research"
-ACCESS_USER = ""          # optional login username (blank = password only)
-# ACCESS_PASSWORD gates the whole agent behind a login overlay.
-# Set it via the deploy UI or: wrangler secret put ACCESS_PASSWORD
-# Leave it unset for open (no-login) access.
+ACCESS_USER     = ""      # optional login username (blank = password only)
+ACCESS_PASSWORD = ""      # set a value here to lock the agent behind a login (blank = open access)
+# For better secrecy, leave ACCESS_PASSWORD = "" above and instead run:
+#   wrangler secret put ACCESS_PASSWORD   (a secret overrides this var and is not stored in the repo)
 
 # Daily reindex of the Vectorize index, 1h after llms.txt regenerates (06:00 UTC).
 # No-op when the VECTORIZE binding below is not enabled.
