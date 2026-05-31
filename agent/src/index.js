@@ -589,7 +589,7 @@ function ddgParse(html) {
   return out;
 }
 
-async function webSearch(query, braveKey) {
+async function webSearch(query, braveKey, env) {
   // 1. Brave (when key set)
   if (braveKey) {
     try {
@@ -602,6 +602,22 @@ async function webSearch(query, braveKey) {
       if (results.length) {
         return { provider: 'Brave', results: results.map(x => ({ title: x.title, url: x.url, content: x.description || '' })) };
       }
+    } catch (_) {}
+  }
+  // 1b. Google Programmable Search (if GOOGLE_CSE_KEY + GOOGLE_CSE_CX set)
+  if (env && env.GOOGLE_CSE_KEY && env.GOOGLE_CSE_CX) {
+    try {
+      const r = await fetch(`https://www.googleapis.com/customsearch/v1?key=${env.GOOGLE_CSE_KEY}&cx=${env.GOOGLE_CSE_CX}&num=6&q=${encodeURIComponent(query)}`,
+        { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) });
+      if (r.ok) { const d = await r.json(); const results = (d.items || []).slice(0, 6).map(x => ({ title: x.title, url: x.link, content: x.snippet || '' })); if (results.length) return { provider: 'Google', results }; }
+    } catch (_) {}
+  }
+  // 1c. Bing Web Search (if BING_API_KEY set)
+  if (env && env.BING_API_KEY) {
+    try {
+      const r = await fetch(`https://api.bing.microsoft.com/v7.0/search?count=6&q=${encodeURIComponent(query)}`,
+        { headers: { 'Ocp-Apim-Subscription-Key': env.BING_API_KEY, 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) });
+      if (r.ok) { const d = await r.json(); const results = ((d.webPages && d.webPages.value) || []).slice(0, 6).map(x => ({ title: x.name, url: x.url, content: x.snippet || '' })); if (results.length) return { provider: 'Bing', results }; }
     } catch (_) {}
   }
   // 2. SearXNG public instances (JSON)
@@ -811,7 +827,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'rdap_domain')  return domainLookup(String(args.domain || ''));
   if (name === 'dns_lookup')   return dnsLookup(String(args.domain || ''));
   if (name === 'cert_ct')      return certLookup(String(args.domain || ''));
-  if (name === 'web_search')   return formatSearch(await webSearch(String(args.query || ''), String(args.braveKey || '')) || { provider: 'none', results: [] });
+  if (name === 'web_search')   return formatSearch(await webSearch(String(args.query || ''), String(args.braveKey || ''), env) || { provider: 'none', results: [] });
   if (name === 'fetch_url')    return fetchUrl(String(args.url || ''));
   if (name === 'shodan_internetdb') return shodanInternetDB(String(args.ip || ''));
   if (name === 'reverse_dns')  return reverseDns(String(args.ip || ''));
@@ -1633,7 +1649,8 @@ function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory, re
   const reasonDirective = (reasoning === 'normal' || reasoning === 'deep')
     ? 'REASONING: Work through the evidence step by step before answering — weigh the LIVE TOOL RESULTS against the CORPUS, surface any contradictions, and state your confidence. Reasoning must stay grounded; never let it turn into invented facts.'
     : '';
-  return [persona, reasonDirective, memSection, toolSection, corpusText].filter(Boolean).join('\n\n');
+  const capabilities = 'PLATFORM CAPABILITIES: This site runs ~43 passive OSINT/recon tools (CVE/EPSS/KEV intel, RDAP/DNS/cert-transparency, IP geo/ASN/Shodan/GreyNoise/Tor-exit, breach checks, dark-web/onion exposure, image EXIF+GPS, username enumeration across many sites, GitHub harvesting, SPF/DMARC email-security, typosquat & subdomain-takeover detection, cloud-bucket exposure, crypto-address intel, and more). For an OSINT request the user names an email, domain, @handle, IP, CVE, image URL, or crypto address and an autonomous multi-round investigation runs automatically and produces a formal write-up with an exposure-risk score. IMPORTANT: you do NOT execute these tools yourself inside a chat reply — only the LIVE TOOL RESULTS shown above are real. If a full investigation would help, tell the user to name the target and the autonomous OSINT run will trigger. Never claim to have run a tool whose result is not present above.';
+  return [persona, capabilities, reasonDirective, memSection, toolSection, corpusText].filter(Boolean).join('\n\n');
 }
 
 // Preliminary reasoning pass (deep effort): the model drafts terse analysis notes
@@ -2803,7 +2820,7 @@ export default {
         for (const ip of (ips || []).slice(0, 2)) toolContext.push(`=== IP: ${ip} ===\n${await ipIntel(env, ip)}`);
         for (const dom of (domains || []).slice(0, 2)) toolContext.push(`=== Domain: ${dom} ===\n${await domainIntel(dom)}`);
         if (useSearch && wantSearch) {
-          const s = await webSearch(cveIds.length ? `${cveIds[0]} exploit PoC advisory` : objective, braveKey);
+          const s = await webSearch(cveIds.length ? `${cveIds[0]} exploit PoC advisory` : objective, braveKey, env);
           toolContext.push(s ? `=== Web Search ===\n${formatSearch(s)}` : '=== Search Unavailable ===\nDo NOT fabricate details; rely on corpus or state what is unknown.');
         }
         let chunks = await vectorRetrieve(env, objective, topK);
@@ -2888,7 +2905,7 @@ export default {
           if (useSearch && wantSearch) {
             const q = cveIds.length ? `${cveIds[0]} exploit PoC advisory` : lastUser;
             dbg('search_web', q);
-            const s = await webSearch(q, braveKey);
+            const s = await webSearch(q, braveKey, env);
             if (s) { dbg('search result', s.provider + ': ' + s.results.length + ' hits'); toolContext.push(`=== Web Search ===\n${formatSearch(s)}`); }
             else {
               dbg('search result', 'all providers unavailable');

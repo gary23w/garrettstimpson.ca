@@ -12,6 +12,8 @@ LLMS_URL  = "https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/refs/h
 SITE_NAME = "Garrett Stimpson Security Research"
 ACCESS_USER     = ""      # optional login username (blank = password only)
 ACCESS_PASSWORD = ""      # set a value here to lock the agent behind a login (blank = open access)
+# Optional reliable search (set as secrets or here): GOOGLE_CSE_KEY + GOOGLE_CSE_CX, or BING_API_KEY.
+# Without them, web_search falls back to keyless SearXNG/DuckDuckGo/Wikipedia (less reliable from Workers).
 # For better secrecy, leave ACCESS_PASSWORD = "" above and instead run:
 #   wrangler secret put ACCESS_PASSWORD   (a secret overrides this var and is not stored in the repo)
 

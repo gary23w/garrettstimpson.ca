@@ -38,6 +38,22 @@
         "type": "secret_text",
         "name": "HIBP_API_KEY",
         "description": "Optional HaveIBeenPwned API key — enables HIBP results in breach_check (XposedOrNot works without it)."
+      },
+      {
+        "type": "secret_text",
+        "name": "GOOGLE_CSE_KEY",
+        "description": "Optional Google Programmable Search API key (with GOOGLE_CSE_CX) for reliable web_search."
+      },
+      {
+        "type": "plain_text",
+        "name": "GOOGLE_CSE_CX",
+        "text": "",
+        "description": "Optional Google Programmable Search engine id (cx) — pair with GOOGLE_CSE_KEY."
+      },
+      {
+        "type": "secret_text",
+        "name": "BING_API_KEY",
+        "description": "Optional Bing Web Search API key for reliable web_search."
       }
     ]
   }
