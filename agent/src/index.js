@@ -778,6 +778,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'opencorporates', category: 'people', passive: true, description: 'OpenCorporates officer/directorship search (needs OPENCORPORATES_API_TOKEN; else returns the manual link)' },
   { name: 'phone_osint', category: 'people', passive: true, description: 'Phone: country/NANP region + line-type/reverse-lookup deep links (no auto-scrape)' },
   { name: 'holehe', category: 'people', passive: false, description: 'Map an EMAIL to accounts registered across 100+ sites (via broker holehe)' },
+  { name: 'exposure_search', category: 'people', passive: true, description: 'UNIFIED breach/darknet exposure for any selector (email/username/domain) — aggregates HudsonRock stealer logs + LeakCheck + breach DBs + paste into one verdict, exposure timeline, and cross-source pivots' },
   { name: 'jwt', category: 'recon', passive: true, description: 'Decode/inspect a JWT (claims, alg:none, expiry) — no verification' },
   { name: 'cidr', category: 'recon', passive: true, description: 'IPv4 CIDR math: network/broadcast/mask/range/host count' },
   { name: 'hash_id', category: 'malware', passive: true, description: 'Identify likely hash type by format (MD5/SHA/NTLM/bcrypt/...)' },
@@ -921,6 +922,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'opencorporates') return openCorporates(env, String(args.name || args.target || args.query || ''));
   if (name === 'phone_osint')  return phoneOsint(String(args.phone || args.number || args.target || ''));
   if (name === 'holehe')       { try { const out = await runBrokerTool(env, { tool:'holehe', args:{ email:String(args.email||args.target||'') }, target:String(args.email||args.target||''), requestedAt:new Date().toISOString() }); return typeof out==='string'?out:JSON.stringify(out,null,2); } catch(e){ return `holehe ${String(args.email||args.target||'')}: requires TOOL_BROKER_URL (the broker runs holehe to map an email to registered accounts). ${e.message}`; } }
+  if (name === 'exposure_search') return exposureSearch(env, String(args.selector || args.target || args.email || args.username || args.domain || ''));
   if (name === 'jwt')          return jwtDecode(String(args.token || args.target || args.input || ''));
   if (name === 'cidr')         return cidrTool(String(args.input || args.cidr || args.target || ''));
   if (name === 'hash_id')      return hashId(String(args.hash || args.target || args.input || ''));
@@ -2108,6 +2110,46 @@ async function unshorten(url) {
 }
 
 // Infostealer / stealer-log exposure — HudsonRock Cavalier (free, keyless). The modern dark-web dump data.
+// Unified exposure search — ONE selector fanned across every keyless breach/stealer/
+// leak/paste source, merged into a verdict + exposure timeline + cross-source pivots.
+// Uses defender-oriented exposure APIs only; never hosts/returns raw stolen dumps.
+async function exposureSearch(env, selector) {
+  const t = String(selector || '').trim();
+  if (!t) return 'exposure_search: a selector (email, username, or domain) is required.';
+  const isEmail = /@/.test(t);
+  const jobs = [
+    ['HudsonRock infostealer logs', stealerCheck(t)],
+    ['LeakCheck (public)', leakCheck(t)],
+    ['Paste / forum mentions', pasteSearch(t)],
+  ];
+  if (isEmail) {
+    jobs.push(['Breach databases (XposedOrNot/HIBP)', breachCheck(env, t)]);
+    jobs.push(['Gravatar profile', gravatarLookup(t)]);
+  }
+  const settled = await Promise.all(jobs.map(async ([label, p]) => {
+    try { return [label, String(await p)]; } catch (e) { return [label, '(' + e.message + ')']; }
+  }));
+  const combined = settled.map(([l, v]) => `### ${l}\n${v}`).join('\n\n');
+  const uq = a => [...new Set(a)];
+  let hits = 0;
+  if (/comput(er|ers)\b|infected|stealer (log|infection)/i.test(combined) && !/no .*(stealer|infection|comput)/i.test(combined)) hits++;
+  const lcm = combined.match(/(\d+)\s+(?:results?|breach(?:es)?|record|source)/i); if (lcm && +lcm[1] > 0) hits++;
+  if (/exposed in \d+ breach|breaches:\s*[1-9]|\bpwned\b/i.test(combined)) hits++;
+  if (/(onion site\(s\) referencing|paste|leaked)/i.test(combined) && !/no (indexed|paste|result)/i.test(combined)) hits++;
+  const verdict = hits >= 2 ? 'EXPOSED (corroborated by multiple sources)' : (hits === 1 ? 'LIKELY EXPOSED (single source)' : 'NO PUBLIC EXPOSURE FOUND in keyless sources (NOT exhaustive — absence is not proof of safety)');
+  const dates = uq(combined.match(/\b(?:20)\d{2}(?:-\d{2}(?:-\d{2})?)?\b/g) || []).filter(d => { const y = +d.slice(0, 4); return y >= 2007 && y <= 2026; }).sort();
+  const tl = t.toLowerCase();
+  const pEmails = uq((combined.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || []).map(x => x.toLowerCase())).filter(e => e !== tl && !/noreply|@example\.|@hudsonrock|@leakcheck/.test(e)).slice(0, 8);
+  const pDomains = uq((combined.match(/\b(?:[a-z0-9\-]+\.)+[a-z]{2,}\b/ig) || []).map(x => x.toLowerCase())).filter(d => d !== tl && !/hudsonrock|leakcheck|xposedornot|gravatar|garrettstimpson|w3\.org|example\./.test(d) && !pEmails.some(e => e.endsWith('@' + d))).slice(0, 8);
+  const classes = ['password', 'email', 'username', 'phone', 'ip address', 'full name', 'address', 'date of birth', 'hash'].filter(c => new RegExp(c.replace(' ', '\\s*'), 'i').test(combined));
+  const out = [`exposure_search "${t}" — unified breach/darknet exposure (aggregated, defender APIs only)`, `VERDICT: ${verdict}`];
+  if (classes.length) out.push(`data classes seen: ${classes.join(', ')}`);
+  if (dates.length) out.push(`exposure timeline: ${dates.join(' -> ')}`);
+  if (pEmails.length || pDomains.length) out.push(`cross-source PIVOTS (run exposure_search on these next): ${[].concat(pEmails, pDomains).join(', ')}`);
+  out.push('', combined, '\nNOTE: aggregated from defender-oriented keyless sources (HudsonRock, LeakCheck public, XposedOrNot, paste). Not exhaustive vs. a paid breach DB; this tool reports WHETHER/WHERE a selector is exposed, never raw stolen credentials. Rotate any exposed secrets.');
+  return out.join('\n');
+}
+
 async function stealerCheck(target) {
   const t = String(target || '').trim();
   if (!t) return 'stealer_check: an email, username, or domain is required.';
@@ -2307,6 +2349,7 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
     'user: whose phone number is +14165551234?  => {"tool":"phone_osint","arg":"+14165551234"}',
     'user: is John Smith named in any SEC filings?  => {"tool":"edgar","arg":"John Smith"}',
     'user: what sites is bob@acme.com registered on?  => {"tool":"holehe","arg":"bob@acme.com"}',
+    'user: what has leaked about bob@acme.com? / is this account exposed in breaches?  => {"tool":"exposure_search","arg":"bob@acme.com"}',
     'user: dev.to profile for garrettstimpson  => {"tool":"devto_user","arg":"garrettstimpson"}',
     'user: what is a heap overflow?  => {"tool":"none"}',
     'user: thanks, that helps  => {"tool":"none"}',
@@ -3446,7 +3489,7 @@ async function runOsintFlow(q, od, c){
   } else if(od.intent==='darkweb'){
     var dterms=[]; (od.emails||[]).forEach(function(x){ dterms.push(x); }); (od.domains||[]).forEach(function(x){ dterms.push(x); }); (od.handles||[]).forEach(function(x){ dterms.push(x); });
     if(!dterms.length) dterms.push(od.keyword);
-    dterms.slice(0,4).forEach(function(x){ jobs.push(['onion_search '+x,'onion_search',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); jobs.push(['leakcheck '+x,'leakcheck',x]); jobs.push(['paste_search '+x,'paste_search',x]); });
+    dterms.slice(0,4).forEach(function(x){ jobs.push(['exposure_search '+x,'exposure_search',x]); jobs.push(['onion_search '+x,'onion_search',x]); });
     (od.onions||[]).forEach(function(x){ jobs.push(['onion_fetch '+x,'onion_fetch',x]); });
     (od.emails||[]).forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); });
   } else if(od.intent==='malware'){
@@ -3460,8 +3503,9 @@ async function runOsintFlow(q, od, c){
   } else if(od.intent==='tech'){
     od.domains.forEach(function(x){ jobs.push(['tech_fingerprint '+x,'tech_fingerprint','https://'+x]); jobs.push(['vuln_scan '+x,'vuln_scan','https://'+x]); jobs.push(['http_headers '+x,'http_headers','https://'+x]); jobs.push(['wellknown '+x,'wellknown',x]); });
   } else if(od.intent==='breach'){
-    od.emails.forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); jobs.push(['leakcheck '+x,'leakcheck',x]); });
-    od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); });
+    od.emails.forEach(function(x){ jobs.push(['exposure_search '+x,'exposure_search',x]); jobs.push(['email_recon '+x,'email_recon',x]); });
+    od.handles.forEach(function(x){ jobs.push(['exposure_search '+x,'exposure_search',x]); jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); });
+    od.domains.forEach(function(x){ jobs.push(['exposure_search '+x,'exposure_search',x]); });
   } else if(od.intent==='person'){
     (od.persons||[]).forEach(function(nm){
       var ql='"'+nm+'"';
@@ -3561,7 +3605,7 @@ async function runOsintFlow(q, od, c){
   var objective=(od.intent==='malware') ? ('You are writing a FORMAL MALWARE ANALYSIS report for: "'+q+'". Use ONLY the tool evidence in the context; never invent a fact not present in it; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary\\n## Sample Identification (hashes, file type, size)\\n## Reputation & Classification (Cymru MHR / VirusTotal / MalwareBazaar verdicts, malware family)\\n## Capabilities & Suspicious Indicators (notable APIs/strings and what they imply)\\n## Indicators of Compromise (URLs, IPs, hashes)\\n## MITRE ATT&CK Mapping (only techniques clearly evidenced)\\n## Detection & Mitigation\\n## Detection Rules (draft a YARA rule from the notable strings/imports, and a Sigma rule if process/registry/network indicators are evident)\\nBe precise and defensive.') : ('You are writing a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence in the context - never invent a fact not present in it; mark anything missing as UNKNOWN. Do NOT merely restate tool output: ANALYZE it - infer the subject likely identity, connect accounts/emails/domains/repos that plausibly belong to the same person, and weigh your confidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences with your assessment)\\n## Entities and Identifiers\\n## Findings (per source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaked/commit emails - or state none found)\\n## Pivots and Links (how discovered emails/domains/repos connect and what they reveal)\\n## Gaps and Confidence (what is UNKNOWN, reliability, plus 3-5 concrete recommended next OSINT steps)\\nBe precise, defensive in framing, and analytical.');
   if(od.intent==='person') objective='Write a FORMAL PERSON / IDENTITY OSINT report for: "'+q+'". Use ONLY the tool evidence; never invent; mark missing as UNKNOWN. CRITICAL: separate accounts/data CONFIRMED to be THIS specific person (corroborated by matching name, bio, or the user-provided context/domain) from generic same-name or same-username matches that are likely UNRELATED people — never attribute breach/stealer data or accounts to the subject unless clearly theirs. An account counts as CONFIRMED when its OWN profile, bio, or repository NAMES reference the subject name or a domain/site already tied to the subject (for example a GitHub user whose repositories include the subject website, or a profile whose bio names them) - corroborate such links explicitly and do NOT file them under unrelated. Use this markdown structure:\\n## Executive Summary (who this likely is + confidence)\\n## Confirmed Identifiers (accounts/emails/domains tied to THIS person, and why)\\n## Candidate / Unconfirmed Matches (same name/handle, possibly unrelated)\\n## Exposure (breaches / stealer logs ONLY for confirmed emails)\\n## Gaps & Recommended Next Steps\\nBe precise and label confidence honestly.';
   if(od.intent==='cve') objective='Write a FORMAL VULNERABILITY REPORT for: "'+q+'". Use ONLY the tool evidence; never invent CVSS/EPSS scores, affected versions, or dates. Use this markdown structure:\\n## Summary\\n## Severity (CVSS vector + base score, EPSS exploitation probability)\\n## Exploitation Status (CISA KEV listing, public PoC availability with links, any in-the-wild evidence)\\n## Affected & Fixed Versions\\n## Detection & Mitigation\\n## References\\nIMPORTANT: the NVD evidence often states affected/fixed versions inline (e.g. \"Versions before X, Y, Z are affected\") - extract those verbatim into Affected & Fixed Versions; only write UNKNOWN if no version string appears anywhere in the evidence.';
-  if(od.intent==='darkweb') objective='Write a FORMAL DARK-WEB EXPOSURE report for: "'+q+'". Use ONLY the tool evidence; never invent; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary (overall exposure verdict)\\n## Stealer-Log / Infostealer Exposure (HudsonRock: infected hosts, dates, credential counts at risk)\\n## Breaches & Leaked Data (which breaches, exposed data classes, password exposure)\\n## Dark-Web / Onion Mentions\\n## Risk & Remediation (passwords to rotate, accounts at risk, monitoring advice)\\nBe precise and defensive.';
+  if(od.intent==='darkweb') objective='Write a FORMAL DARK-WEB EXPOSURE report for: "'+q+'". Use ONLY the tool evidence; never invent; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary (overall exposure verdict)\\n## Stealer-Log / Infostealer Exposure (HudsonRock: infected hosts, dates, credential counts at risk)\\n## Breaches & Leaked Data (which breaches, exposed data classes, password exposure)\\n## Dark-Web / Onion Mentions\\n## Exposure Timeline (order breach/stealer dates oldest->newest)\\n## Cross-Selector Pivots (other emails/usernames/domains surfaced + what to search next)\\n## Risk & Remediation (passwords to rotate, accounts at risk, monitoring advice)\\nBe precise and defensive.';
   var report;
   try{ report=await callTask(objective, synth); }
   catch(e){ report='# OSINT write-up: '+q+'\\n\\n(synthesis failed: '+e.message+')\\n\\n'+evidence; }
@@ -3671,7 +3715,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email', exposure_search:'selector' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
