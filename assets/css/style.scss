@@ -868,3 +868,17 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 .search-box::placeholder { color: var(--text-muted) !important; }
 .search-count { font-size: 11px !important; color: var(--text-muted) !important; margin-bottom: 18px !important; }
 .search-results .post-card { margin-bottom: 14px !important; }
+
+/* ============================================================
+   AGENT LINK / HERO CTA
+   ============================================================ */
+.site-nav .agent-link { color: var(--blue-accent) !important; border-color: var(--border) !important; }
+.site-nav .agent-link:hover { color: var(--bg) !important; background: var(--blue-accent) !important; box-shadow: 0 0 12px rgba(0,212,255,0.4) !important; }
+.hero-cta {
+  display: inline-block !important; margin-top: 18px !important;
+  font-family: var(--font-mono) !important; font-size: 13px !important; font-weight: 700 !important;
+  color: #000 !important; background: var(--green) !important; text-decoration: none !important;
+  padding: 10px 18px !important; border-radius: 5px !important;
+  box-shadow: 0 0 18px var(--green-glow) !important; transition: transform .15s, box-shadow .15s !important;
+}
+.hero-cta:hover { transform: translateY(-2px) !important; box-shadow: 0 4px 26px rgba(0,255,65,0.5) !important; }
