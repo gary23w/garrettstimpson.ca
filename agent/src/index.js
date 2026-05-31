@@ -2973,7 +2973,10 @@ function detectOsint(q, prev){
   if(um){ handles.push(um[1]); handles=uniq(handles); }
   var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate','email security','spf','dmarc','spoof','typosquat','lookalike','phishing','wallet','bitcoin','ethereum','malware','sample','hash','virus','trojan','stealer','ransomware','reverse engineer','breakdown','osin','conduct','look into','dig into','look up','run osint'];
   var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
-  var persons=uniq((text.match(/\\b[A-Z][a-z'\\-]{1,}\\s+[A-Z][a-z'\\-]{1,}(?:\\s+[A-Z][a-z'\\-]{1,})?\\b/g)||[]).filter(function(p){ return !/^(the|a|an|agent|osint|hello|hi|hey|dear|mr|ms|dr|new|good)\\b/i.test(p); }));
+  var persons=uniq(text.match(/\\b[A-Z][a-z'\\-]{1,}\\s+[A-Z][a-z'\\-]{1,}(?:\\s+[A-Z][a-z'\\-]{1,})?\\b/g)||[]);
+  var pnm=low.match(/(?:look into|look up|investigate|osint(?: on)?|profile(?: of)?|recon|stalk|dig into|background on|person(?: named| called)?|named|called|info on|intel on|dossier on|about|who is|who's|search for)\\s+(?:the\\s+person\\s+|the\\s+|a\\s+|an\\s+)?([a-z][a-z'\\-]+(?:\\s+[a-z][a-z'\\-]+){1,2})/);
+  if(pnm){ var cnm=pnm[1].trim(); if(!/\\b(the|this|that|dark|web|domain|website|site|email|address|ip|hash|sample|malware|exploit|onion|tor|breach|leak|leaked|exposure|company|server|forum|page|guy|persons?|people|profile|account|target|username|handle|everything|anything|info|information|details|more|whatever)\\b/.test(cnm)) persons.push(cnm.replace(/\\b[a-z]/g,function(ch){ return ch.toUpperCase(); })); }
+  persons=uniq(persons.filter(function(p){ return !/^(the|a|an|agent|osint|hello|hi|hey|dear|mr|ms|dr|new|good)\\b/i.test(p); }));
   if(hasTrigger && !handles.length && !emails.length && !persons.length){
     var toks=low.replace(/[^a-z0-9_.@ -]/g,' ').split(' ').filter(Boolean);
     var last=toks[toks.length-1]||'';
