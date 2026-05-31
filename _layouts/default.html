@@ -37,14 +37,12 @@
       <a class="site-title" rel="author" href="{{ "/" | relative_url }}">{{ site.title | escape }}</a>
 
       <nav class="site-nav">
-        <input type="checkbox" id="nav-trigger" class="nav-trigger" />
-        <label for="nav-trigger">
-          <span class="menu-icon">
-            <svg viewBox="0 0 24 24" width="22px" height="22px" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke="#00ff41" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
-          </span>
-        </label>
+        <button type="button" class="nav-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-menu">
+          <svg class="ico-open" viewBox="0 0 24 24" width="22px" height="22px" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke="#00ff41" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+          <svg class="ico-close" viewBox="0 0 24 24" width="22px" height="22px" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="#00ff41" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+        </button>
 
-        <div class="trigger">
+        <div class="trigger" id="nav-menu">
           {%- assign default_paths = site.pages | map: "path" -%}
           {%- assign page_paths = site.header_pages | default: default_paths -%}
           {%- for path in page_paths -%}
@@ -202,6 +200,19 @@
   <!-- Share: copy link -->
   <script>
   (function(){ var sc=document.getElementById('share-copy'); if(!sc) return; sc.addEventListener('click',function(){ if(navigator.clipboard){ navigator.clipboard.writeText(location.href).then(function(){ sc.textContent='copied!'; setTimeout(function(){ sc.textContent='copy link'; },1200); }); } }); })();
+  </script>
+
+  <!-- Mobile nav toggle (JS class-based — reliable on iOS/Android) -->
+  <script>
+  (function(){
+    var nav=document.querySelector('.site-nav'); if(!nav) return;
+    var tog=nav.querySelector('.nav-toggle'); if(!tog) return;
+    function close(){ nav.classList.remove('nav-open'); tog.setAttribute('aria-expanded','false'); }
+    tog.addEventListener('click',function(e){ e.stopPropagation(); var open=nav.classList.toggle('nav-open'); tog.setAttribute('aria-expanded', open?'true':'false'); });
+    document.addEventListener('click',function(e){ if(!nav.contains(e.target)) close(); });
+    document.addEventListener('keydown',function(e){ if(e.key==='Escape') close(); });
+    nav.querySelectorAll('.trigger a').forEach(function(a){ a.addEventListener('click',close); });
+  })();
   </script>
 </body>
 </html>
