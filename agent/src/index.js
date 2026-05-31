@@ -771,6 +771,13 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'crawl', category: 'recon', passive: false, description: 'Crawl a website: extract & follow links/files, download linked text files, scan for exposed secrets' },
   { name: 'subdomains', category: 'recon', passive: true, description: 'DNS-brute common subdomains (DoH) — complements crt.sh' },
   { name: 'vuln_scan', category: 'recon', passive: false, description: 'Passive vuln indication: detect software versions -> candidate CVEs (NVD) + Shodan CVE tags (no active exploitation)' },
+  { name: 'keybase', category: 'people', passive: true, description: 'Keybase cryptographically-VERIFIED identity: proven Twitter/GitHub/Reddit/web links, PGP key, crypto addresses' },
+  { name: 'devto_user', category: 'people', passive: true, description: 'Dev.to profile (real name, location, linked GitHub/Twitter/site) — corroborates identity' },
+  { name: 'people_search', category: 'people', passive: true, description: 'Generate analyst deep-links for a NAME (people-search, public records, obituary/FindAGrave, court, dorks) — no auto-scrape' },
+  { name: 'edgar', category: 'people', passive: true, description: 'SEC EDGAR full-text search; finds a person/company in insider filings (Form 3/4/5 name individuals)' },
+  { name: 'opencorporates', category: 'people', passive: true, description: 'OpenCorporates officer/directorship search (needs OPENCORPORATES_API_TOKEN; else returns the manual link)' },
+  { name: 'phone_osint', category: 'people', passive: true, description: 'Phone: country/NANP region + line-type/reverse-lookup deep links (no auto-scrape)' },
+  { name: 'holehe', category: 'people', passive: false, description: 'Map an EMAIL to accounts registered across 100+ sites (via broker holehe)' },
   { name: 'jwt', category: 'recon', passive: true, description: 'Decode/inspect a JWT (claims, alg:none, expiry) — no verification' },
   { name: 'cidr', category: 'recon', passive: true, description: 'IPv4 CIDR math: network/broadcast/mask/range/host count' },
   { name: 'hash_id', category: 'malware', passive: true, description: 'Identify likely hash type by format (MD5/SHA/NTLM/bcrypt/...)' },
@@ -907,6 +914,13 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'crawl')        return crawl(String(args.url || args.target || ''));
   if (name === 'subdomains')   return subdomains(String(args.domain || args.target || ''));
   if (name === 'vuln_scan')    return vulnScan(String(args.target || args.url || args.domain || ''));
+  if (name === 'keybase')      return keybaseLookup(String(args.username || args.user || args.target || ''));
+  if (name === 'devto_user')   return devtoUser(String(args.username || args.user || args.target || ''));
+  if (name === 'people_search') return peopleSearch(String(args.name || args.target || args.query || ''));
+  if (name === 'edgar')        return secEdgar(String(args.name || args.target || args.query || ''));
+  if (name === 'opencorporates') return openCorporates(env, String(args.name || args.target || args.query || ''));
+  if (name === 'phone_osint')  return phoneOsint(String(args.phone || args.number || args.target || ''));
+  if (name === 'holehe')       { try { const out = await runBrokerTool(env, { tool:'holehe', args:{ email:String(args.email||args.target||'') }, target:String(args.email||args.target||''), requestedAt:new Date().toISOString() }); return typeof out==='string'?out:JSON.stringify(out,null,2); } catch(e){ return `holehe ${String(args.email||args.target||'')}: requires TOOL_BROKER_URL (the broker runs holehe to map an email to registered accounts). ${e.message}`; } }
   if (name === 'jwt')          return jwtDecode(String(args.token || args.target || args.input || ''));
   if (name === 'cidr')         return cidrTool(String(args.input || args.cidr || args.target || ''));
   if (name === 'hash_id')      return hashId(String(args.hash || args.target || args.input || ''));
@@ -1144,12 +1158,164 @@ async function gravatarLookup(email) {
   return `Gravatar ${e}\nsha256: ${h}\navatar: ${has ? 'EXISTS' : 'none'}${prof ? '\n' + prof : '\nprofile: none/private'}`;
 }
 
+// ── People-OSINT depth: identity correlation, records, phone/email enrichment ──
+
+// Keybase — cryptographically VERIFIED cross-account identity links (proofs), PGP, crypto addrs.
+async function keybaseLookup(u) {
+  const v = String(u || '').trim().replace(/^@/, '');
+  if (!v || /[^A-Za-z0-9_.\-]/.test(v)) return 'keybase: a username/handle is required.';
+  async function look(qs) {
+    const r = await fetch(`https://keybase.io/_/api/1.0/user/lookup.json?${qs}&fields=proofs_summary,profile,basics,cryptocurrency_addresses,public_keys`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const them = d.them;
+    if (Array.isArray(them)) return them.find(Boolean) || null;
+    return them || null;
+  }
+  let them = null;
+  try { them = await look('usernames=' + encodeURIComponent(v)); } catch (e) { return `keybase ${v}: lookup failed (${e.message}).`; }
+  if (!them) { try { them = await look('twitter=' + encodeURIComponent(v)); } catch (e) {} }
+  if (!them) { try { them = await look('github=' + encodeURIComponent(v)); } catch (e) {} }
+  if (!them) return `keybase ${v}: no Keybase identity found (Keybase proofs are cryptographically verified, so absence is common and NOT exonerating).`;
+  const prof = them.profile || {}, basics = them.basics || {};
+  const proofs = ((them.proofs_summary || {}).all) || [];
+  const lines = [`keybase @${basics.username || v} — CRYPTOGRAPHICALLY VERIFIED identity links`];
+  if (prof.full_name || prof.location || prof.bio) lines.push(`name: ${prof.full_name || '?'} | location: ${prof.location || '?'}${prof.bio ? ' | bio: ' + prof.bio : ''}`);
+  if (proofs.length) { lines.push('proven accounts:'); proofs.forEach(p => lines.push(`  ${p.proof_type}: ${p.nametag}  ${p.service_url || p.human_url || ''}`)); }
+  const cc = them.cryptocurrency_addresses || {};
+  Object.keys(cc).forEach(k => { (cc[k] || []).forEach(a => lines.push(`  ${k}: ${a.address || a}`)); });
+  const fp = ((them.public_keys || {}).primary || {}).key_fingerprint || (them.public_keys || {}).eldest_key_fingerprint;
+  if (fp) lines.push(`pgp: ${String(fp).toUpperCase()}`);
+  if (!proofs.length && !Object.keys(cc).length) lines.push('(identity exists but no public proofs/keys)');
+  return lines.join('\n');
+}
+
+// Dev.to profile — real name, location, linked GitHub/Twitter/site (strong corroboration).
+async function devtoUser(u) {
+  const v = String(u || '').trim().replace(/^@/, '');
+  if (!v || /[^A-Za-z0-9_.\-]/.test(v)) return 'devto_user: a username is required.';
+  try {
+    const r = await fetch(`https://dev.to/api/users/by_username?url=${encodeURIComponent(v)}`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) });
+    if (r.status === 404) return `devto_user ${v}: no Dev.to account.`;
+    if (!r.ok) return `devto_user ${v}: lookup failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    const links = [];
+    if (d.github_username) links.push('github:' + d.github_username);
+    if (d.twitter_username) links.push('twitter:' + d.twitter_username);
+    if (d.website_url) links.push('site:' + d.website_url);
+    return `devto_user @${d.username} (https://dev.to/${d.username})\nname: ${d.name || '?'} | location: ${d.location || '?'} | joined: ${d.joined_at || '?'}\nbio: ${d.summary || '(none)'}${links.length ? '\nlinked: ' + links.join(', ') : ''}`;
+  } catch (e) { return `devto_user ${v}: lookup failed (${e.message}).`; }
+}
+
+// People search — analyst DEEP LINKS only (no auto-scrape). Covers social, people-search,
+// genealogy/vital records, court records, and Google dorks for a human to review.
+function peopleSearch(input) {
+  const parts = String(input || '').split('|').map(s => s.trim());
+  const name = parts[0], loc = parts[1] || '';
+  if (!name || name.length < 2) return 'people_search: a person NAME is required (optionally "Name | City/Region").';
+  const toks = name.split(/\s+/);
+  const first = toks[0], last = toks[toks.length - 1];
+  const q = encodeURIComponent(name), ql = encodeURIComponent(name + (loc ? ' ' + loc : ''));
+  const nm = name.toLowerCase().replace(/[^a-z ]/g, '').trim().replace(/\s+/g, '-');
+  const L = (t, u) => `  ${t}: ${u}`;
+  const out = [`people_search "${name}"${loc ? ' (' + loc + ')' : ''} — analyst deep links (open only what you need; same-name hits are often DIFFERENT people)`];
+  out.push('social:');
+  out.push(L('LinkedIn', `https://www.google.com/search?q=site:linkedin.com/in+${q}`));
+  out.push(L('Twitter/X', `https://x.com/search?q=${q}&f=user`));
+  out.push(L('Facebook', `https://www.facebook.com/search/people/?q=${q}`));
+  out.push(L('Instagram', `https://www.google.com/search?q=site:instagram.com+${q}`));
+  out.push('people-search / public records:');
+  out.push(L('TruePeopleSearch', `https://www.truepeoplesearch.com/results?name=${q}`));
+  out.push(L('FastPeopleSearch', `https://www.fastpeoplesearch.com/name/${nm}`));
+  out.push(L('ThatsThem', `https://thatsthem.com/name/${nm}`));
+  out.push(L('Radaris', `https://radaris.com/p/${encodeURIComponent(first)}/${encodeURIComponent(last)}/`));
+  out.push('genealogy / vital records (relatives, ancestry):');
+  out.push(L('FamilySearch', `https://www.familysearch.org/search/record/results?q.givenName=${encodeURIComponent(first)}&q.surname=${encodeURIComponent(last)}`));
+  out.push(L('FindAGrave', `https://www.findagrave.com/memorial/search?firstname=${encodeURIComponent(first)}&lastname=${encodeURIComponent(last)}`));
+  out.push(L('Legacy obituaries', `https://www.legacy.com/search?query=${q}`));
+  out.push('court / legal:');
+  out.push(L('CanLII (CA)', `https://www.canlii.org/en/#search/text=${q}`));
+  out.push(L('CourtListener (US)', `https://www.courtlistener.com/?q=${q}`));
+  out.push('dorks:');
+  out.push(L('contact dork', `https://www.google.com/search?q=${ql}+(email+OR+phone+OR+contact)`));
+  out.push(L('resume/CV dork', `https://www.google.com/search?q=${ql}+(resume+OR+cv+OR+filetype:pdf)`));
+  out.push('NOTE: these are human-review links to public portals. The agent does NOT auto-harvest relatives, addresses, or genealogy. Verify each hit is actually the same person before relying on it.');
+  return out.join('\n');
+}
+
+// SEC EDGAR full-text search — find a person/company in insider filings (Form 3/4/5 name individuals).
+async function secEdgar(name) {
+  const v = String(name || '').trim();
+  if (!v || v.length < 2) return 'edgar: a person or company name is required.';
+  try {
+    const r = await fetch(`https://efts.sec.gov/LATEST/search-index?q=%22${encodeURIComponent(v)}%22&forms=3,4,5`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent research (defensive OSINT)', 'Accept': 'application/json' }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return `edgar ${v}: lookup failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    const h = d.hits || {};
+    const total = ((h.total || {}).value) || 0;
+    if (!total) return `edgar "${v}": no SEC insider (Form 3/4/5) filings naming this entity.`;
+    const rows = (h.hits || []).slice(0, 8).map(it => {
+      const s = it._source || {};
+      const nm = (s.display_names || []).join('; ');
+      const cik = (s.ciks || [])[0] || '';
+      return `  ${s.file_date || '?'} ${(s.root_forms || [s.form]).join('/')} — ${nm}${cik ? '  https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + cik : ''}`;
+    });
+    return `edgar "${v}" — SEC insider filings (Form 3/4/5 name individuals): ${total} hit(s)\n${rows.join('\n')}\nbrowse: https://www.sec.gov/cgi-bin/browse-edgar?company=${encodeURIComponent(v)}&CIK=&type=&action=getcompany`;
+  } catch (e) { return `edgar ${v}: lookup failed (${e.message}).`; }
+}
+
+// OpenCorporates — officer/directorship records (free API now needs a token; degrade to the link).
+async function openCorporates(env, name) {
+  const v = String(name || '').trim();
+  if (!v || v.length < 2) return 'opencorporates: a name is required.';
+  const ui = `https://opencorporates.com/officers?q=${encodeURIComponent(v)}`;
+  const tok = String(env.OPENCORPORATES_API_TOKEN || '').trim();
+  if (!tok) return `opencorporates: the free API now requires a token. Set OPENCORPORATES_API_TOKEN to enable officer/directorship search. Manual: ${ui}`;
+  try {
+    const r = await fetch(`https://api.opencorporates.com/v0.4/officers/search?q=${encodeURIComponent(v)}&api_token=${encodeURIComponent(tok)}`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return `opencorporates ${v}: HTTP ${r.status}. Manual: ${ui}`;
+    const d = await r.json();
+    const offs = (((d.results || {}).officers) || []).slice(0, 8).map(o => {
+      const x = o.officer || o;
+      return `  ${x.name} — ${x.position || 'officer'} @ ${(x.company || {}).name || '?'} (${(x.company || {}).jurisdiction_code || '?'})`;
+    });
+    const tot = ((d.results || {}).total_count) || offs.length;
+    return offs.length ? `opencorporates "${v}": ${tot} officer record(s)\n${offs.join('\n')}\nUI: ${ui}` : `opencorporates "${v}": no officer records. UI: ${ui}`;
+  } catch (e) { return `opencorporates ${v}: ${e.message}. Manual: ${ui}`; }
+}
+
+// Phone OSINT — country/NANP region + line-type/reverse-lookup deep links (no auto-scrape).
+function phoneOsint(input) {
+  const raw = String(input || '').trim();
+  const d = raw.replace(/[^\d+]/g, '').replace(/^\+/, '');
+  if (d.length < 7) return 'phone_osint: provide a number in international format (e.g. +14165551234).';
+  const CC = [['1', 'North America (US/Canada — NANP)'], ['44', 'United Kingdom'], ['61', 'Australia'], ['91', 'India'], ['49', 'Germany'], ['33', 'France'], ['81', 'Japan'], ['86', 'China'], ['7', 'Russia/Kazakhstan'], ['55', 'Brazil'], ['52', 'Mexico'], ['34', 'Spain'], ['39', 'Italy'], ['31', 'Netherlands'], ['46', 'Sweden'], ['41', 'Switzerland'], ['971', 'UAE'], ['972', 'Israel'], ['234', 'Nigeria'], ['27', 'South Africa'], ['82', 'South Korea'], ['65', 'Singapore'], ['63', 'Philippines'], ['62', 'Indonesia'], ['90', 'Turkey'], ['380', 'Ukraine'], ['48', 'Poland'], ['351', 'Portugal'], ['353', 'Ireland'], ['64', 'New Zealand']];
+  let cc = '', country = 'unknown';
+  for (const [c, n] of CC.sort((a, b) => b[0].length - a[0].length)) { if (d.startsWith(c)) { cc = c; country = n; break; } }
+  const lines = [`phone_osint ${raw}`, `normalized: +${d} | digits: ${d.length}`, `country code: ${cc ? '+' + cc + ' — ' + country : 'unknown (include the country code, e.g. +1)'}`];
+  if (cc === '1') { lines.push(`NANP area code: ${d.slice(1, 4)} (geographic region varies — confirm via lookup)`); }
+  const q = encodeURIComponent(raw), dd = encodeURIComponent(d);
+  lines.push('lookups (human-review):');
+  lines.push(`  carrier/line-type: https://www.google.com/search?q=%2B${dd}+carrier`);
+  lines.push(`  Truecaller: https://www.truecaller.com/search/${cc === '1' ? 'us' : 'intl'}/${dd}`);
+  lines.push(`  Sync.me: https://sync.me/search/?number=${dd}`);
+  lines.push(`  WhitePages: https://www.whitepages.com/phone/${dd}`);
+  lines.push(`  leak/breach context: https://www.google.com/search?q=${q}+(leak+OR+breach+OR+pastebin)`);
+  lines.push('NOTE: carrier/line-type/owner require the linked services; the agent does not auto-scrape them.');
+  return lines.join('\n');
+}
+
 // Email recon — format + MX (DoH) + gravatar presence (passive).
 async function emailRecon(email) {
   const e = String(email || '').trim().toLowerCase();
   const m = e.match(/^[^@\s]+@([^@\s]+\.[^@\s]+)$/);
   if (!m) return `email_recon: ${email} is not a valid email.`;
   const dom = m[1];
+  const disposable = /(mailinator|guerrilla|10minutemail|tempmail|temp-mail|throwaway|yopmail|trashmail|getnada|maildrop|dispostable|fakeinbox|sharklasers|mohmal|emailondeck|moakt|mailnesia|tempr\.email|33mail|spamgourmet|guerrillamail)/i.test(dom);
   let mx = 'UNKNOWN';
   try {
     const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${dom}&type=MX`, { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(6000) });
@@ -1158,7 +1324,7 @@ async function emailRecon(email) {
     mx = recs.length ? recs.join(', ') : 'none (no MX — may not receive mail)';
   } catch (ex) { mx = `lookup failed (${ex.message})`; }
   const grav = await gravatarLookup(e);
-  return `email_recon ${e}\ndomain: ${dom}\nMX: ${mx}\n--- gravatar ---\n${grav}`;
+  return `email_recon ${e}\ndomain: ${dom}\ndisposable: ${disposable ? 'YES (throwaway provider)' : 'no'}\nMX: ${mx}\n--- gravatar ---\n${grav}`;
 }
 
 // ── Defensive OSINT tools ────────────────────────────────────────────────────
@@ -3295,11 +3461,13 @@ async function runOsintFlow(q, od, c){
       var ctx=q.toLowerCase().replace(/[",]/g,' ').split(/\\s+/).filter(function(w){ return w && w.length>1 && nm.toLowerCase().split(' ').indexOf(w)<0 && ['osint','investigate','profile','recon','stalk','who','whos','is','person','named','called','about','the','a','an','please','find','look','into','up','on','background','info','intel','dossier','search','for','of','people','dig','everything','anything'].indexOf(w)<0; }).join(' ').trim();
       if(ctx.length>2) jobs.push(['web_search '+nm+' ['+ctx+']','web_search',ql+' '+ctx]);
       jobs.push(['github code search '+nm,'github_osint',ql]);
+      jobs.push(['people_search '+nm,'people_search',nm]);
+      jobs.push(['edgar '+nm,'edgar',nm]);
       var p=nm.toLowerCase().replace(/[^a-z ]/g,'').split(/\\s+/).filter(Boolean);
-      if(p.length>=2){ var f=p[0],l=p[p.length-1]; [f+l,f[0]+l,f+'.'+l,f+'_'+l,l+f].slice(0,5).forEach(function(u){ jobs.push(['username_enum '+u,'username_enum',u]); jobs.push(['github_user '+u,'github_user',u]); }); }
+      if(p.length>=2){ var f=p[0],l=p[p.length-1]; var cand=[f+l,f[0]+l,f+'.'+l,f+'_'+l,l+f]; cand.slice(0,5).forEach(function(u){ jobs.push(['username_enum '+u,'username_enum',u]); jobs.push(['github_user '+u,'github_user',u]); }); cand.slice(0,3).forEach(function(u){ jobs.push(['keybase '+u,'keybase',u]); jobs.push(['devto_user '+u,'devto_user',u]); }); }
     });
     (od.emails||[]).forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); });
-    (od.handles||[]).forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); });
+    (od.handles||[]).forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); jobs.push(['keybase '+x,'keybase',x]); jobs.push(['devto_user '+x,'devto_user',x]); });
   } else if(od.intent==='cve'){
     od.cves.forEach(function(x){ jobs.push(['NVD '+x,'nvd_lookup',x]); jobs.push(['CVE detail '+x,'circl_cve',x]); jobs.push(['EPSS '+x,'epss_lookup',x]); jobs.push(['KEV '+x,'kev_lookup',x]); jobs.push(['PoC '+x,'cve_poc',x]); jobs.push(['web_search '+x,'web_search',x+' exploit advisory patch']); });
   } else {
@@ -3333,7 +3501,7 @@ async function runOsintFlow(q, od, c){
     pv.emails.forEach(function(e){ pjobs.push(['breach_check '+e,'breach_check',e]); pjobs.push(['gravatar '+e,'gravatar',e]); pjobs.push(['email_recon '+e,'email_recon',e]); pjobs.push(['onion_search '+e,'onion_search',e]); });
     pv.domains.forEach(function(d){ pjobs.push(['tech_fingerprint '+d,'tech_fingerprint','https://'+d]); pjobs.push(['rdap_domain '+d,'rdap_domain',d]); pjobs.push(['dns_lookup '+d,'dns_lookup',d]); pjobs.push(['crtsh_subs '+d,'crtsh_subs',d]); });
     pv.names.forEach(function(nm){ pjobs.push(['web_search '+nm,'web_search','"'+nm+'"']); });
-    (pv.phandles||[]).forEach(function(h){ pjobs.push(['username_enum '+h,'username_enum',h]); pjobs.push(['github_user '+h,'github_user',h]); });
+    (pv.phandles||[]).forEach(function(h){ pjobs.push(['username_enum '+h,'username_enum',h]); pjobs.push(['github_user '+h,'github_user',h]); pjobs.push(['keybase '+h,'keybase',h]); pjobs.push(['devto_user '+h,'devto_user',h]); });
     pv.domains.forEach(function(d){ pjobs.push(['crawl '+d,'crawl','https://'+d]); });
     (pv.hashes||[]).forEach(function(h){ pjobs.push(['hash_lookup '+h,'hash_lookup',h]); });
     (pv.samples||[]).forEach(function(su){ pjobs.push(['file_analyze '+su,'file_analyze',su]); });
@@ -3470,7 +3638,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
