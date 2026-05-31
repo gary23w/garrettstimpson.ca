@@ -54,6 +54,10 @@
             {%- endif -%}
           {%- endfor -%}
 
+          {%- if site.agent_url and site.agent_url != "" -%}
+          <a class="page-link agent-link" href="{{ site.agent_url }}" target="_blank" rel="noopener" title="Chat with Agent Garrett">&#9099; Agent</a>
+          {%- endif -%}
+
           <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/gary23w/garrettstimpson.ca/tree/main/agent"
              target="_blank" rel="noopener noreferrer"
              title="Deploy your own research agent — powered by Cloudflare Workers AI"
