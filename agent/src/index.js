@@ -757,6 +757,8 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'leakcheck', category: 'darkweb', passive: true, description: 'Public breach-index record count + exposed data types (LeakCheck, keyless)' },
   { name: 'paste_search', category: 'darkweb', passive: true, description: 'Search public paste dumps (psbdmp) for an email/domain/keyword' },
   { name: 'dork', category: 'search', passive: true, description: 'Generate + run Google dorks for a domain/email/name (recon)' },
+  { name: 'phish_check', category: 'recon', passive: false, description: 'Phishing verdict for a URL: domain age, URLhaus, lure keywords, login form, redirects' },
+  { name: 'archive_urls', category: 'osint', passive: true, description: 'Wayback historical URLs/endpoints for a domain (forgotten paths)' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
   { name: 'decode', category: 'malware', passive: true, description: 'Recursive multi-layer decode (base64/hex/url/gzip) + refang + IOCs' },
@@ -878,6 +880,8 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'leakcheck')    return leakCheck(String(args.target || args.email || args.username || ''));
   if (name === 'paste_search') return pasteSearch(String(args.target || args.term || args.query || ''));
   if (name === 'dork')         return dorkTool(env, String(args.target || args.query || ''));
+  if (name === 'phish_check')  return phishCheck(String(args.url || args.target || ''));
+  if (name === 'archive_urls') return archiveUrls(String(args.domain || args.target || ''));
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
   if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
@@ -1978,6 +1982,55 @@ async function dorkTool(env, target) {
   return out.join('\n');
 }
 
+// Composite phishing analyzer — domain age + URLhaus + lure keywords + login form + redirects.
+async function phishCheck(url) {
+  let u; try { u = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch { return 'phish_check: a URL is required.'; }
+  if (isPrivateHost(u.hostname)) return `phish_check: ${u.hostname} is private/internal — blocked.`;
+  const host = u.hostname.toLowerCase();
+  let score = 0; const signals = [];
+  if (/xn--/.test(host)) { score += 22; signals.push('punycode/IDN domain (homoglyph spoofing risk)'); }
+  if ((host.match(/-/g) || []).length >= 3) { score += 8; signals.push('many hyphens in hostname'); }
+  if (/\d{4,}/.test(host)) { score += 5; signals.push('long digit run in hostname'); }
+  const brands = ['paypal', 'apple', 'microsoft', 'google', 'amazon', 'netflix', 'bank', 'secure', 'login', 'signin', 'verify', 'update', 'account', 'wallet', 'coinbase', 'metamask', 'support'];
+  const hit = brands.filter(b => host.includes(b));
+  if (hit.length) { score += 12; signals.push('brand/lure keywords in host: ' + hit.join(', ')); }
+  try {
+    const reg = host.split('.').slice(-2).join('.');
+    const rd = await domainLookup(reg);
+    const m = String(rd).match(/(\d{4}-\d{2}-\d{2})/);
+    if (m) { const days = (Date.now() - Date.parse(m[1])) / 86400000; if (days >= 0 && days < 90) { score += 25; signals.push(`registration date ${m[1]} (~${Math.round(days)} days old — very new)`); } }
+  } catch (e) {}
+  try {
+    const uh = await urlhausLookup(host);
+    if (/malware|blacklist|listed/i.test(uh) && !/no results|not (found|listed)|0 /i.test(uh)) { score += 30; signals.push('URLhaus: host associated with malware URLs'); }
+  } catch (e) {}
+  try {
+    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
+    const html = await r.text();
+    if (/<input[^>]+type=["']?password/i.test(html)) { score += 10; signals.push('page contains a password / login form'); }
+    try { const fin = new URL(r.url).hostname.toLowerCase(); if (fin && fin !== host) { score += 8; signals.push('redirects to a different host: ' + fin); } } catch (e) {}
+  } catch (e) { signals.push('page fetch failed: ' + e.message); }
+  score = Math.min(100, score);
+  const verdict = score >= 60 ? 'HIGH likelihood of phishing' : score >= 30 ? 'SUSPICIOUS' : score > 0 ? 'low-risk signals present' : 'no obvious phishing signals';
+  return `phish_check ${host}\nverdict: ${verdict} (${score}/100)\n` + (signals.length ? signals.map(s => '- ' + s).join('\n') : '- none');
+}
+
+// Wayback historical URLs (CDX) — surfaces forgotten endpoints/paths.
+async function archiveUrls(domain) {
+  const d = String(domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+  if (!d) return 'archive_urls: a domain is required.';
+  try {
+    const r = await fetch(`https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(d)}*&output=json&collapse=urlkey&limit=80&filter=statuscode:200`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return `archive_urls ${d}: lookup failed (HTTP ${r.status}).`;
+    const rows = await r.json();
+    if (Array.isArray(rows) && rows.length) rows.shift();
+    const paths = [...new Set((rows || []).map(x => x[2]).filter(Boolean))].slice(0, 45);
+    if (!paths.length) return `archive_urls ${d}: no archived URLs found (or archive.org unreachable from here).`;
+    return `archive_urls ${d}: ${paths.length} archived URLs (historical endpoints — check for forgotten admin/API paths)\n` + paths.join('\n');
+  } catch (e) { return `archive_urls ${d}: failed (${e.message}).`; }
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -2778,7 +2831,7 @@ async function runOsintFlow(q, od, c){
   window.__osintAbort=false; var stopBtn=el('btn-stop'); if(stopBtn){ stopBtn.style.display=''; stopBtn.textContent='stop'; }
   var jobs=[];
   function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise','tor_exit'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
-  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check','subdomain_takeover','stealer_check'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check')?('https://'+x):x]); }); }
+  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check','subdomain_takeover','stealer_check','archive_urls'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check')?('https://'+x):x]); }); }
   if(od.intent==='image'){
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
     if(!(od.images||[]).length) addMsg('system','OSINT(image): no image URL found - paste a direct image link (jpg/png/...).');
@@ -2933,7 +2986,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
