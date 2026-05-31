@@ -2662,7 +2662,7 @@ function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory, re
       if (budget - block.length < 0) break;
       parts.push(block); budget -= block.length;
     }
-    corpusText = `CORPUS (top ${parts.length} chunks by relevance — use ONLY chunks that actually match the question; ignore unrelated ones):\n${parts.join('\n\n---\n\n')}`;
+    corpusText = `CORPUS (top ${parts.length} chunks by relevance — use ONLY chunks that actually match the question; ignore unrelated ones):\n${parts.join('\n\n---\n\n')} ANTI-FABRICATION (critical): only state facts that appear in the LIVE TOOL RESULTS or research context actually shown to you. NEVER fabricate or guess files, filenames, file listings, hashes, malware names/families, loaders, payloads, IOCs, CVEs, or attributions; if no tool returned such data, say it was not found or is UNKNOWN. NEVER take malware/exploit details from the research corpus and attribute them to a user-supplied target (person, site, IP, domain) - corpus content describes published research only, never the entity being investigated. If asked about files/artifacts and no tool actually retrieved any, say so plainly instead of inventing examples.`;
   }
   const toolSection = toolContext.length ? `LIVE TOOL RESULTS:\n${toolContext.join('\n\n').slice(0, TOOL_CHARS)}` : '';
   const memParts = [];
