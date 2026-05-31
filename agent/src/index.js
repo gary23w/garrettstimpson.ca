@@ -753,6 +753,8 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'cors_check', category: 'recon', passive: false, description: 'Test a URL for permissive/misconfigured CORS (Origin reflection)' },
   { name: 'subdomain_takeover', category: 'recon', passive: false, description: 'Detect dangling CNAMEs to deprovisioned services (subdomain takeover risk)' },
   { name: 'onion_fetch', category: 'darkweb', passive: true, description: 'Fetch .onion content over clearnet via free tor2web gateways (no Tor needed)' },
+  { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
+  { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
 ];
 
 function parseCsvSet(value) {
@@ -864,6 +866,8 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'cors_check')   return corsCheck(String(args.url || args.target || ''));
   if (name === 'subdomain_takeover') return subdomainTakeover(String(args.domain || args.target || ''));
   if (name === 'onion_fetch')  return onionFetch(env, String(args.url || args.onion || args.target || ''));
+  if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
+  if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1653,6 +1657,88 @@ async function onionFetch(env, onionUrl) {
   return `onion_fetch ${host}: no free Tor gateway could reach it right now (public gateways are unreliable / often down).\nTo view it yourself: open http://${host}${path} in the Tor Browser, or try a gateway link: https://${host}.onion.ws${path}`;
 }
 
+// File-hash reputation — Team Cymru MHR (keyless, MD5/SHA1) + optional VT / MalwareBazaar.
+async function hashLookup(env, h) {
+  const x = String(h || '').trim().toLowerCase();
+  if (!/^[a-f0-9]{32}$|^[a-f0-9]{40}$|^[a-f0-9]{64}$/.test(x)) return 'hash_lookup: provide an MD5, SHA-1, or SHA-256 file hash.';
+  const kind = x.length === 32 ? 'MD5' : x.length === 40 ? 'SHA-1' : 'SHA-256';
+  const out = [`hash_lookup ${x} (${kind})`];
+  if (x.length !== 64) {
+    try {
+      const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${x}.malware.hash.cymru.com&type=TXT`,
+        { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(7000) });
+      const j = await r.json();
+      const ans = (j.Answer || []).map(a => String(a.data).replace(/^"|"$/g, ''));
+      if (ans.length) {
+        const parts = ans[0].split(/\s+/);
+        const seen = new Date((+parts[0]) * 1000).toISOString().slice(0, 10);
+        out.push(`Team Cymru MHR: KNOWN MALWARE — last seen ${seen}, ~${parts[1]}% AV detection`);
+      } else out.push('Team Cymru MHR: not in registry (unknown or clean).');
+    } catch (e) { out.push(`Team Cymru MHR: lookup failed (${e.message}).`); }
+  } else out.push('Team Cymru MHR: SHA-256 unsupported there — provide MD5/SHA-1 for MHR.');
+  const vt = String((env && env.VT_API_KEY) || '');
+  if (vt) {
+    try {
+      const r = await fetch(`https://www.virustotal.com/api/v3/files/${x}`, { headers: { 'x-apikey': vt }, signal: AbortSignal.timeout(9000) });
+      if (r.status === 404) out.push('VirusTotal: not found.');
+      else if (r.ok) {
+        const a = (await r.json()).data.attributes; const s = a.last_analysis_stats || {};
+        const total = (s.malicious || 0) + (s.suspicious || 0) + (s.undetected || 0) + (s.harmless || 0);
+        out.push(`VirusTotal: ${s.malicious || 0}/${total} malicious | type: ${a.type_description || '?'} | names: ${(a.names || []).slice(0, 3).join(', ')}` +
+          (a.popular_threat_classification ? `\nthreat label: ${a.popular_threat_classification.suggested_threat_label}` : ''));
+      } else out.push(`VirusTotal: HTTP ${r.status}.`);
+    } catch (e) { out.push(`VirusTotal: ${e.message}`); }
+  } else out.push('VirusTotal: skipped (set VT_API_KEY for detections + threat label).');
+  const mb = String((env && env.MALWAREBAZAAR_API_KEY) || '');
+  if (mb) {
+    try {
+      const r = await fetch('https://mb-api.abuse.ch/api/v1/', { method: 'POST', headers: { 'Auth-Key': mb, 'Content-Type': 'application/x-www-form-urlencoded' }, body: `query=get_info&hash=${x}`, signal: AbortSignal.timeout(9000) });
+      if (r.ok) { const d = await r.json(); if (d.query_status === 'ok' && d.data && d.data[0]) { const m = d.data[0]; out.push(`MalwareBazaar: ${m.signature || 'unknown family'} | ${m.file_type || ''} | tags: ${(m.tags || []).join(', ')}`); } else out.push('MalwareBazaar: not found.'); }
+    } catch (e) { out.push(`MalwareBazaar: ${e.message}`); }
+  }
+  return out.join('\n');
+}
+
+// Static triage of a sample fetched by URL — type, hashes, strings, IOCs, suspicious APIs.
+async function fileAnalyze(url) {
+  let u; try { u = new URL(url); } catch { return 'file_analyze: a direct file URL is required.'; }
+  if (isPrivateHost(u.hostname)) return `file_analyze: ${u.hostname} is private/internal — blocked.`;
+  try {
+    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, redirect: 'follow', signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return `file_analyze ${u.hostname}: fetch failed (HTTP ${r.status}).`;
+    let bytes = new Uint8Array(await r.arrayBuffer());
+    const size = bytes.length;
+    if (size > 3145728) bytes = bytes.slice(0, 3145728);
+    const sha256 = await sha256hexBytes(bytes);
+    const sha1 = [...new Uint8Array(await crypto.subtle.digest('SHA-1', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
+    const hex = n => [...bytes.slice(0, n)].map(b => b.toString(16).padStart(2, '0')).join('');
+    let ftype = 'unknown / data';
+    if (bytes[0] === 0x4D && bytes[1] === 0x5A) ftype = 'PE/DOS executable (MZ)';
+    else if (hex(4) === '7f454c46') ftype = 'ELF executable';
+    else if (['cafebabe', 'feedface', 'feedfacf', 'cffaedfe'].includes(hex(4))) ftype = 'Mach-O executable';
+    else if (hex(4) === '25504446') ftype = 'PDF document';
+    else if (hex(8) === 'd0cf11e0a1b11ae1') ftype = 'OLE / legacy Office (DOC/XLS/PPT)';
+    else if (bytes[0] === 0x50 && bytes[1] === 0x4B) ftype = 'ZIP / OOXML Office (DOCX/XLSX/JAR/APK)';
+    else if (hex(4) === '4d534346') ftype = 'Microsoft Cabinet (CAB)';
+    let cur = '', strings = [];
+    for (let i = 0; i < bytes.length; i++) { const c = bytes[i]; if (c >= 32 && c < 127) cur += String.fromCharCode(c); else { if (cur.length >= 5) strings.push(cur); cur = ''; } }
+    if (cur.length >= 5) strings.push(cur);
+    const blob = strings.join('\n'); const low = blob.toLowerCase();
+    const urls = [...new Set(blob.match(/https?:\/\/[^\s"'<>]{6,200}/g) || [])].slice(0, 12);
+    const ips = [...new Set(blob.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])].slice(0, 12);
+    const SUS = ['CreateRemoteThread', 'VirtualAllocEx', 'WriteProcessMemory', 'LoadLibrary', 'GetProcAddress', 'WinExec', 'ShellExecute', 'URLDownloadToFile', 'RegSetValue', 'CryptEncrypt', 'powershell', 'cmd.exe', 'rundll32', 'schtasks', 'WScript.Shell', 'FromBase64String', 'Invoke-Expression', 'mimikatz', 'VirtualProtect', 'SetWindowsHookEx', 'IsDebuggerPresent', 'bcdedit', 'vssadmin', 'wbadmin'];
+    const flags = SUS.filter(k => low.indexOf(k.toLowerCase()) >= 0);
+    const notable = strings.filter(t => t.length >= 8 && t.length <= 120).slice(0, 25);
+    let out = `file_analyze ${u.hostname}\nsize: ${size} bytes | type: ${ftype}\nsha256: ${sha256}\nsha1: ${sha1}`;
+    if (flags.length) out += `\nsuspicious indicators (${flags.length}): ${flags.join(', ')}`;
+    if (urls.length) out += `\nembedded URLs:\n${urls.join('\n')}`;
+    if (ips.length) out += `\nembedded IPs: ${ips.join(', ')}`;
+    if (notable.length) out += `\nnotable strings:\n${notable.join('\n')}`;
+    out += `\n\n(Run hash_lookup ${sha1} for reputation; for deep RE — yara/capa/radare2 — set TOOL_BROKER_URL.)`;
+    return out;
+  } catch (e) { return `file_analyze ${u.hostname}: failed (${e.message}).`; }
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -2152,7 +2238,7 @@ inp.addEventListener('keydown', async function(e){
   if(!c.msgs.length){ c.title=q.slice(0,40); }
   c.msgs.push({role:'user',content:q}); saveChats(chats); renderChats();
   addMsg('user',q);
-  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
+  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions,hashes:od.hashes}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
   var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full=''; var firstTok=true;
   el2.innerHTML='<span class="spinner"></span><span class="think">Agent Garrett is thinking…</span>';
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
@@ -2336,6 +2422,7 @@ function detectOsint(q, prev){
   var cves=uniq((text.match(/CVE-\\d{4}-\\d+/ig)||[]).map(function(c){ return c.toUpperCase(); }));
   var crypto=uniq(text.match(/\\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39}|0x[a-fA-F0-9]{40})\\b/g)||[]);
   var onions=uniq((text.match(/\\b[a-z2-7]{16}\\.onion\\b|\\b[a-z2-7]{56}\\.onion\\b/ig)||[]).map(function(x){ return x.toLowerCase(); }));
+  var hashes=uniq((text.match(/\\b[a-f0-9]{64}\\b|\\b[a-f0-9]{40}\\b|\\b[a-f0-9]{32}\\b/ig)||[]).map(function(x){ return x.toLowerCase(); }));
   var emailDoms={}; emails.forEach(function(e){ emailDoms[e.split('@')[1].toLowerCase()]=1; });
   var imgHosts={}; images.forEach(function(x){ try{ imgHosts[new URL(x).hostname.toLowerCase()]=1; }catch(e){} });
   var domains=uniq((text.match(/\\b(?:[a-z0-9\\-]+\\.)+[a-z]{2,24}\\b/ig)||[]).map(function(d){ return d.toLowerCase(); })
@@ -2345,26 +2432,27 @@ function detectOsint(q, prev){
   var handles=uniq((text.match(/(?:^|\\s)@([A-Za-z0-9_]{2,30})/g)||[]).map(function(s){ return s.trim().replace(/^@/,''); }));
   var um=low.match(/\\b(?:username|handle|user|account|alias)\\s*[:=]?\\s*['"]?([a-z0-9_.\\-]{2,30})/);
   if(um){ handles.push(um[1]); handles=uniq(handles); }
-  var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate','email security','spf','dmarc','spoof','typosquat','lookalike','phishing','wallet','bitcoin','ethereum'];
+  var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate','email security','spf','dmarc','spoof','typosquat','lookalike','phishing','wallet','bitcoin','ethereum','malware','sample','hash','virus','trojan','stealer','ransomware','reverse engineer','breakdown'];
   var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
   var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
   var refPrev=/\\b(it|its|that|this|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo))\\b/i.test(low);
-  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length;
+  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length;
   var soloEntity=(entityCount===1)&&(text.split(/\\s+/).length<=2);
   if(entityCount===0 && prev && (hasTrigger||refPrev||personHint)){
-    emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice(); images=(prev.images||[]).slice(); crypto=(prev.crypto||[]).slice(); onions=(prev.onions||[]).slice();
-    entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length;
+    emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice(); images=(prev.images||[]).slice(); crypto=(prev.crypto||[]).slice(); onions=(prev.onions||[]).slice(); hashes=(prev.hashes||[]).slice();
+    entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length;
   }
   var intent='full';
   if(images.length || /\\b(image|photo|picture|exif|reverse image|geoloc)\\b/.test(low)) intent='image';
   else if(onions.length || /\\b(onion|dark ?web|tor network|leaked on|paste dump)\\b/.test(low)) intent='darkweb';
+  else if(hashes.length || /\\b(malware|sample|virus|trojan|stealer|ransomware|payload|reverse engineer|disassemble|md5|sha1|sha256|sha-1|sha-256)\\b/.test(low)) intent='malware';
   else if(/\\b(origin|behind|real ip|true ip|bypass|unmask)\\b/.test(low)) intent='origin';
   else if(/\\b(discourse|wordpress|drupal|joomla|cms|tech stack|framework|fingerprint|built with|built on|powered by|running|is it a|is it an)\\b/.test(low)) intent='tech';
   else if(/\\b(breach|pwned|leaked|leak|exposed|hibp|compromis)\\b/.test(low)) intent='breach';
   var hasIntent=intent!=='full';
   var actionable=hasTrigger||hasIntent||(refPrev&&!!prev);
   var isOsint=(entityCount>0&&actionable)||soloEntity||(hasTrigger&&personHint);
-  return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, crypto:crypto, onions:onions, keyword:text };
+  return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, crypto:crypto, onions:onions, hashes:hashes, keyword:text };
 }
 
 function osintSummary(od){
@@ -2377,6 +2465,7 @@ function osintSummary(od){
   if(od.images && od.images.length) p.push('image:'+od.images.length);
   if(od.crypto && od.crypto.length) p.push('crypto:'+od.crypto.join(','));
   if(od.onions && od.onions.length) p.push('onion:'+od.onions.length);
+  if(od.hashes && od.hashes.length) p.push('hash:'+od.hashes.length);
   return p.length?p.join(' | '):'keyword search';
 }
 async function runOsintTool(tool, arg){
@@ -2454,6 +2543,11 @@ async function runOsintFlow(q, od, c){
     dterms.slice(0,4).forEach(function(x){ jobs.push(['onion_search '+x,'onion_search',x]); });
     (od.onions||[]).forEach(function(x){ jobs.push(['onion_fetch '+x,'onion_fetch',x]); });
     (od.emails||[]).forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); });
+  } else if(od.intent==='malware'){
+    (od.hashes||[]).forEach(function(x){ jobs.push(['hash_lookup '+x,'hash_lookup',x]); });
+    var furl=''; var hi=q.indexOf('http'); if(hi>=0) furl=q.slice(hi).split(' ')[0];
+    if(furl) jobs.push(['file_analyze '+furl,'file_analyze',furl]);
+    if(!jobs.length) addMsg('system','OSINT(malware): provide a file hash (md5/sha1/sha256) or a sample URL.');
   } else if(od.intent==='origin'){
     od.domains.forEach(function(x){ jobs.push(['origin_ip '+x,'origin_ip',x]); jobs.push(['dns_lookup '+x,'dns_lookup',x]); jobs.push(['crtsh_subs '+x,'crtsh_subs',x]); });
     od.ips.forEach(addIpFull);
@@ -2510,7 +2604,7 @@ async function runOsintFlow(q, od, c){
   addMsg('system','> '+rsLine);
   var synth=blocks.map(function(b){ return b.slice(0,900); }).join('\\n\\n').slice(0,13500);
   synth='RISK ASSESSMENT (heuristic, computed from the evidence): '+rsLine+'\\n\\n'+synth;
-  var objective='You are writing a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence in the context - never invent a fact not present in it; mark anything missing as UNKNOWN. Do NOT merely restate tool output: ANALYZE it - infer the subject likely identity, connect accounts/emails/domains/repos that plausibly belong to the same person, and weigh your confidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences with your assessment)\\n## Entities and Identifiers\\n## Findings (per source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaked/commit emails - or state none found)\\n## Pivots and Links (how discovered emails/domains/repos connect and what they reveal)\\n## Gaps and Confidence (what is UNKNOWN, reliability, plus 3-5 concrete recommended next OSINT steps)\\nBe precise, defensive in framing, and analytical.';
+  var objective=(od.intent==='malware') ? ('You are writing a FORMAL MALWARE ANALYSIS report for: "'+q+'". Use ONLY the tool evidence in the context; never invent a fact not present in it; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary\\n## Sample Identification (hashes, file type, size)\\n## Reputation & Classification (Cymru MHR / VirusTotal / MalwareBazaar verdicts, malware family)\\n## Capabilities & Suspicious Indicators (notable APIs/strings and what they imply)\\n## Indicators of Compromise (URLs, IPs, hashes)\\n## MITRE ATT&CK Mapping (only techniques clearly evidenced)\\n## Detection & Mitigation\\nBe precise and defensive.') : ('You are writing a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence in the context - never invent a fact not present in it; mark anything missing as UNKNOWN. Do NOT merely restate tool output: ANALYZE it - infer the subject likely identity, connect accounts/emails/domains/repos that plausibly belong to the same person, and weigh your confidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences with your assessment)\\n## Entities and Identifiers\\n## Findings (per source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaked/commit emails - or state none found)\\n## Pivots and Links (how discovered emails/domains/repos connect and what they reveal)\\n## Gaps and Confidence (what is UNKNOWN, reliability, plus 3-5 concrete recommended next OSINT steps)\\nBe precise, defensive in framing, and analytical.');
   var report;
   try{ report=await callTask(objective, synth); }
   catch(e){ report='# OSINT write-up: '+q+'\\n\\n(synthesis failed: '+e.message+')\\n\\n'+evidence; }
@@ -2593,7 +2687,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
@@ -2631,7 +2725,7 @@ el('t-run').onclick=async function(){
 async function startOsint(obj){
   if(!obj || !obj.trim()) return;
   var od=detectOsint(obj, window.__lastOsint); od.isOsint=true;
-  window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions};
+  window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions,hashes:od.hashes};
   busy=true; inp.disabled=true;
   var c=active(); addMsg('user',obj); c.msgs.push({role:'user',content:obj}); if(c.msgs.length===1) c.title='[osint] '+obj.slice(0,30); saveChats(chats); renderChats();
   try{ await runOsintFlow(obj, od, c); }catch(e){ addMsg('system','OSINT error: '+e.message); }
