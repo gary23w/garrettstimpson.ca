@@ -725,6 +725,9 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'origin_ip', category: 'recon', passive: true, description: 'Find possible origin IP behind Cloudflare via passive subdomain DNS probing' },
   { name: 'image_osint', category: 'osint', passive: true, description: 'Image OSINT: hash, type, EXIF (camera/GPS/timestamp) + reverse-image-search links' },
   { name: 'onion_search', category: 'darkweb', passive: true, description: 'Dark-web exposure: Ahmia onion index (+ Tor broker if TOOL_BROKER_URL set)' },
+  { name: 'email_security', category: 'recon', passive: true, description: 'SPF / DMARC / MX / DNSSEC posture for a domain (spoofability check)' },
+  { name: 'typosquat', category: 'recon', passive: true, description: 'Generate lookalike domains and flag registered ones (phishing / brand abuse)' },
+  { name: 'crypto_addr', category: 'osint', passive: true, description: 'BTC/ETH address balance + transaction activity (threat-intel)' },
 ];
 
 function parseCsvSet(value) {
@@ -824,6 +827,9 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'origin_ip')    return originIp(String(args.domain || args.target || ''));
   if (name === 'image_osint')  return imageOsint(String(args.url || args.image || args.target || ''));
   if (name === 'onion_search') return onionSearch(env, String(args.query || args.target || args.domain || args.email || ''));
+  if (name === 'email_security') return emailSecurity(String(args.domain || args.target || ''));
+  if (name === 'typosquat')    return typosquat(String(args.domain || args.target || ''));
+  if (name === 'crypto_addr')  return cryptoAddr(String(args.address || args.addr || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1291,6 +1297,95 @@ async function onionSearch(env, query) {
   return `onion_search "${q}" (dark-web exposure monitoring)\n` + lines.join('\n\n') + '\n\nNote: index references surfaced for defensive exposure assessment only.';
 }
 
+// Email-security posture — SPF / DMARC / MX / DNSSEC (spoofability assessment).
+async function emailSecurity(domain) {
+  const d = String(domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+  if (!d || d.indexOf('.') < 0) return 'email_security: a domain is required.';
+  const doh = async (name, type) => {
+    try {
+      const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`,
+        { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(7000) });
+      const j = await r.json(); return j.Answer || [];
+    } catch { return []; }
+  };
+  const clean = a => a.map(x => String(x.data || '').replace(/^"|"$/g, '').replace(/" "/g, ''));
+  const root = clean(await doh(d, 'TXT'));
+  const dmRec = clean(await doh('_dmarc.' + d, 'TXT'));
+  const mxA = await doh(d, 'MX');
+  const dk = await doh(d, 'DNSKEY');
+  const spf = root.find(t => /v=spf1/i.test(t));
+  const dmarc = dmRec.find(t => /v=DMARC1/i.test(t));
+  const mx = mxA.filter(a => a.type === 15).map(a => a.data);
+  const dnssec = dk.some(a => a.type === 48);
+  const pol = (dmarc && (dmarc.match(/p=([a-z]+)/i) || [])[1]) || '';
+  const gaps = [];
+  if (!spf) gaps.push('No SPF record — sender domain is easier to spoof.');
+  else if (/[~?]all/.test(spf)) gaps.push('SPF uses soft-fail (~all/?all) — weaker enforcement than -all.');
+  if (!dmarc) gaps.push('No DMARC record — no anti-spoofing policy published.');
+  else if (/p=none/i.test(dmarc)) gaps.push('DMARC p=none — monitor only; does NOT block spoofed mail.');
+  if (!mx.length) gaps.push('No MX — domain does not receive mail (or is misconfigured).');
+  if (!dnssec) gaps.push('DNSSEC not enabled — DNS answers are not cryptographically signed.');
+  return `email_security ${d}\nSPF: ${spf || 'NONE'}\nDMARC: ${dmarc || 'NONE'}${pol ? ' (policy: ' + pol + ')' : ''}\nMX: ${mx.join(', ') || 'none'}\nDNSSEC: ${dnssec ? 'enabled' : 'not enabled'}\n` +
+    (gaps.length ? `Spoofability / gaps:\n- ${gaps.join('\n- ')}` : 'Posture: SPF + enforcing DMARC + DNSSEC — strong.');
+}
+
+// Typosquat / lookalike-domain discovery (phishing & brand-abuse, passive DoH).
+function typoCandidates(domain) {
+  const parts = domain.split('.'); const name = parts[0]; const tld = parts.slice(1).join('.') || 'com';
+  const set = new Set();
+  for (let i = 0; i < name.length; i++) set.add(name.slice(0, i) + name.slice(i + 1) + '.' + tld);          // omission
+  for (let i = 0; i < name.length - 1; i++) { const a = name.split(''); const t = a[i]; a[i] = a[i + 1]; a[i + 1] = t; set.add(a.join('') + '.' + tld); } // transposition
+  for (let i = 0; i < name.length; i++) set.add(name.slice(0, i) + name[i] + name.slice(i) + '.' + tld);     // repetition
+  const homo = { o: '0', l: '1', i: '1', e: '3', a: '4', s: '5' };
+  for (let i = 0; i < name.length; i++) { const c = name[i]; if (homo[c]) set.add(name.slice(0, i) + homo[c] + name.slice(i + 1) + '.' + tld); } // homoglyph
+  for (let i = 1; i < name.length; i++) set.add(name.slice(0, i) + '-' + name.slice(i) + '.' + tld);         // hyphenation
+  ['com', 'net', 'org', 'co', 'io', 'app', 'xyz', 'info', 'online', 'site'].forEach(t => { if (t !== tld) set.add(name + '.' + t); }); // tld swap
+  set.delete(domain);
+  return [...set].slice(0, 34);
+}
+async function typosquat(domain) {
+  const d = String(domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+  if (!d || d.split('.').length < 2) return 'typosquat: a domain (name.tld) is required.';
+  const cands = typoCandidates(d);
+  const live = [];
+  await Promise.all(cands.map(async c => {
+    try {
+      const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(c)}&type=A`,
+        { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(6000) });
+      const j = await r.json();
+      const a = (j.Answer || []).filter(x => x.type === 1).map(x => x.data);
+      if (a.length) live.push(`${c} -> ${a.slice(0, 2).join(', ')}`);
+    } catch {}
+  }));
+  if (!live.length) return `typosquat ${d}: checked ${cands.length} lookalikes — none currently resolve (no active typosquats found).`;
+  return `typosquat ${d}: ${live.length}/${cands.length} lookalikes are REGISTERED & resolving (possible phishing / brand abuse — investigate):\n${live.join('\n')}`;
+}
+
+// Crypto-address intel — BTC (blockchain.info) / ETH (blockchair), keyless. Threat-intel.
+async function cryptoAddr(addr) {
+  const a = String(addr || '').trim();
+  if (/^(bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39})$/.test(a)) {
+    try {
+      const r = await fetch(`https://blockchain.info/rawaddr/${a}?limit=0`, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(9000) });
+      if (!r.ok) return `crypto_addr ${a}: BTC lookup failed (HTTP ${r.status}).`;
+      const d = await r.json(); const btc = v => (Number(v) / 1e8).toFixed(8);
+      return `crypto_addr ${a} (Bitcoin)\ntx count: ${d.n_tx}\ntotal received: ${btc(d.total_received)} BTC\ntotal sent: ${btc(d.total_sent)} BTC\nbalance: ${btc(d.final_balance)} BTC`;
+    } catch (e) { return `crypto_addr ${a}: BTC lookup failed (${e.message}).`; }
+  }
+  if (/^0x[a-fA-F0-9]{40}$/.test(a)) {
+    try {
+      const r = await fetch(`https://api.blockchair.com/ethereum/dashboards/address/${a}`, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(9000) });
+      if (!r.ok) return `crypto_addr ${a}: ETH lookup failed (HTTP ${r.status}).`;
+      const d = await r.json(); const k = a.toLowerCase();
+      const info = d.data && d.data[k] && d.data[k].address;
+      if (!info) return `crypto_addr ${a}: no ETH data returned.`;
+      const eth = v => (Number(v) / 1e18).toFixed(6);
+      return `crypto_addr ${a} (Ethereum)\nbalance: ${eth(info.balance)} ETH\ntx count: ${info.transaction_count != null ? info.transaction_count : '?'}\nreceived: ${info.received != null ? eth(info.received) : '?'} ETH`;
+    } catch (e) { return `crypto_addr ${a}: ETH lookup failed (${e.message}).`; }
+  }
+  return `crypto_addr: "${a}" is not a recognized BTC or ETH address.`;
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -1613,6 +1708,8 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
   </div>
   <div id="footer" style="text-align:center;padding:9px 0 4px;border-top:1px solid var(--border);margin-top:4px;">
     <button class="btn" id="btn-export" title="Download all your chats, memory, jobs and settings as a JSON file">&#8675; export my data (JSON)</button>
+    <button class="btn" id="btn-import" title="Restore chats, memory, jobs and settings from an exported JSON file">&#8673; import</button>
+    <input type="file" id="imp-file" accept="application/json" style="display:none">
   </div>
 </div>
 <script>
@@ -1775,7 +1872,7 @@ inp.addEventListener('keydown', async function(e){
   if(!c.msgs.length){ c.title=q.slice(0,40); }
   c.msgs.push({role:'user',content:q}); saveChats(chats); renderChats();
   addMsg('user',q);
-  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
+  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
   var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full='';
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
              topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value };
@@ -1956,6 +2053,7 @@ function detectOsint(q, prev){
   var emails=uniq(text.match(/[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}/g)||[]);
   var ips=uniq((text.match(/\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b/g)||[]).filter(function(ip){ return ip.split('.').every(function(o){ return +o>=0&&+o<=255; }); }));
   var cves=uniq((text.match(/CVE-\\d{4}-\\d+/ig)||[]).map(function(c){ return c.toUpperCase(); }));
+  var crypto=uniq(text.match(/\\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39}|0x[a-fA-F0-9]{40})\\b/g)||[]);
   var emailDoms={}; emails.forEach(function(e){ emailDoms[e.split('@')[1].toLowerCase()]=1; });
   var imgHosts={}; images.forEach(function(x){ try{ imgHosts[new URL(x).hostname.toLowerCase()]=1; }catch(e){} });
   var domains=uniq((text.match(/\\b(?:[a-z0-9\\-]+\\.)+[a-z]{2,24}\\b/ig)||[]).map(function(d){ return d.toLowerCase(); })
@@ -1965,15 +2063,15 @@ function detectOsint(q, prev){
   var handles=uniq((text.match(/(?:^|\\s)@([A-Za-z0-9_]{2,30})/g)||[]).map(function(s){ return s.trim().replace(/^@/,''); }));
   var um=low.match(/\\b(?:username|handle|user|account|alias)\\s*[:=]?\\s*['"]?([a-z0-9_.\\-]{2,30})/);
   if(um){ handles.push(um[1]); handles=uniq(handles); }
-  var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate'];
+  var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate','email security','spf','dmarc','spoof','typosquat','lookalike','phishing','wallet','bitcoin','ethereum'];
   var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
   var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
   var refPrev=/\\b(it|its|that|this|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo))\\b/i.test(low);
-  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length;
+  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length;
   var soloEntity=(entityCount===1)&&(text.split(/\\s+/).length<=2);
   if(entityCount===0 && prev && (hasTrigger||refPrev||personHint)){
-    emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice(); images=(prev.images||[]).slice();
-    entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length;
+    emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice(); images=(prev.images||[]).slice(); crypto=(prev.crypto||[]).slice();
+    entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length;
   }
   var intent='full';
   if(images.length || /\\b(image|photo|picture|exif|reverse image|geoloc)\\b/.test(low)) intent='image';
@@ -1984,7 +2082,7 @@ function detectOsint(q, prev){
   var hasIntent=intent!=='full';
   var actionable=hasTrigger||hasIntent||(refPrev&&!!prev);
   var isOsint=(entityCount>0&&actionable)||soloEntity||(hasTrigger&&personHint);
-  return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, keyword:text };
+  return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, crypto:crypto, keyword:text };
 }
 
 function osintSummary(od){
@@ -1995,6 +2093,7 @@ function osintSummary(od){
   if(od.ips.length) p.push('ip:'+od.ips.join(','));
   if(od.cves.length) p.push('cve:'+od.cves.join(','));
   if(od.images && od.images.length) p.push('image:'+od.images.length);
+  if(od.crypto && od.crypto.length) p.push('crypto:'+od.crypto.join(','));
   return p.length?p.join(' | '):'keyword search';
 }
 async function runOsintTool(tool, arg){
@@ -2044,7 +2143,7 @@ async function runOsintFlow(q, od, c){
   addMsg('system','> OSINT run ('+(od.intent||'full')+') - '+osintSummary(od));
   var jobs=[];
   function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
-  function addDomainFull(x){ ['rdap_domain','dns_lookup','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint')?('https://'+x):x]); }); }
+  function addDomainFull(x){ ['rdap_domain','dns_lookup','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint')?('https://'+x):x]); }); }
   if(od.intent==='image'){
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
     if(!(od.images||[]).length) addMsg('system','OSINT(image): no image URL found - paste a direct image link (jpg/png/...).');
@@ -2068,6 +2167,7 @@ async function runOsintFlow(q, od, c){
     od.emails.forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); jobs.push(['gravatar '+x,'gravatar',x]); });
     od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); });
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
+    (od.crypto||[]).forEach(function(x){ jobs.push(['crypto_addr '+x,'crypto_addr',x]); });
     var sterms=[];
     (od.handles||[]).forEach(function(h){ sterms.push('"'+h+'"'); });
     (od.emails||[]).forEach(function(e){ sterms.push('"'+e+'"'); });
@@ -2159,7 +2259,25 @@ el('btn-export').onclick=function(){
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   addMsg('system','Exported '+data.chats.length+' chat(s), '+data.memory.length+' memory item(s), '+data.jobs.length+' job(s) to JSON.');
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query' };
+el('btn-import').onclick=function(){ el('imp-file').click(); };
+el('imp-file').onchange=function(ev){
+  var f=ev.target.files&&ev.target.files[0]; if(!f) return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    try{
+      var data=JSON.parse(rd.result);
+      if(data.chats){ try{ localStorage.setItem('gsa_chats', JSON.stringify(data.chats)); }catch(e){} }
+      if(data.activeChat){ try{ localStorage.setItem('gsa_active', data.activeChat); }catch(e){} }
+      if(data.settings){ try{ localStorage.setItem('gsa_settings', JSON.stringify(data.settings)); }catch(e){} }
+      if(data.jobs){ try{ localStorage.setItem('gsa_jobs', JSON.stringify(data.jobs)); }catch(e){} }
+      if(data.memory){ try{ localStorage.setItem('gsa_memory', JSON.stringify(data.memory)); }catch(e){} }
+      addMsg('system','Imported '+((data.chats||[]).length)+' chat(s), '+((data.memory||[]).length)+' memory item(s). Reloading...');
+      setTimeout(function(){ location.reload(); }, 800);
+    }catch(e){ addMsg('system','Import failed: '+e.message); }
+  };
+  rd.readAsText(f);
+};
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
