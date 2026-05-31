@@ -759,6 +759,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'dork', category: 'search', passive: true, description: 'Generate + run Google dorks for a domain/email/name (recon)' },
   { name: 'phish_check', category: 'recon', passive: false, description: 'Phishing verdict for a URL: domain age, URLhaus, lure keywords, login form, redirects' },
   { name: 'archive_urls', category: 'osint', passive: true, description: 'Wayback historical URLs/endpoints for a domain (forgotten paths)' },
+  { name: 'favicon_hash', category: 'recon', passive: false, description: 'Shodan/FOFA favicon-hash pivot — find other servers sharing a site favicon' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
   { name: 'decode', category: 'malware', passive: true, description: 'Recursive multi-layer decode (base64/hex/url/gzip) + refang + IOCs' },
@@ -882,6 +883,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'dork')         return dorkTool(env, String(args.target || args.query || ''));
   if (name === 'phish_check')  return phishCheck(String(args.url || args.target || ''));
   if (name === 'archive_urls') return archiveUrls(String(args.domain || args.target || ''));
+  if (name === 'favicon_hash') return faviconHash(String(args.url || args.target || ''));
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
   if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
@@ -2031,6 +2033,46 @@ async function archiveUrls(domain) {
   } catch (e) { return `archive_urls ${d}: failed (${e.message}).`; }
 }
 
+// MurmurHash3 x86 32-bit (signed) — for Shodan/FOFA favicon-hash pivoting.
+function mmh3_32(key) {
+  const data = []; for (let i = 0; i < key.length; i++) data.push(key.charCodeAt(i) & 0xff);
+  const c1 = 0xcc9e2d51, c2 = 0x1b873593, len = data.length; let h1 = 0;
+  const rl = len & ~3;
+  for (let i = 0; i < rl; i += 4) {
+    let k1 = (data[i]) | (data[i + 1] << 8) | (data[i + 2] << 16) | (data[i + 3] << 24);
+    k1 = Math.imul(k1, c1); k1 = (k1 << 15) | (k1 >>> 17); k1 = Math.imul(k1, c2);
+    h1 ^= k1; h1 = (h1 << 13) | (h1 >>> 19); h1 = (Math.imul(h1, 5) + 0xe6546b64) | 0;
+  }
+  let k1 = 0;
+  switch (len & 3) {
+    case 3: k1 ^= data[rl + 2] << 16;
+    case 2: k1 ^= data[rl + 1] << 8;
+    case 1: k1 ^= data[rl]; k1 = Math.imul(k1, c1); k1 = (k1 << 15) | (k1 >>> 17); k1 = Math.imul(k1, c2); h1 ^= k1;
+  }
+  h1 ^= len; h1 ^= h1 >>> 16; h1 = Math.imul(h1, 0x85ebca6b); h1 ^= h1 >>> 13; h1 = Math.imul(h1, 0xc2b2ae35); h1 ^= h1 >>> 16;
+  return h1 | 0;
+}
+function b64encodeNL(bytes) {
+  let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  const b = btoa(bin); let out = '';
+  for (let i = 0; i < b.length; i += 76) out += b.slice(i, i + 76) + '\n';
+  return out;
+}
+// Favicon hash (Shodan/FOFA pivot) — find other servers sharing a site's favicon.
+async function faviconHash(url) {
+  let u; try { u = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch { return 'favicon_hash: a URL or domain is required.'; }
+  if (isPrivateHost(u.hostname)) return `favicon_hash: ${u.hostname} is private/internal — blocked.`;
+  const favUrl = /favicon/i.test(u.pathname) ? u.toString() : u.origin + '/favicon.ico';
+  try {
+    const r = await fetch(favUrl, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return `favicon_hash ${u.hostname}: no favicon at /favicon.ico (HTTP ${r.status}).`;
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    if (!bytes.length) return `favicon_hash ${u.hostname}: empty favicon.`;
+    const hash = mmh3_32(b64encodeNL(bytes));
+    return `favicon_hash ${u.hostname}\nShodan favicon hash: ${hash}\npivot — find servers with the SAME favicon (related/phishing infra):\nShodan: https://www.shodan.io/search?query=http.favicon.hash%3A${hash}\nFOFA: https://fofa.info/result?qbase64=${encodeURIComponent(btoa('icon_hash="' + hash + '"'))}`;
+  } catch (e) { return `favicon_hash ${u.hostname}: failed (${e.message}).`; }
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -2986,7 +3028,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
