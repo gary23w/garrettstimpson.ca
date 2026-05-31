@@ -1,0 +1,36 @@
+---
+layout: default
+---
+<article class="post" itemscope itemtype="http://schema.org/BlogPosting">
+  <header class="post-header">
+    <a class="post-back" href="{{ '/' | relative_url }}">&larr; all research</a>
+    <h1 class="post-title" itemprop="name headline">{{ page.title | escape }}</h1>
+    <div class="post-meta">
+      <span class="post-date"><time datetime="{{ page.date | date_to_xmlschema }}" itemprop="datePublished">{{ page.date | date: "%Y.%m.%d" }}</time></span>
+      <span class="post-read">~{{ page.content | number_of_words | divided_by: 200 | plus: 1 }} min read</span>
+      {%- if page.categories.size > 0 -%}<span class="post-cats">{{ page.categories | join: " / " }}</span>{%- endif -%}
+    </div>
+    {%- if page.tags.size > 0 -%}
+    <div class="post-tags">{%- for tag in page.tags -%}<span class="tag">{{ tag }}</span>{%- endfor -%}</div>
+    {%- endif -%}
+  </header>
+
+  <div class="post-content" itemprop="articleBody">
+    {{ content }}
+  </div>
+
+  <nav class="post-nav" aria-label="Post navigation">
+    {%- if page.previous.url -%}
+    <a class="post-nav-link post-nav-prev" href="{{ page.previous.url | relative_url }}">
+      <span class="pn-dir">&larr; previous</span>
+      <span class="pn-title">{{ page.previous.title | escape | truncate: 48 }}</span>
+    </a>
+    {%- endif -%}
+    {%- if page.next.url -%}
+    <a class="post-nav-link post-nav-next" href="{{ page.next.url | relative_url }}">
+      <span class="pn-dir">next &rarr;</span>
+      <span class="pn-title">{{ page.next.title | escape | truncate: 48 }}</span>
+    </a>
+    {%- endif -%}
+  </nav>
+</article>
