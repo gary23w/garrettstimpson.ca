@@ -731,6 +731,8 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'dns_records', category: 'osint', passive: true, description: 'Full DNS record dump (A/AAAA/MX/NS/TXT/CAA/SOA) via DoH' },
   { name: 'tor_exit', category: 'osint', passive: true, description: 'Is an IP a known Tor relay / exit node (onionoo)' },
   { name: 'pwned_password', category: 'people', passive: true, description: 'Check a password against Have I Been Pwned (k-anonymity; only a hash prefix is sent)' },
+  { name: 'cve_search', category: 'intel', passive: true, description: 'Search NVD for CVEs by product/keyword (top results with CVSS)' },
+  { name: 'bucket_finder', category: 'recon', passive: false, description: 'Check S3/GCS/Azure for an exposed storage bucket by name (contacts providers)' },
 ];
 
 function parseCsvSet(value) {
@@ -836,6 +838,8 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'dns_records')  return dnsRecords(String(args.domain || args.target || ''));
   if (name === 'tor_exit')     return torExit(String(args.ip || args.target || ''));
   if (name === 'pwned_password') return pwnedPassword(String(args.password || args.pw || args.target || ''));
+  if (name === 'cve_search')   return cveSearch(String(args.query || args.keyword || args.target || ''));
+  if (name === 'bucket_finder') return bucketFinder(String(args.name || args.target || args.domain || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1447,6 +1451,56 @@ async function pwnedPassword(pw) {
       ? `pwned_password: COMPROMISED — this exact password appears in ${count.toLocaleString()} known breaches. Do NOT use it anywhere.`
       : `pwned_password: not found in the Have I Been Pwned breach corpus (absence is not proof of strength).`;
   } catch (e) { return `pwned_password: lookup failed (${e.message}).`; }
+}
+
+// Search NVD for CVEs by product/keyword.
+async function cveSearch(query) {
+  const q = String(query || '').trim();
+  if (!q) return 'cve_search: a product or keyword is required.';
+  try {
+    const r = await fetch(`https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=${encodeURIComponent(q)}&resultsPerPage=6`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return `cve_search "${q}": NVD lookup failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    const v = d.vulnerabilities || [];
+    if (!v.length) return `cve_search "${q}": no CVEs found.`;
+    const rows = v.slice(0, 6).map(x => {
+      const c = x.cve;
+      const en = (c.descriptions || []).find(z => z.lang === 'en');
+      let score = '?';
+      try {
+        const m = c.metrics || {};
+        const cv = (m.cvssMetricV31 || m.cvssMetricV30 || m.cvssMetricV2 || [])[0];
+        if (cv && cv.cvssData) score = cv.cvssData.baseScore + (cv.cvssData.baseSeverity ? ' ' + cv.cvssData.baseSeverity : '');
+      } catch {}
+      return `${c.id} [CVSS ${score}] ${(en ? en.value : '').slice(0, 150)}`;
+    });
+    return `cve_search "${q}": ${d.totalResults} total — top ${rows.length}:\n` + rows.join('\n');
+  } catch (e) { return `cve_search "${q}": failed (${e.message}).`; }
+}
+
+// Cloud-storage exposure — check S3 / GCS / Azure for a bucket by name. Contacts providers.
+async function bucketFinder(name) {
+  let n = String(name || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+  n = n.split('.')[0];
+  if (!n || !/^[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]$/.test(n)) return 'bucket_finder: a bucket/name keyword is required.';
+  const targets = [
+    ['S3', `https://${n}.s3.amazonaws.com`],
+    ['GCS', `https://storage.googleapis.com/${n}`],
+    ['Azure', `https://${n}.blob.core.windows.net/?comp=list`],
+  ];
+  const out = await Promise.all(targets.map(async ([label, url]) => {
+    try {
+      const r = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(8000) });
+      let verdict;
+      if (r.status === 200) verdict = 'PUBLIC (listable!)';
+      else if (r.status === 403) verdict = 'exists, listing denied (private)';
+      else if (r.status === 404) verdict = 'not found';
+      else verdict = 'HTTP ' + r.status;
+      return `${label.padEnd(6)} ${verdict}  ${url}`;
+    } catch (e) { return `${label.padEnd(6)} error (${e.message})`; }
+  }));
+  return `bucket_finder "${n}" (cloud-storage exposure)\n` + out.join('\n') + '\nNote: PUBLIC listable buckets may leak data — investigate and lock down.';
 }
 
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
@@ -2209,7 +2263,7 @@ async function runOsintFlow(q, od, c){
   window.__osintAbort=false; var stopBtn=el('btn-stop'); if(stopBtn){ stopBtn.style.display=''; stopBtn.textContent='stop'; }
   var jobs=[];
   function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise','tor_exit'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
-  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint')?('https://'+x):x]); }); }
+  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint')?('https://'+x):x]); }); }
   if(od.intent==='image'){
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
     if(!(od.images||[]).length) addMsg('system','OSINT(image): no image URL found - paste a direct image link (jpg/png/...).');
@@ -2276,6 +2330,9 @@ async function runOsintFlow(q, od, c){
   synStatus.textContent='OSINT run complete - '+blocks.length+' tool results across '+(od.intent==='full'?'2 rounds':'1 round')+'.';
   if(stopBtn) stopBtn.style.display='none';
   var d2=addMsg('agent',''); d2.innerHTML=renderMarkdown(report);
+  var dl=document.createElement('button'); dl.className='btn'; dl.style.marginTop='6px'; dl.textContent='\u2913 download report (.md)';
+  dl.onclick=function(){ var blob=new Blob([report],{type:'text/markdown'}); var u=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=u; a.download='osint-'+(q.replace(/[^a-z0-9]+/ig,'-').replace(/^-|-$/g,'').slice(0,40)||'report')+'.md'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); };
+  d2.appendChild(dl);
   c.msgs.push({role:'assistant',content:report});
   if(c.msgs.length===1||(c.title||'').indexOf('[osint]')!==0) c.title='[osint] '+q.slice(0,30);
   saveChats(chats); renderChats();
@@ -2346,7 +2403,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
