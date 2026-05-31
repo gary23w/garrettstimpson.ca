@@ -2324,6 +2324,36 @@ async function faviconHash(url) {
 
 // Agentic tool router — the model decides which ONE tool (if any) the request needs.
 async function toolRouter(env, userMsg, already, contextSoFar) {
+  // ── Deterministic gate (code, not few-shot examples) ──────────────────────
+  // A tool only makes sense when the message contains a concrete ARTIFACT to act on.
+  // Detecting that in code is reliable and example-free; it also kills the failure
+  // where a conversational follow-up ('show me an example') routes to a random tool.
+  const msg = String(userMsg || '');
+  const ARTIFACT = [
+    /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/,                 // email
+    /\bCVE-\d{4}-\d{3,}\b/i,                                            // cve
+    /\bCVSS:[0-9.]+\/[A-Z:\/]+/i,                                        // cvss vector
+    /\b(?:\d{1,3}\.){3}\d{1,3}\b/,                                     // ipv4
+    /\bhttps?:\/\/[^\s]+/i,                                             // url
+    /\b[a-f0-9]{32}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{64}\b/i,            // hash
+    /\b[a-z2-7]{16}\.onion\b|\b[a-z2-7]{56}\.onion\b/i,               // onion
+    /\b(?:bc1[a-z0-9]{20,}|0x[a-fA-F0-9]{40}|[13][a-km-zA-HJ-NP-Z1-9]{25,39})\b/, // crypto
+    /\b(?:[a-z0-9\-]+\.)+(?:com|net|org|io|dev|ca|co|gov|edu|info|xyz|me|app|cloud|ai|sh|onion)\b/i, // domain
+    /@[A-Za-z0-9_]{2,}/,                                                  // @handle
+  ];
+  const hasArtifact = ARTIFACT.some(re => re.test(msg)) || (contextSoFar ? false : false);
+  const low = msg.toLowerCase();
+  // Explicit web-search intent is deterministic — no model needed.
+  if (/\b(search (the )?web|google (it|this|that)|look (it )?up online|search (online|now)|find more (on|about)|web search)\b/.test(low)) {
+    // arg = explicit query if given ('search the web for X'), else the topic in context.
+    let q = (msg.match(/(?:search (?:the )?web (?:for |about )?|web search (?:for )?|find more (?:on|about) |google )(.+)/i) || [])[1] || '';
+    q = q.replace(/["'?.!]+$/,'').trim();
+    if (!q && contextSoFar) { const cm = contextSoFar.match(/[A-Z][A-Za-z0-9]{3,}(?:[A-Z][a-z]+)?/); q = cm ? cm[0] : ''; }
+    if (q) return { tool: 'web_search', arg: q };
+  }
+  // No artifact in the message and no chain context -> nothing concrete to route. Skip the model.
+  if (!hasArtifact && !(contextSoFar && /(hash|sample|\.onion|http|@|CVE-)/i.test(contextSoFar))) return null;
+
   const menu = toolCatalog(env).map(t => `${t.name}: ${t.description}`).join('\n');
   const sys = [
     'You are the TOOL ROUTER for "Agent Garrett", a DEFENSIVE security / OSINT / malware-analysis agent.',
@@ -2367,7 +2397,15 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
     const PRON = new Set(['him','her','them','it','they','he','she','his','hers','their','theirs','this','that','these','those','someone','somebody','anyone','anybody','everyone','person','people','the person','this person','that person','the guy','this guy','that guy','guy','user','the user','target','the target','subject','the subject','me','you','us','more','everybody']);
     const norm = arg.toLowerCase().replace(/[?.!,]+$/, '').replace(/^(the|a|an)\s+/, '');
     if (arg && PRON.has(norm)) return null;
-    return { tool: String(o.tool).toLowerCase().trim(), arg };
+    const tool = String(o.tool).toLowerCase().trim();
+    // Grounding: for entity tools, the arg must literally appear in the message/context —
+    // the model may not invent a target. Pure-compute tools (cvss/decode/encode/...) are exempt.
+    const COMPUTE = new Set(['cvss','decode','encode','jwt','cidr','hash_id','timestamp','ioc_extract','cve_search','web_search','people_search','phone_osint']);
+    if (arg && !COMPUTE.has(tool)) {
+      const hay = (msg + ' ' + (contextSoFar || '')).toLowerCase();
+      if (hay.indexOf(norm) < 0 && hay.indexOf(arg.toLowerCase()) < 0) return null;
+    }
+    return { tool, arg };
   } catch (e) { return null; }
 }
 
