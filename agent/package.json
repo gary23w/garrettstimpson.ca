@@ -20,13 +20,13 @@
       {
         "type": "secret_text",
         "name": "ACCESS_PASSWORD",
-        "description": "Optional login password gating the whole agent. Leave blank for open (no login) access."
+        "description": "Login password gating the whole agent. RECOMMENDED for a real lock. Setting this OR ACCESS_USER turns the login on; leave BOTH blank for open access."
       },
       {
         "type": "plain_text",
         "name": "ACCESS_USER",
         "text": "",
-        "description": "Optional username for the login gate (blank = password only)"
+        "description": "Optional login username. NOTE: setting this alone turns the login on, but for real security also set ACCESS_PASSWORD."
       },
       {
         "type": "secret_text",
