@@ -2776,7 +2776,7 @@ inp.addEventListener('keydown', async function(e){
   if(!c.msgs.length){ c.title=q.slice(0,40); }
   c.msgs.push({role:'user',content:q}); saveChats(chats); renderChats();
   addMsg('user',q);
-  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions,hashes:od.hashes}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
+  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions,hashes:od.hashes,persons:od.persons}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
   var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full=''; var firstTok=true;
   el2.innerHTML='<span class="spinner"></span><span class="think">Agent Garrett is thinking…</span>'; window.__chipsEl=null;
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
@@ -2973,18 +2973,19 @@ function detectOsint(q, prev){
   if(um){ handles.push(um[1]); handles=uniq(handles); }
   var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate','email security','spf','dmarc','spoof','typosquat','lookalike','phishing','wallet','bitcoin','ethereum','malware','sample','hash','virus','trojan','stealer','ransomware','reverse engineer','breakdown','osin','conduct','look into','dig into','look up','run osint'];
   var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
-  if(hasTrigger && !handles.length && !emails.length){
+  var persons=uniq((text.match(/\\b[A-Z][a-z'\\-]{1,}\\s+[A-Z][a-z'\\-]{1,}(?:\\s+[A-Z][a-z'\\-]{1,})?\\b/g)||[]).filter(function(p){ return !/^(the|a|an|agent|osint|hello|hi|hey|dear|mr|ms|dr|new|good)\\b/i.test(p); }));
+  if(hasTrigger && !handles.length && !emails.length && !persons.length){
     var toks=low.replace(/[^a-z0-9_.@ -]/g,' ').split(' ').filter(Boolean);
     var last=toks[toks.length-1]||'';
     if(/^@?[a-z0-9_][a-z0-9_-]{2,29}$/.test(last) && last.indexOf('.')<0 && ['osint','recon','investigate','profile','now','please','target','someone','person','conduct','breakdown'].indexOf(last)<0){ handles.push(last.replace(/^@/,'')); handles=uniq(handles); }
   }
   var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
   var refPrev=/\\b(it|its|that|this|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo))\\b/i.test(low);
-  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length;
+  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length+persons.length;
   var soloEntity=(entityCount===1)&&(text.split(/\\s+/).length<=2);
   if(entityCount===0 && prev && (hasTrigger||refPrev||personHint)){
-    emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice(); images=(prev.images||[]).slice(); crypto=(prev.crypto||[]).slice(); onions=(prev.onions||[]).slice(); hashes=(prev.hashes||[]).slice();
-    entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length;
+    emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice(); images=(prev.images||[]).slice(); crypto=(prev.crypto||[]).slice(); onions=(prev.onions||[]).slice(); hashes=(prev.hashes||[]).slice(); persons=(prev.persons||[]).slice();
+    entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length+persons.length;
   }
   var intent='full';
   if(images.length || /\\b(image|photo|picture|exif|reverse image|geoloc)\\b/.test(low)) intent='image';
@@ -2993,11 +2994,12 @@ function detectOsint(q, prev){
   else if(/\\b(origin|behind|real ip|true ip|bypass|unmask)\\b/.test(low)) intent='origin';
   else if(/\\b(discourse|wordpress|drupal|joomla|cms|tech stack|framework|fingerprint|built with|built on|powered by|running|is it a|is it an)\\b/.test(low)) intent='tech';
   else if(/\\b(breach|pwned|leaked|leak|exposed|hibp|compromis)\\b/.test(low)) intent='breach';
+  else if(persons.length && (personHint || /\\b(look into|look up|background|investigate|profile|who is|find|search for|named|recon|dossier|osint|footprint|dig)\\b/.test(low))) intent='person';
   var hasIntent=intent!=='full';
   var actionable=hasTrigger||hasIntent||(refPrev&&!!prev);
   var strongEntity=(emails.length+handles.length+ips.length+(hashes?hashes.length:0)+(onions?onions.length:0)+(crypto?crypto.length:0)+(images?images.length:0))>0;
   var isOsint=(entityCount>0&&actionable)||soloEntity||(hasTrigger&&personHint)||strongEntity;
-  return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, crypto:crypto, onions:onions, hashes:hashes, keyword:text };
+  return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, crypto:crypto, onions:onions, hashes:hashes, persons:persons, keyword:text };
 }
 
 function osintSummary(od){
@@ -3011,6 +3013,7 @@ function osintSummary(od){
   if(od.crypto && od.crypto.length) p.push('crypto:'+od.crypto.join(','));
   if(od.onions && od.onions.length) p.push('onion:'+od.onions.length);
   if(od.hashes && od.hashes.length) p.push('hash:'+od.hashes.length);
+  if(od.persons && od.persons.length) p.push('person:'+od.persons.join(', '));
   return p.length?p.join(' | '):'keyword search';
 }
 async function runOsintTool(tool, arg){
@@ -3107,6 +3110,18 @@ async function runOsintFlow(q, od, c){
   } else if(od.intent==='breach'){
     od.emails.forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); jobs.push(['leakcheck '+x,'leakcheck',x]); });
     od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); });
+  } else if(od.intent==='person'){
+    (od.persons||[]).forEach(function(nm){
+      var ql='"'+nm+'"';
+      jobs.push(['web_search '+nm,'web_search',ql]);
+      jobs.push(['web_search '+nm+' profiles','web_search',ql+' (linkedin OR github OR twitter OR facebook OR instagram OR email)']);
+      (od.domains||[]).slice(0,1).forEach(function(dm){ jobs.push(['web_search '+nm+' '+dm,'web_search',ql+' '+dm]); });
+      jobs.push(['github code search '+nm,'github_osint',ql]);
+      var p=nm.toLowerCase().replace(/[^a-z ]/g,'').split(/\\s+/).filter(Boolean);
+      if(p.length>=2){ var f=p[0],l=p[p.length-1]; [f+l,f[0]+l,f+'.'+l,f+'_'+l,l+f].slice(0,5).forEach(function(u){ jobs.push(['username_enum '+u,'username_enum',u]); jobs.push(['github_user '+u,'github_user',u]); }); }
+    });
+    (od.emails||[]).forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); });
+    (od.handles||[]).forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); });
   } else {
     od.cves.forEach(function(x){ jobs.push(['CVE detail '+x,'circl_cve',x]); jobs.push(['KEV '+x,'kev_lookup',x]); jobs.push(['EPSS '+x,'epss_lookup',x]); jobs.push(['PoC '+x,'cve_poc',x]); });
     od.ips.forEach(addIpFull);
@@ -3132,7 +3147,7 @@ async function runOsintFlow(q, od, c){
   var st1=addMsg('system','OSINT: round 1 - 0/'+Math.min(jobs.length,30)+' tools...');
   await runJobs(jobs.slice(0,30), blocks, st1, 'round 1');
   st1.textContent='OSINT: round 1 complete ('+blocks.length+' tools).';
-  if(od.intent==='full' && !window.__osintAbort){
+  if((od.intent==='full'||od.intent==='person') && !window.__osintAbort){
     var pv=harvestPivots(blocks.join('\\n'), od);
     var pjobs=[];
     pv.emails.forEach(function(e){ pjobs.push(['breach_check '+e,'breach_check',e]); pjobs.push(['gravatar '+e,'gravatar',e]); pjobs.push(['email_recon '+e,'email_recon',e]); pjobs.push(['onion_search '+e,'onion_search',e]); });
@@ -3161,6 +3176,7 @@ async function runOsintFlow(q, od, c){
   var synth=blocks.map(function(b){ return b.slice(0,900); }).join('\\n\\n').slice(0,13500);
   synth='RISK ASSESSMENT (heuristic, computed from the evidence): '+rsLine+'\\n\\n'+synth;
   var objective=(od.intent==='malware') ? ('You are writing a FORMAL MALWARE ANALYSIS report for: "'+q+'". Use ONLY the tool evidence in the context; never invent a fact not present in it; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary\\n## Sample Identification (hashes, file type, size)\\n## Reputation & Classification (Cymru MHR / VirusTotal / MalwareBazaar verdicts, malware family)\\n## Capabilities & Suspicious Indicators (notable APIs/strings and what they imply)\\n## Indicators of Compromise (URLs, IPs, hashes)\\n## MITRE ATT&CK Mapping (only techniques clearly evidenced)\\n## Detection & Mitigation\\n## Detection Rules (draft a YARA rule from the notable strings/imports, and a Sigma rule if process/registry/network indicators are evident)\\nBe precise and defensive.') : ('You are writing a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence in the context - never invent a fact not present in it; mark anything missing as UNKNOWN. Do NOT merely restate tool output: ANALYZE it - infer the subject likely identity, connect accounts/emails/domains/repos that plausibly belong to the same person, and weigh your confidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences with your assessment)\\n## Entities and Identifiers\\n## Findings (per source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaked/commit emails - or state none found)\\n## Pivots and Links (how discovered emails/domains/repos connect and what they reveal)\\n## Gaps and Confidence (what is UNKNOWN, reliability, plus 3-5 concrete recommended next OSINT steps)\\nBe precise, defensive in framing, and analytical.');
+  if(od.intent==='person') objective='Write a FORMAL PERSON / IDENTITY OSINT report for: "'+q+'". Use ONLY the tool evidence; never invent; mark missing as UNKNOWN. CRITICAL: separate accounts/data CONFIRMED to be THIS specific person (corroborated by matching name, bio, or the user-provided context/domain) from generic same-name or same-username matches that are likely UNRELATED people — never attribute breach/stealer data or accounts to the subject unless clearly theirs. Use this markdown structure:\\n## Executive Summary (who this likely is + confidence)\\n## Confirmed Identifiers (accounts/emails/domains tied to THIS person, and why)\\n## Candidate / Unconfirmed Matches (same name/handle, possibly unrelated)\\n## Exposure (breaches / stealer logs ONLY for confirmed emails)\\n## Gaps & Recommended Next Steps\\nBe precise and label confidence honestly.';
   if(od.intent==='darkweb') objective='Write a FORMAL DARK-WEB EXPOSURE report for: "'+q+'". Use ONLY the tool evidence; never invent; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary (overall exposure verdict)\\n## Stealer-Log / Infostealer Exposure (HudsonRock: infected hosts, dates, credential counts at risk)\\n## Breaches & Leaked Data (which breaches, exposed data classes, password exposure)\\n## Dark-Web / Onion Mentions\\n## Risk & Remediation (passwords to rotate, accounts at risk, monitoring advice)\\nBe precise and defensive.';
   var report;
   try{ report=await callTask(objective, synth); }
@@ -3309,7 +3325,7 @@ el('t-run').onclick=async function(){
 async function startOsint(obj){
   if(!obj || !obj.trim()) return;
   var od=detectOsint(obj, window.__lastOsint); od.isOsint=true;
-  window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions,hashes:od.hashes};
+  window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions,hashes:od.hashes,persons:od.persons};
   busy=true; inp.disabled=true;
   var c=active(); addMsg('user',obj); c.msgs.push({role:'user',content:obj}); if(c.msgs.length===1) c.title='[osint] '+obj.slice(0,30); saveChats(chats); renderChats();
   try{ await runOsintFlow(obj, od, c); }catch(e){ addMsg('system','OSINT error: '+e.message); }
