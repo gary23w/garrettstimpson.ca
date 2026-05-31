@@ -753,6 +753,9 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'tor_exit', category: 'osint', passive: true, description: 'Is an IP a known Tor relay / exit node (onionoo)' },
   { name: 'pwned_password', category: 'people', passive: true, description: 'Check a password against Have I Been Pwned (k-anonymity; only a hash prefix is sent)' },
   { name: 'cve_search', category: 'intel', passive: true, description: 'Search NVD for CVEs by product/keyword (top results with CVSS)' },
+  { name: 'cve_poc', category: 'intel', passive: true, description: 'Public PoC/exploit repos for a CVE (PoC-in-GitHub, by stars)' },
+  { name: 'kev_recent', category: 'intel', passive: true, description: 'Latest CISA Known-Exploited-Vulnerabilities additions (what is exploited now)' },
+  { name: 'mitre', category: 'intel', passive: true, description: 'MITRE ATT&CK technique lookup by id (T1059, T1059.001)' },
   { name: 'bucket_finder', category: 'recon', passive: false, description: 'Check S3/GCS/Azure for an exposed storage bucket by name (contacts providers)' },
   { name: 'email_permutations', category: 'people', passive: true, description: 'Generate likely email addresses from a name + domain (MX-checked, not verified)' },
   { name: 'cors_check', category: 'recon', passive: false, description: 'Test a URL for permissive/misconfigured CORS (Origin reflection)' },
@@ -879,6 +882,9 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'tor_exit')     return torExit(String(args.ip || args.target || ''));
   if (name === 'pwned_password') return pwnedPassword(String(args.password || args.pw || args.target || ''));
   if (name === 'cve_search')   return cveSearch(String(args.query || args.keyword || args.target || ''));
+  if (name === 'cve_poc')      return cvePoc(String(args.cveId || args.cve || args.target || ''));
+  if (name === 'kev_recent')   return kevRecent(String(args.count || args.target || ''));
+  if (name === 'mitre')        return mitreLookup(String(args.technique || args.target || args.id || ''));
   if (name === 'bucket_finder') return bucketFinder(String(args.name || args.target || args.domain || ''));
   if (name === 'email_permutations') return emailPermutations(String(args.input || args.name || args.target || ''));
   if (name === 'cors_check')   return corsCheck(String(args.url || args.target || ''));
@@ -2198,6 +2204,59 @@ async function disclosureDraft(env, target) {
   return `disclosure_draft ${d}\nsuggested recipient(s): ${to.slice(0, 3).join(', ')}\n\n--- SUBJECT ---\n${subject}\n\n--- BODY ---\n${body}\n\nNOTE: DRAFT only — Agent Garrett does not send email. Review and send from your own verified, attributable address. Responsible disclosure should never be anonymous.`;
 }
 
+// Public PoC / exploit repos for a CVE (nomi-sec PoC-in-GitHub dataset, keyless).
+async function cvePoc(cve) {
+  const id = String(cve || '').trim().toUpperCase();
+  const m = id.match(/^CVE-(\d{4})-\d+$/);
+  if (!m) return 'cve_poc: a CVE id like CVE-2021-44228 is required.';
+  try {
+    const r = await fetch(`https://raw.githubusercontent.com/nomi-sec/PoC-in-GitHub/master/${m[1]}/${id}.json`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(9000) });
+    if (r.status === 404) return `cve_poc ${id}: no public PoC repos indexed (PoC-in-GitHub).`;
+    if (!r.ok) return `cve_poc ${id}: lookup failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    if (!d.length) return `cve_poc ${id}: no public PoC repos found.`;
+    const top = d.sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0)).slice(0, 10)
+      .map(x => `★${x.stargazers_count || 0}  ${x.html_url}${x.description ? '\n    ' + String(x.description).slice(0, 110) : ''}`);
+    return `cve_poc ${id}: ${d.length} public PoC repo(s) on GitHub (top by stars):\n${top.join('\n')}`;
+  } catch (e) { return `cve_poc ${id}: failed (${e.message}).`; }
+}
+
+// Latest CISA Known-Exploited-Vulnerabilities additions (what is being exploited now).
+async function kevRecent(arg) {
+  const n = Math.min(30, Math.max(1, parseInt(arg, 10) || 15));
+  try {
+    const r = await fetch('https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json',
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return `kev_recent: CISA feed failed (HTTP ${r.status}).`;
+    const d = await r.json();
+    const v = (d.vulnerabilities || []).sort((a, b) => String(b.dateAdded).localeCompare(String(a.dateAdded))).slice(0, n);
+    const rows = v.map(x => `${x.dateAdded}  ${x.cveID}  ${x.vendorProject}/${x.product} — ${String(x.vulnerabilityName || '').slice(0, 70)}${x.knownRansomwareCampaignUse === 'Known' ? '  [RANSOMWARE]' : ''}`);
+    return `kev_recent: ${n} most recently added CISA KEV entries (catalog total ${d.count || v.length}):\n${rows.join('\n')}`;
+  } catch (e) { return `kev_recent: failed (${e.message}).`; }
+}
+
+// MITRE ATT&CK technique lookup (by id, e.g. T1059 or T1059.001).
+async function mitreLookup(tech) {
+  const t = String(tech || '').trim().toUpperCase();
+  const m = t.match(/^T(\d{4})(?:\.(\d{3}))?$/);
+  if (!m) return 'mitre: a technique id like T1059 or T1059.001 is required.';
+  const path = m[2] ? `${m[1]}/${m[2]}` : `${m[1]}`;
+  try {
+    const r = await fetch(`https://attack.mitre.org/techniques/T${path}/`,
+      { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, signal: AbortSignal.timeout(10000) });
+    if (r.status === 404) return `mitre T${path.replace('/', '.')}: technique not found.`;
+    if (!r.ok) return `mitre: lookup failed (HTTP ${r.status}).`;
+    const html = await r.text();
+    const title = ((html.match(/<title>([^<]+)<\/title>/i) || [])[1] || '').replace(/\s*\|\s*MITRE.*/i, '').trim();
+    const tactics = [...new Set((html.match(/\/tactics\/TA\d+/g) || []))].map(x => x.split('/').pop());
+    let desc = '';
+    const dm = html.match(/<div class="description-body">([\s\S]*?)<\/div>/i);
+    if (dm) desc = dm[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);
+    return `mitre T${path.replace('/', '.')} — ${title || '?'}\ntactics: ${tactics.join(', ') || '?'}\n${desc || '(description not parsed)'}\nref: https://attack.mitre.org/techniques/T${path}/`;
+  } catch (e) { return `mitre: failed (${e.message}).`; }
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -3049,7 +3108,7 @@ async function runOsintFlow(q, od, c){
     od.emails.forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); jobs.push(['leakcheck '+x,'leakcheck',x]); });
     od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); });
   } else {
-    od.cves.forEach(function(x){ jobs.push(['CVE detail '+x,'circl_cve',x]); jobs.push(['KEV '+x,'kev_lookup',x]); jobs.push(['EPSS '+x,'epss_lookup',x]); });
+    od.cves.forEach(function(x){ jobs.push(['CVE detail '+x,'circl_cve',x]); jobs.push(['KEV '+x,'kev_lookup',x]); jobs.push(['EPSS '+x,'epss_lookup',x]); jobs.push(['PoC '+x,'cve_poc',x]); });
     od.ips.forEach(addIpFull);
     od.domains.forEach(addDomainFull);
     od.emails.forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); jobs.push(['email_recon '+x,'email_recon',x]); jobs.push(['gravatar '+x,'gravatar',x]); jobs.push(['stealer_check '+x,'stealer_check',x]); jobs.push(['leakcheck '+x,'leakcheck',x]); });
@@ -3212,7 +3271,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
