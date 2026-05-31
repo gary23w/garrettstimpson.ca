@@ -1136,13 +1136,23 @@ async function breachCheck(env, email) {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return 'breach_check: a valid email is required.';
   const out = [];
   try {
-    const r = await fetch(`https://api.xposedornot.com/v1/check-email/${encodeURIComponent(e)}`,
-      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(9000) });
+    const r = await fetch(`https://api.xposedornot.com/v1/breach-analytics?email=${encodeURIComponent(e)}`,
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(10000) });
     if (r.status === 404) out.push('XposedOrNot: no known breaches for this email.');
     else if (r.ok) {
       const d = await r.json();
-      const list = (d && d.breaches && Array.isArray(d.breaches[0])) ? d.breaches[0] : [];
-      out.push(list.length ? `XposedOrNot: ${list.length} breach(es) — ${list.join(', ')}` : 'XposedOrNot: no known breaches.');
+      const eb = (d.ExposedBreaches && d.ExposedBreaches.breaches_details) || [];
+      if (!eb.length) out.push('XposedOrNot: no known breaches.');
+      else {
+        const risk = d.BreachMetrics && d.BreachMetrics.risk && d.BreachMetrics.risk[0];
+        const classes = new Set();
+        eb.forEach(b => String(b.xposed_data || '').split(';').forEach(c => { const t = c.trim(); if (t) classes.add(t); }));
+        const named = eb.slice(0, 8).map(b => b.breach + (b.xposed_date ? ' (' + b.xposed_date + ')' : ''));
+        let line = `XposedOrNot: ${eb.length} breach(es)` + (risk ? ` | risk: ${risk.risk_label} (${risk.risk_score}/100)` : '');
+        line += `\nexposed data types: ${[...classes].slice(0, 14).join(', ') || 'unknown'}`;
+        line += `\nbreaches: ${named.join(', ')}${eb.length > 8 ? ', +' + (eb.length - 8) + ' more' : ''}`;
+        out.push(line);
+      }
     } else out.push(`XposedOrNot: lookup failed (HTTP ${r.status}).`);
   } catch (ex) { out.push(`XposedOrNot: lookup failed (${ex.message}).`); }
   const hibpKey = String((env && env.HIBP_API_KEY) || '');
