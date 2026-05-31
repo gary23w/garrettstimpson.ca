@@ -733,6 +733,8 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'pwned_password', category: 'people', passive: true, description: 'Check a password against Have I Been Pwned (k-anonymity; only a hash prefix is sent)' },
   { name: 'cve_search', category: 'intel', passive: true, description: 'Search NVD for CVEs by product/keyword (top results with CVSS)' },
   { name: 'bucket_finder', category: 'recon', passive: false, description: 'Check S3/GCS/Azure for an exposed storage bucket by name (contacts providers)' },
+  { name: 'email_permutations', category: 'people', passive: true, description: 'Generate likely email addresses from a name + domain (MX-checked, not verified)' },
+  { name: 'cors_check', category: 'recon', passive: false, description: 'Test a URL for permissive/misconfigured CORS (Origin reflection)' },
 ];
 
 function parseCsvSet(value) {
@@ -840,6 +842,8 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'pwned_password') return pwnedPassword(String(args.password || args.pw || args.target || ''));
   if (name === 'cve_search')   return cveSearch(String(args.query || args.keyword || args.target || ''));
   if (name === 'bucket_finder') return bucketFinder(String(args.name || args.target || args.domain || ''));
+  if (name === 'email_permutations') return emailPermutations(String(args.input || args.name || args.target || ''));
+  if (name === 'cors_check')   return corsCheck(String(args.url || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1501,6 +1505,48 @@ async function bucketFinder(name) {
     } catch (e) { return `${label.padEnd(6)} error (${e.message})`; }
   }));
   return `bucket_finder "${n}" (cloud-storage exposure)\n` + out.join('\n') + '\nNote: PUBLIC listable buckets may leak data — investigate and lock down.';
+}
+
+// Likely email addresses from a name + domain (MX-checked, NOT existence-verified).
+async function emailPermutations(input) {
+  let s = String(input || '').trim();
+  let dom = '';
+  const m = s.match(/@?([a-z0-9.\-]+\.[a-z]{2,})\s*$/i);
+  if (m) { dom = m[1].toLowerCase(); s = s.slice(0, m.index).trim(); }
+  s = s.replace(/@.*/, '').trim();
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (!parts.length || !dom) return 'email_permutations: provide a name and a domain, e.g. "John Doe acme.com".';
+  const f = parts[0].toLowerCase().replace(/[^a-z]/g, '');
+  const l = (parts[parts.length - 1] || '').toLowerCase().replace(/[^a-z]/g, '');
+  const fi = f[0] || '', li = l[0] || '';
+  const users = [...new Set([f, l, f + '.' + l, f + l, fi + l, f + li, fi + '.' + l, l + '.' + f, l + f, f + '_' + l, f + '-' + l].filter(x => x && x.length > 1))];
+  let mx = 'UNKNOWN';
+  try {
+    const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${dom}&type=MX`, { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(6000) });
+    const j = await r.json(); const recs = (j.Answer || []).map(a => a.data);
+    mx = recs.length ? recs.slice(0, 3).join(', ') : 'none (domain may not receive mail)';
+  } catch { mx = 'lookup failed'; }
+  return `email_permutations ${parts.join(' ')} @ ${dom}\nMX: ${mx}\ncandidate addresses (NOT verified to exist — cross-check before use):\n` + users.map(u => u + '@' + dom).join('\n');
+}
+
+// CORS misconfiguration check — does the endpoint reflect an arbitrary Origin?
+async function corsCheck(url) {
+  let u; try { u = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch { return 'cors_check: a URL is required.'; }
+  if (isPrivateHost(u.hostname)) return `cors_check: ${u.hostname} is private/internal — blocked.`;
+  const evil = 'https://evil.example.com';
+  try {
+    const r = await fetch(u.toString(), { headers: { 'Origin': evil, 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(9000) });
+    const acao = r.headers.get('access-control-allow-origin') || '';
+    const acac = r.headers.get('access-control-allow-credentials') || '';
+    let verdict;
+    if (acao === evil && /true/i.test(acac)) verdict = 'CRITICAL: reflects an arbitrary Origin WITH credentials — cross-origin data theft is possible.';
+    else if (acao === evil) verdict = 'WARNING: reflects an arbitrary Origin (no credentials).';
+    else if (acao === '*' && /true/i.test(acac)) verdict = 'MISCONFIG: wildcard ACAO with credentials.';
+    else if (acao === '*') verdict = 'permissive: ACAO=* (fine for public APIs, not for private data).';
+    else if (acao) verdict = `ACAO=${acao} (does not reflect our test origin — looks controlled).`;
+    else verdict = 'no CORS headers (same-origin only).';
+    return `cors_check ${u.hostname} (HTTP ${r.status})\nAccess-Control-Allow-Origin: ${acao || '(none)'}\nAccess-Control-Allow-Credentials: ${acac || '(none)'}\nverdict: ${verdict}`;
+  } catch (e) { return `cors_check ${u.hostname}: failed (${e.message}).`; }
 }
 
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
@@ -2238,6 +2284,22 @@ async function runJobs(jobs, blocks, statusEl, label){
   }
   await Promise.all([worker(),worker(),worker(),worker()]);
 }
+function riskScore(text){
+  var pts=0, reasons=[];
+  var bm=text.match(/(\\d+)\\s+breach\\(es\\)/i);
+  if(bm && (+bm[1])>0){ pts+=Math.min(30,8+(+bm[1])*2); reasons.push(bm[1]+' breach(es)'); }
+  if(/this exact password appears in/i.test(text)){ pts+=20; reasons.push('password compromised'); }
+  if(/PUBLIC \\(listable!\\)/i.test(text)){ pts+=25; reasons.push('public cloud bucket'); }
+  if(/commit emails \\(from public events\\)/i.test(text)){ pts+=10; reasons.push('email leaked via git'); }
+  if(/DMARC: NONE|p=none/i.test(text)){ pts+=10; reasons.push('weak/absent DMARC (spoofable)'); }
+  if(/SPF: NONE/i.test(text)){ pts+=8; reasons.push('no SPF'); }
+  if(/lookalikes are REGISTERED/i.test(text)){ pts+=12; reasons.push('active typosquats'); }
+  if(/onion site\\(s\\) referencing/i.test(text)){ pts+=20; reasons.push('dark-web mentions'); }
+  if(/KNOWN TOR RELAY/i.test(text)){ pts+=5; reasons.push('Tor relay IP'); }
+  pts=Math.min(100,pts);
+  var level= pts>=60?'HIGH':(pts>=30?'MEDIUM':(pts>0?'LOW':'MINIMAL'));
+  return { score:pts, level:level, reasons:reasons };
+}
 function harvestPivots(text, known){
   function uniq(a){ return a.filter(function(x,i){ return a.indexOf(x)===i; }); }
   var kEmails=(known.emails||[]).map(function(x){ return x.toLowerCase(); });
@@ -2263,7 +2325,7 @@ async function runOsintFlow(q, od, c){
   window.__osintAbort=false; var stopBtn=el('btn-stop'); if(stopBtn){ stopBtn.style.display=''; stopBtn.textContent='stop'; }
   var jobs=[];
   function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise','tor_exit'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
-  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint')?('https://'+x):x]); }); }
+  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check')?('https://'+x):x]); }); }
   if(od.intent==='image'){
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
     if(!(od.images||[]).length) addMsg('system','OSINT(image): no image URL found - paste a direct image link (jpg/png/...).');
@@ -2322,7 +2384,11 @@ async function runOsintFlow(q, od, c){
   ev.innerHTML='<div class="jt-h">collected evidence - '+blocks.length+' tool results</div>'+renderMarkdown(FENCE+'\\n'+evidence.slice(0,12000)+'\\n'+FENCE);
   if(window.__osintAbort){ if(stopBtn) stopBtn.style.display='none'; addMsg('system','OSINT run stopped - '+blocks.length+' partial result(s) shown above; synthesis skipped.'); return; }
   var synStatus=addMsg('system','OSINT: synthesizing write-up from '+blocks.length+' results...');
+  var rs=riskScore(evidence);
+  var rsLine='exposure risk (heuristic): '+rs.score+'/100 ['+rs.level+']'+(rs.reasons.length?' - '+rs.reasons.join('; '):'');
+  addMsg('system','> '+rsLine);
   var synth=blocks.map(function(b){ return b.slice(0,900); }).join('\\n\\n').slice(0,13500);
+  synth='RISK ASSESSMENT (heuristic, computed from the evidence): '+rsLine+'\\n\\n'+synth;
   var objective='You are writing a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence in the context - never invent a fact not present in it; mark anything missing as UNKNOWN. Do NOT merely restate tool output: ANALYZE it - infer the subject likely identity, connect accounts/emails/domains/repos that plausibly belong to the same person, and weigh your confidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences with your assessment)\\n## Entities and Identifiers\\n## Findings (per source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaked/commit emails - or state none found)\\n## Pivots and Links (how discovered emails/domains/repos connect and what they reveal)\\n## Gaps and Confidence (what is UNKNOWN, reliability, plus 3-5 concrete recommended next OSINT steps)\\nBe precise, defensive in framing, and analytical.';
   var report;
   try{ report=await callTask(objective, synth); }
@@ -2403,7 +2469,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
