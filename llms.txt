@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-05-31T07:28:22Z
+GENERATED    : 2026-05-31T12:09:27Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 21
+TOTAL POSTS  : 22
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,96 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
+DATE       : 2026-05-31
+URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
+CVE        : CVE-2026-43121, cve-2026-43121
+CATEGORIES : exploits, linux-kernel
+TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
+WORD_COUNT : 1297
+EXCERPT    : A four-byte out-of-bounds write in io_uring's zero-copy receive path got a CVE, a public exploit narrative, and a public argument over whether it actually roots anything. All three are worth your time.
+</FRONTMATTER>
+<BODY>
+Here's what gets me about CVE-2026-43121. The bug is real, the fix is real, the memory corruption is real enough to land a CVE and a stable changelog entry. And yet the loudest part of the conversation around it has been people arguing about whether the full root chain actually holds up. That argument is the interesting part. Most kernel LPE writeups this month wanted you to panic. This one came with a built-in skeptic, and the skeptic was Jens Axboe.
+
+So let's be precise about what this is and what it isn't.
+
+## What broke
+
+The bug lives in `io_uring/zcrx`, the zero-copy receive path. ZCRX landed in 6.12. It exists so high-throughput network apps can have packet payloads delivered straight into userspace memory without the kernel-to-user copy, while headers still go through the normal TCP stack. It is not a generic socket path. It is a negotiated arrangement between application buffers, NIC receive queues, page-pool-backed memory, and io_uring completion semantics. That complexity is exactly where lifetime bugs come from.
+
+Every ZCRX area owns a set of network I/O vectors, the `niov` objects. A freelist tracks which slots are free. A `user_refs` counter tracks whether userspace still holds a reference. The invariant that has to hold is boring and absolute: each `niov` gets returned to the freelist exactly once, only after its last reference drops, even when refill, scrub, completion, and teardown are all running on different CPUs at the same time.
+
+CVE-2026-43121 breaks that invariant with a classic check-then-act race. `io_zcrx_put_niov_uref()` on the refill path did a non-atomic read followed by a separate decrement. Roughly this shape:
+
+```c
+/* simplified vulnerable pattern, not exact kernel source */
+if (atomic_read(&niov->user_refs)) {
+    atomic_dec(&niov->user_refs);
+    if (atomic_read(&niov->user_refs) == 0)
+        io_zcrx_return_niov(niov);
+}
+```
+
+Meanwhile `io_zcrx_scrub()` zeroed the same counter with `atomic_xchg()` without holding the same lock. On an SMP box that gap is a door. CPU0 reads the refcount and pauses inside the window. CPU1 runs scrub, zeroes the reference, and returns the `niov`. CPU0 wakes up, finishes its decrement, sees zero, and returns the same `niov` again. Two CPUs, both convinced they own the last reference, both pushing the same object back onto the freelist.
+
+That double-push is where it goes bad. `free_count` climbs past `num_niovs`. The next push writes a `u32` one element past the end of the `kvmalloc`-allocated freelist array. A four-byte out-of-bounds write into adjacent slab memory.
+
+## Why four bytes is not "nothing"
+
+I see people shrug at a four-byte OOB write. In a userland process, sure, four bytes into padding might just crash you. Kernel heap is a different animal and you should treat it that way.
+
+Kernel objects are dense and the fields are small. Four bytes is enough to land on a refcount, a length, an index, a flags word, list metadata, or the low half of a pointer if the heap places things conveniently. Even when the write isn't immediately an arbitrary write, it's a bridge. Corrupt a length, get an over-read. Leak a pointer, defeat KASLR. Redirect a later operation into something you control. The honest question is never "can four bytes root a box." It's whether this specific allocator, object layout, kernel build, and hardening profile let you steer those four bytes into something that matters.
+
+The original public writeup from ze3tar took exactly that path. It frames the primitive as a controlled `u32` written one slot past the freelist, then goes into heap shaping with System V `msg_msg` objects, KASLR recovery, and a route to root. As exploit-dev thinking it's good work. It doesn't stop at the crash, it asks what object you can park next to the vulnerable allocation and how a weak primitive gets amplified.
+
+## The part that got argued about
+
+This is where I want to slow down, because it's the most useful lesson in the whole episode.
+
+On the oss-security thread, Axboe pushed back on the chain. One step relied on writing `modprobe_path` through `/proc/sys/kernel/modprobe`, which assumes you can write that file with `CAP_SYS_ADMIN`. If you already have `CAP_SYS_ADMIN`, you've kind of given away the plot of a local privilege escalation. He also pointed out that an earlier fix for the underlying user-reference race had already been backported to stable. So part of the dramatic "to root" narrative leaned on privileges whose absence is the entire point of an LPE.
+
+That does not make the bug fake. It makes the headline soft. The memory corruption is confirmed. A reliable, generic, low-privilege root across affected kernels is not established from the official sources, and you should treat anyone claiming otherwise as owing you a reproduction with defined conditions. Both things are true at once and a real practitioner holds both.
+
+## Am I exposed
+
+Probably less universally than the scary version implies, and you still need to check. The bug needs an SMP system, a kernel from 6.12 onward with ZCRX built in and reachable, NIC support for header/data split and flow steering, and `CAP_NET_ADMIN` to set ZCRX up. That's a narrower blast radius than something like the page-cache bugs that hit every distro since 2017. The places that should actually worry are the ones combining untrusted local code with that feature set: multi-tenant nodes, CI runners, and anyone who deliberately turned on zero-copy receive for throughput.
+
+Check whether io_uring is even reachable for unprivileged users first:
+
+```bash
+sysctl kernel.io_uring_disabled
+# 0 = everyone, 1 = restricted to a group, 2 = fully off
+```
+
+## Fix and mitigation
+
+The upstream fix replaces the read-then-decrement with a compare-and-exchange loop so only one CPU can win the transition:
+
+```c
+/* simplified fixed pattern */
+u32 refs = atomic_read(&niov->user_refs);
+do {
+    if (!refs)
+        return;
+} while (!atomic_try_cmpxchg(&niov->user_refs, &refs, refs - 1));
+
+if (refs == 1)
+    io_zcrx_return_niov(niov);
+```
+
+The change matters because `atomic_try_cmpxchg()` turns "I saw a value and changed it later" into "I change it only if it's still exactly what I saw." Lose the race, see the new state, don't double-return. The fix shipped in the stable trees and shows up in the 6.18.16 changelog as "io_uring/zcrx: fix user_ref race between scrub and refill paths," tracing back to commit `34a3e60821ab` that added the ZCRX page-pool memory provider. A separate defensive patch, commit `04756ab59ac4eaf2a4f807cca8f4dde859bc02d9`, adds `WARN_ON_ONCE(area->free_count >= area->nia.num_niovs)` before the freelist write so a corrupted `free_count` trips a warning instead of writing OOB. Keep both. The cmpxchg stops the double-return, the bounds check catches anything that still slips.
+
+Concrete steps. Patch to a kernel that carries the user_ref fix, meaning 6.18.16 or your distro's equivalent backport, and confirm with `uname -r` against your vendor's advisory rather than trusting the package version string. If you can't patch immediately and you don't actually need io_uring for unprivileged workloads, set `sysctl -w kernel.io_uring_disabled=2` and persist it in `/etc/sysctl.d/`. If you need io_uring but not for everyone, use `=1` with `kernel.io_uring_group` to gate it. ZCRX itself depends on specific NIC features and explicit setup, so on hosts that never configured it the practical reach is limited, but I wouldn't lean on that as your only control.
+
+One last thing. The bug was found in code that exists purely to go faster. ZCRX, splice, skb coalescing, page-cache shortcuts. The performance-critical paths keep producing these because that's where ownership semantics get bent for speed. If your threat model includes local attackers, every new fast path is new attack surface, and you should budget for that going in.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
@@ -125,7 +215,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -237,7 +327,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -307,7 +397,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -484,7 +574,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -578,7 +668,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -741,7 +831,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -899,7 +989,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -1033,7 +1123,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -1255,7 +1345,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -1383,7 +1473,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -1590,7 +1680,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -1704,7 +1794,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -1888,12 +1978,12 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
+CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -2044,7 +2134,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -2197,12 +2287,12 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : cve-2026-46333, CVE-2026-46333
+CVE        : CVE-2026-46333, cve-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -2297,12 +2387,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : cve-2026-42945, CVE-2026-42945
+CVE        : CVE-2026-42945, cve-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -2448,7 +2538,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
@@ -2656,12 +2746,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -2771,12 +2861,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, CVE-2026-43500, cve-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -2868,7 +2958,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -3015,5 +3105,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 21 documents — 2026-05-31T07:28:22Z
+END OF CORPUS — 22 documents — 2026-05-31T12:09:27Z
 ================================================================================
