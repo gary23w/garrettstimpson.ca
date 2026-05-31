@@ -2430,6 +2430,11 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 .think{color:var(--muted);font-style:italic;}
 .tool-chips{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 6px;}
 .tchip{font-size:10px;color:var(--blue);border:1px solid var(--border);border-radius:10px;padding:1px 9px;background:#06121a;}
+#disclose{display:none;border:1px solid var(--border);border-radius:3px;padding:10px;margin-bottom:10px;background:var(--panel);font-size:11px;}
+#disclose.show{display:block;}
+#disclose .trow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:5px 0;}
+#disclose input{background:#000;border:1px solid var(--border);color:var(--green);font:inherit;padding:3px 6px;}
+#disclose .jbtn{cursor:pointer;border:1px solid var(--green);color:var(--green);background:transparent;font:inherit;padding:3px 10px;border-radius:2px;}
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -2452,6 +2457,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
         <button class="btn" id="btn-job" title="Agent mode — jobs &amp; swarms">agent</button>
         <button class="btn" id="btn-tools" title="CTF tools &amp; policy">tools</button>
         <button class="btn" id="btn-stop" title="Stop the running OSINT run" style="display:none;color:var(--err);border-color:var(--err);">stop</button>
+        <button class="btn" id="btn-disclose" title="Responsible disclosure — draft &amp; (if enabled) send">disclose</button>
       </div>
     </div>
   </header>
@@ -2517,6 +2523,16 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
       <button class="jbtn" id="t-run">run tool</button>
     </div>
     <div id="t-result"></div>
+  </div>
+
+  <div id="disclose">
+    <div style="color:var(--muted);margin-bottom:6px;">RESPONSIBLE DISCLOSURE — draft a blue-team email to a domain's published security contact. Sending is OFF unless a verified provider is configured (DISCLOSURE_SEND_ENABLED + RESEND_API_KEY/MAILGUN + DISCLOSURE_FROM_EMAIL). Attributable only — never anonymous; you confirm every send.</div>
+    <div class="trow"><input class="t-arg" id="dc-domain" placeholder="domain (auto-draft from its security contact)"><button class="jbtn" id="dc-draft">draft</button></div>
+    <div class="trow"><input class="t-arg" id="dc-to" placeholder="recipient (security@ / abuse@ ...)"></div>
+    <div class="trow"><input class="t-arg" id="dc-subject" placeholder="subject"></div>
+    <textarea id="dc-body" rows="7" placeholder="email body (review carefully)" style="width:100%;background:#000;border:1px solid var(--border);color:var(--green);font:inherit;padding:6px 8px;"></textarea>
+    <div class="trow"><label style="font-size:10px;color:#bbb;"><input type="checkbox" id="dc-confirm"> I verified this is accurate and authorize sending from my address</label><button class="jbtn" id="dc-send">send</button></div>
+    <div id="dc-result"></div>
   </div>
 
   <div id="main">
@@ -3138,6 +3154,33 @@ function startScheduler(){
 // ============ Agent-panel wiring ============
 el('btn-job').onclick=function(){ var on=el('jobs').classList.toggle('show'); el('btn-job').classList.toggle('on',on); };
 el('btn-tools').onclick=function(){ var on=el('tools').classList.toggle('show'); el('btn-tools').classList.toggle('on',on); if(on) loadCatalog(); };
+el('btn-disclose').onclick=function(){ var on=el('disclose').classList.toggle('show'); el('btn-disclose').classList.toggle('on',on); };
+el('dc-draft').onclick=async function(){
+  var dom=el('dc-domain').value.trim(); var out=el('dc-result'); if(!dom){ out.innerHTML='<div class="t-out">enter a domain to draft.</div>'; return; }
+  out.innerHTML='<div class="t-out">drafting...</div>';
+  try{
+    var r=await fetch('/api/tools/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tool:'disclosure_draft',args:{target:dom},target:dom,confirm:true})});
+    var d=await r.json(); var t=String(d.result||d.error||'');
+    var rec=(t.match(/recipient\\(s\\):\\s*([^\\n,]+)/)||[])[1]||'';
+    var subj=(t.match(/--- SUBJECT ---\\n([\\s\\S]*?)\\n\\n--- BODY ---/)||[])[1]||'';
+    var body=(t.match(/--- BODY ---\\n([\\s\\S]*?)\\n\\nNOTE:/)||[])[1]||'';
+    if(rec) el('dc-to').value=rec.trim(); if(subj) el('dc-subject').value=subj.trim(); if(body) el('dc-body').value=body.trim();
+    var pre=document.createElement('div'); pre.className='t-out'; pre.textContent=t; out.innerHTML=''; out.appendChild(pre);
+  }catch(e){ out.innerHTML='<div class="t-out">error: '+e.message+'</div>'; }
+};
+el('dc-send').onclick=async function(){
+  var out=el('dc-result');
+  if(!el('dc-confirm').checked){ out.innerHTML='<div class="t-out">Tick the confirmation box to authorize sending.</div>'; return; }
+  var to=el('dc-to').value.trim(), subject=el('dc-subject').value.trim(), body=el('dc-body').value.trim();
+  if(!to||!subject||!body){ out.innerHTML='<div class="t-out">Recipient, subject and body are required.</div>'; return; }
+  out.innerHTML='<div class="t-out">sending...</div>';
+  try{
+    var r=await fetch('/api/send-disclosure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to:to,subject:subject,body:body,confirm:true})});
+    var d=await r.json();
+    out.innerHTML='<div class="t-out">'+(d.ok?('sent via '+d.provider+' to '+d.to+(d.id?' (id '+d.id+')':'')):('NOT sent: '+(d.error||('HTTP '+r.status))))+'</div>';
+  }catch(e){ out.innerHTML='<div class="t-out">error: '+e.message+'</div>'; }
+};
+
 el('btn-stop').onclick=function(){ window.__osintAbort=true; el('btn-stop').textContent='stopping...'; };
 el('btn-export').onclick=function(){
   var data={ app:'Agent Garrett', exportedAt:new Date().toISOString(), schema:1,
@@ -3388,6 +3431,38 @@ export default {
       } catch (e) {
         return json({ ok: false, tool, target, error: e.message }, 500);
       }
+    }
+
+    // POST /api/send-disclosure — human-approved responsible-disclosure send (OFF by default)
+    if (url.pathname === '/api/send-disclosure' && request.method === 'POST') {
+      let b; try { b = await request.json(); } catch { return json({ ok: false, error: 'bad json' }, 400); }
+      if (!isTruthy(env.DISCLOSURE_SEND_ENABLED, false)) return json({ ok: false, error: 'Disclosure sending is OFF. Set DISCLOSURE_SEND_ENABLED=true and a verified provider to enable.' }, 403);
+      if (b.confirm !== true) return json({ ok: false, error: 'confirm=true is required to send.' }, 400);
+      const fromEmail = String(env.DISCLOSURE_FROM_EMAIL || '');
+      const resend = String(env.RESEND_API_KEY || ''); const mgKey = String(env.MAILGUN_API_KEY || ''); const mgDom = String(env.MAILGUN_DOMAIN || '');
+      if (!fromEmail || (!resend && !(mgKey && mgDom))) return json({ ok: false, error: 'No verified sender configured. Set DISCLOSURE_FROM_EMAIL + RESEND_API_KEY (or MAILGUN_API_KEY + MAILGUN_DOMAIN).' }, 400);
+      const to = String(b.to || '').trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return json({ ok: false, error: 'valid recipient email required' }, 400);
+      const local = to.split('@')[0].replace(/[.+\-_].*$/, '');
+      const ROLE = ['security', 'abuse', 'secure', 'soc', 'cert', 'psirt', 'hostmaster', 'postmaster', 'contact', 'info', 'admin', 'it', 'privacy', 'support'];
+      if (!ROLE.includes(local)) return json({ ok: false, error: `Recipient must be a role/security address (security@, abuse@, ...). Got "${to.split('@')[0]}".` }, 400);
+      const subject = String(b.subject || '').slice(0, 200).trim();
+      const body = String(b.body || '').slice(0, 8000).trim();
+      if (!subject || !body) return json({ ok: false, error: 'subject and body are required' }, 400);
+      try { const cache = caches.default; const ck = 'https://disclose.local/cap/' + new Date().toISOString().slice(0, 10); const hit = await cache.match(ck); const nn = hit ? (parseInt(await hit.text(), 10) || 0) : 0; if (nn >= 10) return json({ ok: false, error: 'daily disclosure send cap (10) reached.' }, 429); await cache.put(ck, new Response(String(nn + 1), { headers: { 'Cache-Control': 'max-age=86400' } })); } catch (e) {}
+      try {
+        let id = '', provider = '';
+        if (resend) {
+          const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { 'Authorization': 'Bearer ' + resend, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: fromEmail, to: [to], subject, text: body }), signal: AbortSignal.timeout(10000) });
+          const d = await r.json().catch(() => ({})); if (!r.ok) return json({ ok: false, error: 'Resend ' + r.status + ': ' + String(d.message || JSON.stringify(d)).slice(0, 200) }, 502); id = d.id || ''; provider = 'resend';
+        } else {
+          const form = new URLSearchParams(); form.set('from', fromEmail); form.set('to', to); form.set('subject', subject); form.set('text', body);
+          const r = await fetch('https://api.mailgun.net/v3/' + mgDom + '/messages', { method: 'POST', headers: { 'Authorization': 'Basic ' + btoa('api:' + mgKey), 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString(), signal: AbortSignal.timeout(10000) });
+          const d = await r.json().catch(() => ({})); if (!r.ok) return json({ ok: false, error: 'Mailgun ' + r.status }, 502); id = d.id || ''; provider = 'mailgun';
+        }
+        console.log(JSON.stringify({ event: 'disclosure_sent', to, provider }));
+        return json({ ok: true, provider, id, to });
+      } catch (e) { return json({ ok: false, error: e.message }, 500); }
     }
 
     // POST /api/reindex — rebuild the Vectorize index from llms.txt
