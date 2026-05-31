@@ -755,7 +755,9 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'onion_fetch', category: 'darkweb', passive: true, description: 'Fetch .onion content over clearnet via free tor2web gateways (no Tor needed)' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
-  { name: 'decode', category: 'malware', passive: true, description: 'Auto-decode/deobfuscate base64/hex/URL/ROT13 and extract IOCs' },
+  { name: 'decode', category: 'malware', passive: true, description: 'Recursive multi-layer decode (base64/hex/url/gzip) + refang + IOCs' },
+  { name: 'ioc_extract', category: 'malware', passive: true, description: 'Extract + defang all IOCs (IP/domain/URL/email/hash/CVE/crypto) from pasted text' },
+  { name: 'cvss', category: 'intel', passive: true, description: 'CVSS v3.1 base-score calculator from a vector string' },
 ];
 
 function parseCsvSet(value) {
@@ -870,6 +872,8 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
   if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
+  if (name === 'ioc_extract')  return iocExtract(String(args.text || args.input || args.target || ''));
+  if (name === 'cvss')         return cvssCalc(String(args.vector || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1795,6 +1799,58 @@ async function decodeTool(input) {
   if (!chain.length) return 'decode: no confident decoding (tried url / base64 / hex / gzip, multi-layer). May be plaintext or an unsupported codec.';
   const iocs = [...new Set(cur.match(/https?:\/\/[^\s"'<>]{6,200}|\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])].slice(0, 12);
   return 'decode (' + layers + ' layer' + (layers === 1 ? '' : 's') + ')\n' + chain.join('\n') + (iocs.length ? '\n\nIOCs in final output:\n' + iocs.join('\n') : '');
+}
+
+// Extract + defang IOCs from arbitrary text (logs, emails, reports).
+function iocExtract(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return 'ioc_extract: paste text (logs, email, report) to pull IOCs from.';
+  const t = raw.replace(/\[:?\/\/\]/g, '://').replace(/\[\.\]/g, '.').replace(/\(\.\)/g, '.').replace(/\[:\]/g, ':').replace(/hxxp/gi, 'http');
+  const uniq = a => [...new Set(a)];
+  const urls = uniq(t.match(/https?:\/\/[^\s"'<>\])]{4,}/gi) || []);
+  const ipv4 = uniq((t.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || []).filter(ip => ip.split('.').every(o => +o <= 255)));
+  const emails = uniq(t.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || []);
+  const domains = uniq((t.match(/\b(?:[a-z0-9\-]+\.)+[a-z]{2,18}\b/gi) || []).map(d => d.toLowerCase())
+    .filter(d => !/\.(png|jpe?g|gif|svg|js|css|html?|php|aspx?|exe|dll|txt|md|json|xml|zip)$/.test(d)));
+  const md5 = uniq((t.match(/\b[a-f0-9]{32}\b/gi) || []).map(x => x.toLowerCase()));
+  const sha1 = uniq((t.match(/\b[a-f0-9]{40}\b/gi) || []).map(x => x.toLowerCase()));
+  const sha256 = uniq((t.match(/\b[a-f0-9]{64}\b/gi) || []).map(x => x.toLowerCase()));
+  const cves = uniq((t.match(/CVE-\d{4}-\d+/gi) || []).map(c => c.toUpperCase()));
+  const btc = uniq(t.match(/\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39})\b/g) || []);
+  const eth = uniq(t.match(/\b0x[a-f0-9]{40}\b/gi) || []);
+  const defang = s => s.replace(/^http/i, 'hxxp').replace(/:\/\//g, '[://]').replace(/\./g, '[.]');
+  const sections = [];
+  const add = (label, arr, df) => { if (arr.length) sections.push(`${label} (${arr.length}):\n` + arr.slice(0, 50).map(x => df ? defang(x) : x).join('\n')); };
+  add('URLs', urls, true); add('IPv4', ipv4, true); add('Domains', domains, true); add('Emails', emails, true);
+  add('MD5', md5, false); add('SHA1', sha1, false); add('SHA256', sha256, false);
+  add('CVEs', cves, false); add('BTC addresses', btc, false); add('ETH addresses', eth, false);
+  if (!sections.length) return 'ioc_extract: no IOCs found in the provided text.';
+  return 'ioc_extract — IOCs (defanged where applicable; safe to share):\n\n' + sections.join('\n\n');
+}
+
+// CVSS v3.1 base-score calculator from a vector string.
+function cvssCalc(vector) {
+  const v = String(vector || '').trim().toUpperCase();
+  if (!/AV:[NALP]/.test(v)) return 'cvss: provide a CVSS v3.x vector, e.g. CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H';
+  const m = {}; v.split('/').forEach(p => { const kv = p.split(':'); if (kv.length === 2) m[kv[0]] = kv[1]; });
+  const AV = { N: 0.85, A: 0.62, L: 0.55, P: 0.2 }[m.AV];
+  const AC = { L: 0.77, H: 0.44 }[m.AC];
+  const UI = { N: 0.85, R: 0.62 }[m.UI];
+  const scope = m.S;
+  const PR = (scope === 'C' ? { N: 0.85, L: 0.68, H: 0.5 } : { N: 0.85, L: 0.62, H: 0.27 })[m.PR];
+  const imp = { H: 0.56, L: 0.22, N: 0 };
+  const C = imp[m.C], I = imp[m.I], A = imp[m.A];
+  if ([AV, AC, PR, UI, C, I, A].some(x => x === undefined)) return 'cvss: incomplete/invalid vector (need AV,AC,PR,UI,S,C,I,A).';
+  const isc = 1 - ((1 - C) * (1 - I) * (1 - A));
+  const impact = scope === 'C' ? 7.52 * (isc - 0.029) - 3.25 * Math.pow(isc - 0.02, 15) : 6.42 * isc;
+  const expl = 8.22 * AV * AC * PR * UI;
+  let base;
+  if (impact <= 0) base = 0;
+  else if (scope === 'C') base = Math.min(1.08 * (impact + expl), 10);
+  else base = Math.min(impact + expl, 10);
+  base = Math.ceil(base * 10) / 10;
+  const sev = base === 0 ? 'None' : base < 4 ? 'Low' : base < 7 ? 'Medium' : base < 9 ? 'High' : 'Critical';
+  return `cvss ${v}\nbase score: ${base.toFixed(1)} (${sev})\nimpact sub-score: ${impact.toFixed(2)} | exploitability: ${expl.toFixed(2)}`;
 }
 
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
@@ -2745,7 +2801,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
