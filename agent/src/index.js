@@ -3420,7 +3420,11 @@ function harvestPivots(text, known){
   var PROF=/(?:github\\.com|gitlab\\.com|twitter\\.com|x\\.com|instagram\\.com|keybase\\.io|t\\.me|dev\\.to|codeberg\\.org|mastodon\\.social|reddit\\.com\\/(?:user|u)|linkedin\\.com\\/in)\\/@?([a-z0-9_.\\-]{3,30})/ig;
   var pm; while((pm=PROF.exec(text))){ var ph=pm[1].toLowerCase(); if(!/^(login|about|home|search|explore|settings|help|signup|signin|status|share|intent|hashtag|tos|privacy|notifications|messages|orgs|sponsors|features|pricing|topics|collections|trending|marketplace|enterprise|security|blog|docs)$/.test(ph)) phandles.push(ph); }
   phandles=uniq(phandles).filter(function(h){ return (known.handles||[]).indexOf(h)<0; }).slice(0,6);
-  return { emails:emails, domains:doms.slice(0,4), names:names.slice(0,2), hashes:hashes, samples:samples, onions:onions, cryptos:cryptos, phandles:phandles };
+  var LEADDENY=/(google\\.|bing\\.com|duckduckgo|yandex|baidu|facebook\\.com|instagram\\.com|twitter\\.com|x\\.com|linkedin\\.com|reddit\\.com|youtube\\.|youtu\\.be|play\\.google|apps\\.apple|apkmirror|gizmodo|pinterest|tiktok|amazon\\.|ebay\\.|\\/search\\?|\\/wiki\\/%)/i;
+  var rawleads=uniq((text.match(/https?:\\/\\/[^\\s"'<>\\)\\]]+/ig)||[]).map(function(u){ return u.replace(/[.,);]+$/,''); }));
+  var seenH={}, leads=[];
+  rawleads.forEach(function(u){ var h; try{ h=new URL(u).hostname.toLowerCase(); }catch(e){ return; } var path=u.replace(/^https?:\\/\\/[^\\/]+/i,''); if(!path||path==='/') return; if(LEADDENY.test(u)) return; if(seenH[h]) return; seenH[h]=1; leads.push(u); });
+  return { emails:emails, domains:doms.slice(0,4), names:names.slice(0,2), hashes:hashes, samples:samples, onions:onions, cryptos:cryptos, phandles:phandles, leads:leads.slice(0,4) };
 }
 
 async function runOsintFlow(q, od, c){
@@ -3495,23 +3499,46 @@ async function runOsintFlow(q, od, c){
   var st1=addMsg('system','OSINT: round 1 - 0/'+Math.min(jobs.length,30)+' tools...');
   await runJobs(jobs.slice(0,30), blocks, st1, 'round 1');
   st1.textContent='OSINT: round 1 complete ('+blocks.length+' tools).';
-  if((od.intent==='full'||od.intent==='person') && !window.__osintAbort){
-    var pv=harvestPivots(blocks.join('\\n'), od);
+  var pv=harvestPivots(blocks.join('\\n'), od);
+  var doEntityPivot=(od.intent==='full'||od.intent==='person');
+  if((doEntityPivot || (pv.leads||[]).length) && !window.__osintAbort){
     var pjobs=[];
-    pv.emails.forEach(function(e){ pjobs.push(['breach_check '+e,'breach_check',e]); pjobs.push(['gravatar '+e,'gravatar',e]); pjobs.push(['email_recon '+e,'email_recon',e]); pjobs.push(['onion_search '+e,'onion_search',e]); });
-    pv.domains.forEach(function(d){ pjobs.push(['tech_fingerprint '+d,'tech_fingerprint','https://'+d]); pjobs.push(['rdap_domain '+d,'rdap_domain',d]); pjobs.push(['dns_lookup '+d,'dns_lookup',d]); pjobs.push(['crtsh_subs '+d,'crtsh_subs',d]); });
-    pv.names.forEach(function(nm){ pjobs.push(['web_search '+nm,'web_search','"'+nm+'"']); });
-    (pv.phandles||[]).forEach(function(h){ pjobs.push(['username_enum '+h,'username_enum',h]); pjobs.push(['github_user '+h,'github_user',h]); pjobs.push(['keybase '+h,'keybase',h]); pjobs.push(['devto_user '+h,'devto_user',h]); });
-    pv.domains.forEach(function(d){ pjobs.push(['crawl '+d,'crawl','https://'+d]); });
-    (pv.hashes||[]).forEach(function(h){ pjobs.push(['hash_lookup '+h,'hash_lookup',h]); });
-    (pv.samples||[]).forEach(function(su){ pjobs.push(['file_analyze '+su,'file_analyze',su]); });
-    (pv.onions||[]).forEach(function(o){ pjobs.push(['onion_fetch '+o,'onion_fetch',o]); });
-    (pv.cryptos||[]).forEach(function(c){ pjobs.push(['crypto_addr '+c,'crypto_addr',c]); });
+    if(doEntityPivot){
+      pv.emails.forEach(function(e){ pjobs.push(['breach_check '+e,'breach_check',e]); pjobs.push(['gravatar '+e,'gravatar',e]); pjobs.push(['email_recon '+e,'email_recon',e]); pjobs.push(['onion_search '+e,'onion_search',e]); });
+      pv.domains.forEach(function(d){ pjobs.push(['tech_fingerprint '+d,'tech_fingerprint','https://'+d]); pjobs.push(['rdap_domain '+d,'rdap_domain',d]); pjobs.push(['dns_lookup '+d,'dns_lookup',d]); pjobs.push(['crtsh_subs '+d,'crtsh_subs',d]); });
+      pv.names.forEach(function(nm){ pjobs.push(['web_search '+nm,'web_search','"'+nm+'"']); });
+      (pv.phandles||[]).forEach(function(h){ pjobs.push(['username_enum '+h,'username_enum',h]); pjobs.push(['github_user '+h,'github_user',h]); pjobs.push(['keybase '+h,'keybase',h]); pjobs.push(['devto_user '+h,'devto_user',h]); });
+      pv.domains.forEach(function(d){ pjobs.push(['crawl '+d,'crawl','https://'+d]); });
+      (pv.hashes||[]).forEach(function(h){ pjobs.push(['hash_lookup '+h,'hash_lookup',h]); });
+      (pv.samples||[]).forEach(function(su){ pjobs.push(['file_analyze '+su,'file_analyze',su]); });
+      (pv.onions||[]).forEach(function(o){ pjobs.push(['onion_fetch '+o,'onion_fetch',o]); });
+      (pv.cryptos||[]).forEach(function(c){ pjobs.push(['crypto_addr '+c,'crypto_addr',c]); });
+    }
+    (pv.leads||[]).forEach(function(u){ pjobs.push(['crawl '+u,'crawl',u]); });
     if(pjobs.length){
-      addMsg('system','> pivot: discovered '+[].concat(pv.emails,pv.domains,pv.names,pv.phandles||[],pv.hashes||[],pv.samples||[],pv.onions||[],pv.cryptos||[]).slice(0,12).join(', ')+' - digging deeper ('+Math.min(pjobs.length,22)+' tools)');
-      var st2=addMsg('system','OSINT: round 2 (pivots) - 0/'+Math.min(pjobs.length,22)+' tools...');
-      await runJobs(pjobs.slice(0,22), blocks, st2, 'round 2 (pivots)');
+      var disc=[].concat(pv.emails,pv.domains,pv.names,pv.phandles||[],pv.hashes||[],pv.samples||[],pv.onions||[],pv.cryptos||[],pv.leads||[]).slice(0,12);
+      addMsg('system','> pivot: '+disc.join(', ')+' - digging deeper ('+Math.min(pjobs.length,24)+' tools)');
+      var preR2=blocks.length;
+      var st2=addMsg('system','OSINT: round 2 (pivots) - 0/'+Math.min(pjobs.length,24)+' tools...');
+      await runJobs(pjobs.slice(0,24), blocks, st2, 'round 2 (pivots)');
       st2.textContent='OSINT: round 2 complete.';
+      if(!window.__osintAbort){
+        var pv2=harvestPivots(blocks.slice(preR2).join('\\n'), od);
+        var done={}; jobs.concat(pjobs).forEach(function(j){ done[j[1]+':'+String(j[2]).toLowerCase()]=1; });
+        var p3=[];
+        function add3(tool,arg){ var k=tool+':'+String(arg).toLowerCase(); if(arg && !done[k]){ done[k]=1; p3.push([tool+' '+arg,tool,arg]); } }
+        (pv2.leads||[]).forEach(function(u){ add3('crawl',u); });
+        (pv2.samples||[]).forEach(function(su){ add3('file_analyze',su); });
+        (pv2.emails||[]).forEach(function(e){ add3('breach_check',e); add3('email_recon',e); });
+        (pv2.phandles||[]).forEach(function(h){ add3('username_enum',h); add3('keybase',h); });
+        (pv2.domains||[]).forEach(function(d){ add3('rdap_domain',d); });
+        if(p3.length){
+          addMsg('system','> recursion: following '+Math.min(p3.length,12)+' new lead(s) found inside fetched pages');
+          var st3=addMsg('system','OSINT: round 3 (recursion) - 0/'+Math.min(p3.length,12)+' tools...');
+          await runJobs(p3.slice(0,12), blocks, st3, 'round 3 (recursion)');
+          st3.textContent='OSINT: round 3 complete.';
+        }
+      }
     } else { addMsg('system','> no new pivots surfaced from round 1.'); }
   }
   var evidence=blocks.join('\\n\\n');
