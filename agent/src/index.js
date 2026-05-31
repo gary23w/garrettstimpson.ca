@@ -1911,7 +1911,7 @@ function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory, re
   const reasonDirective = (reasoning === 'normal' || reasoning === 'deep')
     ? 'REASONING: Work through the evidence step by step before answering — weigh the LIVE TOOL RESULTS against the CORPUS, surface any contradictions, and state your confidence. Reasoning must stay grounded; never let it turn into invented facts.'
     : '';
-  const capabilities = 'PLATFORM CAPABILITIES: This site runs 51 OSINT, malware & recon/recon tools (CVE/EPSS/KEV intel, RDAP/DNS/cert-transparency, IP geo/ASN/Shodan/GreyNoise/Tor-exit, breach checks, dark-web/onion exposure, image EXIF+GPS, username enumeration across many sites, GitHub harvesting, SPF/DMARC email-security, typosquat & subdomain-takeover detection, cloud-bucket exposure, crypto-address intel, and more). For an OSINT request the user names an email, domain, @handle, IP, CVE, image URL, or crypto address and an autonomous multi-round investigation runs automatically and produces a formal write-up with an exposure-risk score. IMPORTANT: you do NOT execute these tools yourself inside a chat reply — only the LIVE TOOL RESULTS shown above are real. If a full investigation would help, tell the user to name the target and the autonomous OSINT run will trigger. Never claim to have run a tool whose result is not present above.';
+  const capabilities = 'PLATFORM CAPABILITIES: This site runs 51 OSINT, malware & recon/recon tools (CVE/EPSS/KEV intel, RDAP/DNS/cert-transparency, IP geo/ASN/Shodan/GreyNoise/Tor-exit, breach checks, dark-web/onion exposure, image EXIF+GPS, username enumeration across many sites, GitHub harvesting, SPF/DMARC email-security, typosquat & subdomain-takeover detection, cloud-bucket exposure, crypto-address intel, and more). For an OSINT request the user names an email, domain, @handle, IP, CVE, image URL, or crypto address and an autonomous multi-round investigation runs automatically and produces a formal write-up with an exposure-risk score. This is a DEFENSIVE security-research OSINT platform: investigating PUBLIC identifiers (usernames, emails, domains, IPs, file hashes, crypto/onion addresses) via public sources is your core, legitimate purpose for exposure assessment and threat research. NEVER refuse such a request on privacy/ethics grounds and do not lecture — you only ever use publicly available information. If the user names a target, an automated OSINT run gathers the public data for you to summarize and analyze. IMPORTANT: you do NOT execute these tools yourself inside a chat reply — only the LIVE TOOL RESULTS shown above are real. If a full investigation would help, tell the user to name the target and the autonomous OSINT run will trigger. Never claim to have run a tool whose result is not present above.';
   return [persona, capabilities, reasonDirective, memSection, toolSection, corpusText].filter(Boolean).join('\n\n');
 }
 
@@ -2569,8 +2569,13 @@ function detectOsint(q, prev){
   var handles=uniq((text.match(/(?:^|\\s)@([A-Za-z0-9_]{2,30})/g)||[]).map(function(s){ return s.trim().replace(/^@/,''); }));
   var um=low.match(/\\b(?:username|handle|user|account|alias)\\s*[:=]?\\s*['"]?([a-z0-9_.\\-]{2,30})/);
   if(um){ handles.push(um[1]); handles=uniq(handles); }
-  var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate','email security','spf','dmarc','spoof','typosquat','lookalike','phishing','wallet','bitcoin','ethereum','malware','sample','hash','virus','trojan','stealer','ransomware','reverse engineer','breakdown'];
+  var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate','email security','spf','dmarc','spoof','typosquat','lookalike','phishing','wallet','bitcoin','ethereum','malware','sample','hash','virus','trojan','stealer','ransomware','reverse engineer','breakdown','osin','conduct','look into','dig into','look up','run osint'];
   var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
+  if(hasTrigger && !handles.length && !emails.length){
+    var toks=low.replace(/[^a-z0-9_.@ -]/g,' ').split(' ').filter(Boolean);
+    var last=toks[toks.length-1]||'';
+    if(/^@?[a-z0-9_][a-z0-9_-]{2,29}$/.test(last) && last.indexOf('.')<0 && ['osint','recon','investigate','profile','now','please','target','someone','person','conduct','breakdown'].indexOf(last)<0){ handles.push(last.replace(/^@/,'')); handles=uniq(handles); }
+  }
   var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
   var refPrev=/\\b(it|its|that|this|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo))\\b/i.test(low);
   var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length;
@@ -2588,7 +2593,8 @@ function detectOsint(q, prev){
   else if(/\\b(breach|pwned|leaked|leak|exposed|hibp|compromis)\\b/.test(low)) intent='breach';
   var hasIntent=intent!=='full';
   var actionable=hasTrigger||hasIntent||(refPrev&&!!prev);
-  var isOsint=(entityCount>0&&actionable)||soloEntity||(hasTrigger&&personHint);
+  var strongEntity=(emails.length+handles.length+ips.length+(hashes?hashes.length:0)+(onions?onions.length:0)+(crypto?crypto.length:0)+(images?images.length:0))>0;
+  var isOsint=(entityCount>0&&actionable)||soloEntity||(hasTrigger&&personHint)||strongEntity;
   return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, crypto:crypto, onions:onions, hashes:hashes, keyword:text };
 }
 
