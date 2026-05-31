@@ -54,6 +54,11 @@
         "type": "secret_text",
         "name": "BING_API_KEY",
         "description": "Optional Bing Web Search API key for reliable web_search."
+      },
+      {
+        "type": "secret_text",
+        "name": "ABUSECH_API_KEY",
+        "description": "Optional abuse.ch Auth-Key (free) — enables URLhaus malware-URL lookups."
       }
     ]
   }

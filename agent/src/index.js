@@ -402,7 +402,7 @@ async function dnsLookup(domain) {
 // from public CT logs (read-only OSINT, not a scan).
 async function certLookup(domain) {
   try {
-    const r = await fetch(`https://crt.sh/?q=${encodeURIComponent('%.' + domain)}&output=json`,
+    const r = await fetch(`https://crt.sh/?q=${encodeURIComponent('%.' + domain)}&output=json`,  // crt.sh is flaky
       { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return `crt.sh: no certificate data for ${domain} (HTTP ${r.status}).`;
     const data = await r.json();
@@ -546,10 +546,14 @@ async function urlscanSearch(domain) {
 }
 
 // abuse.ch URLhaus — malware-URL records for a host/IP/domain
-async function urlhausLookup(host) {
+async function urlhausLookup(env, host) {
+  const key = String((env && (env.ABUSECH_API_KEY || env.URLHAUS_API_KEY)) || '');
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  if (key) headers['Auth-Key'] = key;
   try {
-    const r = await fetch('https://urlhaus-api.abuse.ch/v1/host/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `host=${encodeURIComponent(host)}`, signal: AbortSignal.timeout(8000) });
-    if (!r.ok) return `URLhaus ${host}: unavailable (HTTP ${r.status}; may now require a free Auth-Key).`;
+    const r = await fetch('https://urlhaus-api.abuse.ch/v1/host/', { method: 'POST', headers, body: `host=${encodeURIComponent(host)}`, signal: AbortSignal.timeout(8000) });
+    if (r.status === 401) return key ? `URLhaus ${host}: Auth-Key rejected (401).` : `URLhaus ${host}: skipped — abuse.ch now needs a free Auth-Key (set ABUSECH_API_KEY).`;
+    if (!r.ok) return `URLhaus ${host}: unavailable (HTTP ${r.status}).`;
     const d = await r.json();
     if (d.query_status === 'no_results') return `URLhaus ${host}: no malware URLs on record.`;
     if (d.query_status !== 'ok') return `URLhaus ${host}: ${d.query_status}.`;
@@ -677,7 +681,8 @@ function formatSearch(s) {
 function isPrivateHost(host) {
   const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
   if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) return true;
-  if (h === '::1' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80')) return true;
+  if (h === '::1') return true;
+  if (h.indexOf(':') >= 0 && (h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80'))) return true;  // IPv6 ULA/link-local only
   const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (m) {
     const a = +m[1], b = +m[2];
@@ -850,7 +855,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'asn_info')     return asnInfo(String(args.target || args.ip || args.asn || ''));
   if (name === 'wayback')      return wayback(String(args.url || args.domain || ''));
   if (name === 'urlscan')      return urlscanSearch(String(args.domain || ''));
-  if (name === 'urlhaus')      return urlhausLookup(String(args.host || args.domain || args.ip || ''));
+  if (name === 'urlhaus')      return urlhausLookup(env, String(args.host || args.domain || args.ip || ''));
   if (name === 'github_osint') return githubOsint(env, String(args.query || ''));
   if (name === 'crtsh_subs')   return crtshSubs(String(args.domain || args.target || ''));
   if (name === 'circl_cve')    return circlCve(String(args.cveId || args.cve || ''));
@@ -949,7 +954,7 @@ async function crtshSubs(domain) {
   if (!d) return 'crtsh_subs: a domain is required.';
   try {
     const r = await fetch(`https://crt.sh/?q=%25.${encodeURIComponent(d)}&output=json`,
-      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(12000) });
+      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(7000) });
     if (!r.ok) return `crt.sh ${d}: lookup failed (HTTP ${r.status}).`;
     const rows = await r.json();
     const set = new Set();
@@ -1925,8 +1930,8 @@ async function stealerCheck(target) {
     if (!r.ok) return `stealer_check ${t}: lookup failed (HTTP ${r.status}).`;
     const d = await r.json();
     const st = d.stealers || [];
-    const infected = /infected|associated with/i.test(d.message || '');
-    if (!st.length && !infected && d.total == null) return `stealer_check ${t}: NOT found in HudsonRock infostealer datasets (no known stealer-log exposure).`;
+    const exposed = st.length > 0 || +d.total > 0 || +d.employees > 0 || +d.users > 0 || +d.total_user_services > 0 || +d.total_corporate_services > 0 || +d.third_parties > 0;
+    if (!exposed) return `stealer_check ${t}: NOT found in HudsonRock infostealer datasets (no known stealer-log exposure).`;
     let out = `stealer_check ${t} (HudsonRock — infostealer / stealer-logs)\nEXPOSED in stealer-log data.`;
     if (st.length) {
       out += '\n' + st.slice(0, 6).map(s =>
@@ -2014,7 +2019,7 @@ async function phishCheck(url) {
     if (m) { const days = (Date.now() - Date.parse(m[1])) / 86400000; if (days >= 0 && days < 90) { score += 25; signals.push(`registration date ${m[1]} (~${Math.round(days)} days old — very new)`); } }
   } catch (e) {}
   try {
-    const uh = await urlhausLookup(host);
+    const uh = await urlhausLookup(null, host);
     if (/malware|blacklist|listed/i.test(uh) && !/no results|not (found|listed)|0 /i.test(uh)) { score += 30; signals.push('URLhaus: host associated with malware URLs'); }
   } catch (e) {}
   try {
@@ -2924,7 +2929,7 @@ async function runOsintFlow(q, od, c){
   window.__osintAbort=false; var stopBtn=el('btn-stop'); if(stopBtn){ stopBtn.style.display=''; stopBtn.textContent='stop'; }
   var jobs=[];
   function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise','tor_exit'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
-  function addDomainFull(x){ ['rdap_domain','dns_records','cert_ct','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check','subdomain_takeover','stealer_check','archive_urls'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check')?('https://'+x):x]); }); }
+  function addDomainFull(x){ ['rdap_domain','dns_records','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check','subdomain_takeover','stealer_check'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check')?('https://'+x):x]); }); }
   if(od.intent==='image'){
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
     if(!(od.images||[]).length) addMsg('system','OSINT(image): no image URL found - paste a direct image link (jpg/png/...).');
@@ -3253,6 +3258,7 @@ export default {
       let body; try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }
       const tool = String(body.tool || '').trim().toLowerCase();
       const args = body.args && typeof body.args === 'object' ? body.args : {};
+      for (const k in args) { if (typeof args[k] === 'string') { const mm = args[k].match(/\]\((https?:\/\/[^)\s]+)\)/); if (mm) args[k] = mm[1]; args[k] = args[k].replace(/^[\[<("'\s]+|[\]>)"'\s]+$/g, '').trim(); } }
       const target = normalizeTarget(body.target || args.target || args.url || args.domain || args.ip || '');
       const policy = getToolPolicy(env);
       if (!tool) return json({ ok: false, error: 'tool is required' }, 400);
