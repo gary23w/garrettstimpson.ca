@@ -1622,15 +1622,24 @@ async function onionFetch(onionUrl) {
   const m = s.match(/^([a-z2-7]{16}\.onion|[a-z2-7]{56}\.onion)(\/.*)?$/i);
   if (!m) return 'onion_fetch: provide a .onion address (v2 16-char or v3 56-char), optionally with a path.';
   const host = m[1].toLowerCase(), path = m[2] || '/';
-  const gateways = ['onion.ws', 'onion.ly', 'onion.pet', 'onion.moe', 'onion.foundation', 'tor2web.io', 'onion.com.de', 'onion.re'];
+  const gateways = ['onion.ws', 'onion.ly', 'onion.pet', 'onion.moe', 'onion.re'];
   for (const gw of gateways) {
     try {
       const r = await fetch(`https://${host}.${gw}${path}`,
-        { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, redirect: 'follow', signal: AbortSignal.timeout(12000) });
+        { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, redirect: 'follow', signal: AbortSignal.timeout(9000) });
       if (r.ok) {
         const raw = await r.text();
         const body = raw.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        if (body.length > 40) return `onion_fetch ${host} (via ${gw}, HTTP ${r.status})\n\n${body.slice(0, 5000)}`;
+        if (body.length > 40) {
+          const links = [...new Set((raw.match(/[a-z2-7]{16}\.onion|[a-z2-7]{56}\.onion/gi) || []).map(x => x.toLowerCase()))].filter(o => o !== host).slice(0, 12);
+          const emails = [...new Set(raw.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [])].slice(0, 8);
+          const btc = [...new Set(raw.match(/\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39})\b/g) || [])].slice(0, 6);
+          let piv = '';
+          if (links.length) piv += `\n\ndiscovered onion links (${links.length}):\n` + links.join('\n');
+          if (emails.length) piv += `\n\nemails on page: ` + emails.join(', ');
+          if (btc.length) piv += `\n\nBTC addresses on page: ` + btc.join(', ');
+          return `onion_fetch ${host} (via ${gw}, HTTP ${r.status})\n\n${body.slice(0, 4500)}${piv}`;
+        }
       }
     } catch (e) {}
   }
@@ -2087,6 +2096,11 @@ function addMsg(role,text){
   var d=document.createElement('div'); d.className='msg '+role; d.textContent=text;
   log.appendChild(d); log.scrollTop=log.scrollHeight; return d;
 }
+function addCopyBtn(elm, text){
+  var b=document.createElement('button'); b.className='btn'; b.style.cssText='margin-top:5px;font-size:9px;padding:1px 7px;'; b.textContent='copy';
+  b.onclick=function(){ if(navigator.clipboard){ navigator.clipboard.writeText(text).then(function(){ b.textContent='copied!'; setTimeout(function(){ b.textContent='copy'; },1200); }); } };
+  elm.appendChild(b);
+}
 function dbg(head,body){
   if(head){ var h=document.createElement('div'); h.className='dh'; h.textContent=ts()+' · '+head; dbgPane.appendChild(h); }
   if(body){ var e=document.createElement('div'); e.className='de'; e.textContent=body; dbgPane.appendChild(e); }
@@ -2159,7 +2173,7 @@ inp.addEventListener('keydown', async function(e){
     }
   }catch(e){ full=(full||'')+'\\n[error] '+e.message; el2.textContent=full; }
   el2.className='msg agent';
-  if(full.trim()){ el2.innerHTML=renderMarkdown(full); c.msgs.push({role:'assistant',content:full}); saveChats(chats); MEM.add(q+' \u2192 '+full.slice(0,500),'finding'); } else { el2.textContent='[no response]'; }
+  if(full.trim()){ el2.innerHTML=renderMarkdown(full); addCopyBtn(el2, full); c.msgs.push({role:'assistant',content:full}); saveChats(chats); MEM.add(q+' \u2192 '+full.slice(0,500),'finding'); } else { el2.textContent='[no response]'; }
   busy=false; inp.disabled=false; inp.focus();
 });
 
