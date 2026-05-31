@@ -1,0 +1,5 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+requests[socks]>=2.31
+sherlock-project>=0.14.4
+holehe>=1.61

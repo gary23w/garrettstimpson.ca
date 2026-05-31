@@ -863,7 +863,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'email_permutations') return emailPermutations(String(args.input || args.name || args.target || ''));
   if (name === 'cors_check')   return corsCheck(String(args.url || args.target || ''));
   if (name === 'subdomain_takeover') return subdomainTakeover(String(args.domain || args.target || ''));
-  if (name === 'onion_fetch')  return onionFetch(String(args.url || args.onion || args.target || ''));
+  if (name === 'onion_fetch')  return onionFetch(env, String(args.url || args.onion || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1617,11 +1617,18 @@ async function subdomainTakeover(domain) {
 }
 
 // Fetch .onion content over clearnet via free tor2web gateways (no Tor/broker needed).
-async function onionFetch(onionUrl) {
+async function onionFetch(env, onionUrl) {
   let s = String(onionUrl || '').trim().replace(/^https?:\/\//i, '');
   const m = s.match(/^([a-z2-7]{16}\.onion|[a-z2-7]{56}\.onion)(\/.*)?$/i);
   if (!m) return 'onion_fetch: provide a .onion address (v2 16-char or v3 56-char), optionally with a path.';
   const host = m[1].toLowerCase(), path = m[2] || '/';
+  if (env && env.TOOL_BROKER_URL) {
+    try {
+      const out = await runBrokerTool(env, { tool: 'onion_fetch', args: { url: host + path }, target: host, requestedAt: new Date().toISOString() });
+      const txt = typeof out === 'string' ? out : (out && (out.result || ''));
+      if (txt && /HTTP \d/.test(txt)) return txt + '\n(via Tor broker)';
+    } catch (e) {}
+  }
   const gateways = ['onion.ws', 'onion.ly', 'onion.pet', 'onion.moe', 'onion.re'];
   for (const gw of gateways) {
     try {
