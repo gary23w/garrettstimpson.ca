@@ -163,6 +163,24 @@ def exif(url):
     return "exif %s\n%s" % (url, out[:4000])
 
 
+def yara_scan(url):
+    if not url:
+        return "yara_scan: a sample URL is required."
+    try:
+        path = fetch_sample(url)
+    except Exception as e:
+        return "yara_scan: download failed (%s)" % e
+    rules = os.environ.get("YARA_RULES", "/app/rules.yar")
+    try:
+        out = run_cli(["yara", "-w", "-s", rules, path], 120)
+    finally:
+        try: os.remove(path)
+        except Exception: pass
+    if not out.strip():
+        return "yara_scan %s: no rule matches (ruleset: %s)." % (url, rules)
+    return "yara_scan %s (ruleset: %s)\n%s" % (url, rules, out[:4000])
+
+
 TOOLS = {
     "onion_fetch":  lambda a: onion_fetch(a.get("url") or a.get("onion") or a.get("target") or ""),
     "onion_search": lambda a: onion_search(a.get("query") or a.get("target") or ""),
@@ -171,6 +189,7 @@ TOOLS = {
     "re_analyze":   lambda a: re_analyze(a.get("url") or a.get("target") or ""),
     "ole_macros":   lambda a: ole_macros(a.get("url") or a.get("target") or ""),
     "exif":         lambda a: exif(a.get("url") or a.get("target") or ""),
+    "yara_scan":    lambda a: yara_scan(a.get("url") or a.get("target") or ""),
 }
 
 
