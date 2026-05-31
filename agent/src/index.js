@@ -752,6 +752,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'email_permutations', category: 'people', passive: true, description: 'Generate likely email addresses from a name + domain (MX-checked, not verified)' },
   { name: 'cors_check', category: 'recon', passive: false, description: 'Test a URL for permissive/misconfigured CORS (Origin reflection)' },
   { name: 'subdomain_takeover', category: 'recon', passive: false, description: 'Detect dangling CNAMEs to deprovisioned services (subdomain takeover risk)' },
+  { name: 'onion_fetch', category: 'darkweb', passive: true, description: 'Fetch .onion content over clearnet via free tor2web gateways (no Tor needed)' },
 ];
 
 function parseCsvSet(value) {
@@ -862,6 +863,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'email_permutations') return emailPermutations(String(args.input || args.name || args.target || ''));
   if (name === 'cors_check')   return corsCheck(String(args.url || args.target || ''));
   if (name === 'subdomain_takeover') return subdomainTakeover(String(args.domain || args.target || ''));
+  if (name === 'onion_fetch')  return onionFetch(String(args.url || args.onion || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1313,7 +1315,7 @@ async function onionSearch(env, query) {
       const re = /([a-z2-7]{16}\.onion|[a-z2-7]{56}\.onion)/gi;
       let m; while ((m = re.exec(html))) { const o = m[1].toLowerCase(); if (o.indexOf('juhanurmihxlp') === 0) continue; if (!seen[o]) { seen[o] = 1; hits.push(o); } }
       lines.push(hits.length
-        ? `Ahmia (clearnet onion index): ${hits.length} onion site(s) referencing "${q}":\n` + hits.slice(0, 15).join('\n')
+        ? `Ahmia (clearnet onion index): ${hits.length} onion site(s) referencing "${q}":\n` + hits.slice(0, 15).map(o => o + '  (view: https://' + o + '.onion.ws)').join('\n')
         : `Ahmia: no indexed onion sites referencing "${q}" (or abuse-filtered).`);
     } else lines.push(`Ahmia: unavailable (HTTP ${r.status}). Clearnet onion gateways frequently block datacenter/Workers IPs.`);
   } catch (e) { lines.push(`Ahmia: unavailable (${e.message}).`); }
@@ -1326,7 +1328,7 @@ async function onionSearch(env, query) {
   } else {
     lines.push('Live .onion crawl: not available in-worker (Cloudflare Workers cannot open Tor circuits). Set TOOL_BROKER_URL to a Tor-capable broker to enable real onion crawling.');
   }
-  return `onion_search "${q}" (dark-web exposure monitoring)\n` + lines.join('\n\n') + '\n\nNote: index references surfaced for defensive exposure assessment only.';
+  return `onion_search "${q}" (dark-web exposure monitoring)\n` + lines.join('\n\n') + '\n\nTip: use onion_fetch <address> to pull onion site text via a free clearnet gateway. Index references surfaced for defensive exposure assessment only.';
 }
 
 // Email-security posture — SPF / DMARC / MX / DNSSEC (spoofability assessment).
@@ -1614,6 +1616,27 @@ async function subdomainTakeover(domain) {
   return `subdomain_takeover ${d}:\n` + findings.join('\n');
 }
 
+// Fetch .onion content over clearnet via free tor2web gateways (no Tor/broker needed).
+async function onionFetch(onionUrl) {
+  let s = String(onionUrl || '').trim().replace(/^https?:\/\//i, '');
+  const m = s.match(/^([a-z2-7]{16}\.onion|[a-z2-7]{56}\.onion)(\/.*)?$/i);
+  if (!m) return 'onion_fetch: provide a .onion address (v2 16-char or v3 56-char), optionally with a path.';
+  const host = m[1].toLowerCase(), path = m[2] || '/';
+  const gateways = ['onion.ws', 'onion.ly', 'onion.pet', 'onion.moe', 'onion.foundation', 'tor2web.io', 'onion.com.de', 'onion.re'];
+  for (const gw of gateways) {
+    try {
+      const r = await fetch(`https://${host}.${gw}${path}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, redirect: 'follow', signal: AbortSignal.timeout(12000) });
+      if (r.ok) {
+        const raw = await r.text();
+        const body = raw.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (body.length > 40) return `onion_fetch ${host} (via ${gw}, HTTP ${r.status})\n\n${body.slice(0, 5000)}`;
+      }
+    } catch (e) {}
+  }
+  return `onion_fetch ${host}: no free Tor gateway could reach it right now (public gateways are unreliable / often down).\nTo view it yourself: open http://${host}${path} in the Tor Browser, or try a gateway link: https://${host}.onion.ws${path}`;
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -1839,6 +1862,11 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
   #tools select,#jobs select,#tools input.t-arg,#jobs input[type=text]{width:100%;flex:1 1 100%;}
   #tools .trow,#jobs .row{gap:6px;}
 }
+@keyframes gsspin{to{transform:rotate(360deg)}}
+.spinner{display:inline-block;width:11px;height:11px;border:2px solid var(--muted);border-top-color:var(--blue);border-radius:50%;animation:gsspin .7s linear infinite;vertical-align:-2px;margin-right:7px;}
+@keyframes gsblink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.msg.agent.streaming::after{content:'\u258b';color:var(--blue);animation:gsblink 1.05s steps(1) infinite;margin-left:1px;}
+.think{color:var(--muted);font-style:italic;}
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -2103,8 +2131,9 @@ inp.addEventListener('keydown', async function(e){
   if(!c.msgs.length){ c.title=q.slice(0,40); }
   c.msgs.push({role:'user',content:q}); saveChats(chats); renderChats();
   addMsg('user',q);
-  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
-  var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full='';
+  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
+  var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full=''; var firstTok=true;
+  el2.innerHTML='<span class="spinner"></span><span class="think">Agent Garrett is thinking…</span>';
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
              topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value };
   dbg('query', q+'  [search='+opts.webSearch+' temp='+opts.temperature+' topK='+opts.topK+']');
@@ -2125,12 +2154,12 @@ inp.addEventListener('keydown', async function(e){
           dbg(sep>=0?p.slice(0,sep):p, sep>=0?p.slice(sep+1):''); continue;
         }
         if(line.indexOf('data: ')!==0) continue;
-        try{ var obj=JSON.parse(line.slice(6)); var t=obj.response||''; if(t){ full+=t; el2.textContent+=t; log.scrollTop=log.scrollHeight; } }catch(e3){}
+        try{ var obj=JSON.parse(line.slice(6)); var t=obj.response||''; if(t){ if(firstTok){ el2.textContent=''; firstTok=false; } full+=t; el2.textContent+=t; log.scrollTop=log.scrollHeight; } }catch(e3){}
       }
     }
   }catch(e){ full=(full||'')+'\\n[error] '+e.message; el2.textContent=full; }
   el2.className='msg agent';
-  if(full.trim()){ el2.innerHTML=renderMarkdown(full); c.msgs.push({role:'assistant',content:full}); saveChats(chats); MEM.add(q+' \u2192 '+full.slice(0,500),'finding'); }
+  if(full.trim()){ el2.innerHTML=renderMarkdown(full); c.msgs.push({role:'assistant',content:full}); saveChats(chats); MEM.add(q+' \u2192 '+full.slice(0,500),'finding'); } else { el2.textContent='[no response]'; }
   busy=false; inp.disabled=false; inp.focus();
 });
 
@@ -2285,6 +2314,7 @@ function detectOsint(q, prev){
   var ips=uniq((text.match(/\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b/g)||[]).filter(function(ip){ return ip.split('.').every(function(o){ return +o>=0&&+o<=255; }); }));
   var cves=uniq((text.match(/CVE-\\d{4}-\\d+/ig)||[]).map(function(c){ return c.toUpperCase(); }));
   var crypto=uniq(text.match(/\\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39}|0x[a-fA-F0-9]{40})\\b/g)||[]);
+  var onions=uniq((text.match(/\\b[a-z2-7]{16}\\.onion\\b|\\b[a-z2-7]{56}\\.onion\\b/ig)||[]).map(function(x){ return x.toLowerCase(); }));
   var emailDoms={}; emails.forEach(function(e){ emailDoms[e.split('@')[1].toLowerCase()]=1; });
   var imgHosts={}; images.forEach(function(x){ try{ imgHosts[new URL(x).hostname.toLowerCase()]=1; }catch(e){} });
   var domains=uniq((text.match(/\\b(?:[a-z0-9\\-]+\\.)+[a-z]{2,24}\\b/ig)||[]).map(function(d){ return d.toLowerCase(); })
@@ -2298,22 +2328,22 @@ function detectOsint(q, prev){
   var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
   var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
   var refPrev=/\\b(it|its|that|this|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo))\\b/i.test(low);
-  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length;
+  var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length;
   var soloEntity=(entityCount===1)&&(text.split(/\\s+/).length<=2);
   if(entityCount===0 && prev && (hasTrigger||refPrev||personHint)){
-    emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice(); images=(prev.images||[]).slice(); crypto=(prev.crypto||[]).slice();
-    entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length;
+    emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice(); images=(prev.images||[]).slice(); crypto=(prev.crypto||[]).slice(); onions=(prev.onions||[]).slice();
+    entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length;
   }
   var intent='full';
   if(images.length || /\\b(image|photo|picture|exif|reverse image|geoloc)\\b/.test(low)) intent='image';
-  else if(/\\b(onion|dark ?web|tor network|leaked on|paste dump)\\b/.test(low)) intent='darkweb';
+  else if(onions.length || /\\b(onion|dark ?web|tor network|leaked on|paste dump)\\b/.test(low)) intent='darkweb';
   else if(/\\b(origin|behind|real ip|true ip|bypass|unmask)\\b/.test(low)) intent='origin';
   else if(/\\b(discourse|wordpress|drupal|joomla|cms|tech stack|framework|fingerprint|built with|built on|powered by|running|is it a|is it an)\\b/.test(low)) intent='tech';
   else if(/\\b(breach|pwned|leaked|leak|exposed|hibp|compromis)\\b/.test(low)) intent='breach';
   var hasIntent=intent!=='full';
   var actionable=hasTrigger||hasIntent||(refPrev&&!!prev);
   var isOsint=(entityCount>0&&actionable)||soloEntity||(hasTrigger&&personHint);
-  return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, crypto:crypto, keyword:text };
+  return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, crypto:crypto, onions:onions, keyword:text };
 }
 
 function osintSummary(od){
@@ -2325,6 +2355,7 @@ function osintSummary(od){
   if(od.cves.length) p.push('cve:'+od.cves.join(','));
   if(od.images && od.images.length) p.push('image:'+od.images.length);
   if(od.crypto && od.crypto.length) p.push('crypto:'+od.crypto.join(','));
+  if(od.onions && od.onions.length) p.push('onion:'+od.onions.length);
   return p.length?p.join(' | '):'keyword search';
 }
 async function runOsintTool(tool, arg){
@@ -2400,6 +2431,7 @@ async function runOsintFlow(q, od, c){
     var dterms=[]; (od.emails||[]).forEach(function(x){ dterms.push(x); }); (od.domains||[]).forEach(function(x){ dterms.push(x); }); (od.handles||[]).forEach(function(x){ dterms.push(x); });
     if(!dterms.length) dterms.push(od.keyword);
     dterms.slice(0,4).forEach(function(x){ jobs.push(['onion_search '+x,'onion_search',x]); });
+    (od.onions||[]).forEach(function(x){ jobs.push(['onion_fetch '+x,'onion_fetch',x]); });
     (od.emails||[]).forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); });
   } else if(od.intent==='origin'){
     od.domains.forEach(function(x){ jobs.push(['origin_ip '+x,'origin_ip',x]); jobs.push(['dns_lookup '+x,'dns_lookup',x]); jobs.push(['crtsh_subs '+x,'crtsh_subs',x]); });
@@ -2417,6 +2449,7 @@ async function runOsintFlow(q, od, c){
     od.handles.forEach(function(x){ jobs.push(['username_enum '+x,'username_enum',x]); jobs.push(['github_user '+x,'github_user',x]); });
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
     (od.crypto||[]).forEach(function(x){ jobs.push(['crypto_addr '+x,'crypto_addr',x]); });
+    (od.onions||[]).forEach(function(x){ jobs.push(['onion_fetch '+x,'onion_fetch',x]); });
     var sterms=[];
     (od.handles||[]).forEach(function(h){ sterms.push('"'+h+'"'); });
     (od.emails||[]).forEach(function(e){ sterms.push('"'+e+'"'); });
@@ -2539,7 +2572,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
@@ -2577,7 +2610,7 @@ el('t-run').onclick=async function(){
 async function startOsint(obj){
   if(!obj || !obj.trim()) return;
   var od=detectOsint(obj, window.__lastOsint); od.isOsint=true;
-  window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto};
+  window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions};
   busy=true; inp.disabled=true;
   var c=active(); addMsg('user',obj); c.msgs.push({role:'user',content:obj}); if(c.msgs.length===1) c.title='[osint] '+obj.slice(0,30); saveChats(chats); renderChats();
   try{ await runOsintFlow(obj, od, c); }catch(e){ addMsg('system','OSINT error: '+e.message); }
