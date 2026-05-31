@@ -3078,7 +3078,11 @@ function harvestPivots(text, known){
   var samples=uniq(text.match(/https?:\\/\\/[^\\s"'<>]+?\\.(?:exe|dll|bin|zip|rar|7z|js|jar|apk|docx?|xlsx?|pptx?|pdf|txt|json|ps1|vbs|hta|scr|msi|cab|iso|gz|tar)(?:\\?[^\\s"'<>]*)?/ig)||[]).slice(0,4);
   var onions=uniq((text.match(/[a-z2-7]{16}\\.onion|[a-z2-7]{56}\\.onion/ig)||[]).map(function(x){ return x.toLowerCase(); })).filter(function(o){ return o.indexOf('juhanurmihxlp')!==0; }).slice(0,3);
   var cryptos=uniq(text.match(/\\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39}|0x[a-fA-F0-9]{40})\\b/g)||[]).slice(0,3);
-  return { emails:emails, domains:doms.slice(0,4), names:names.slice(0,2), hashes:hashes, samples:samples, onions:onions, cryptos:cryptos };
+  var phandles=[];
+  var PROF=/(?:github\\.com|gitlab\\.com|twitter\\.com|x\\.com|instagram\\.com|keybase\\.io|t\\.me|dev\\.to|codeberg\\.org|mastodon\\.social|reddit\\.com\\/(?:user|u)|linkedin\\.com\\/in)\\/@?([a-z0-9_.\\-]{3,30})/ig;
+  var pm; while((pm=PROF.exec(text))){ var ph=pm[1].toLowerCase(); if(!/^(login|about|home|search|explore|settings|help|signup|signin|status|share|intent|hashtag|tos|privacy|notifications|messages|orgs|sponsors|features|pricing|topics|collections|trending|marketplace|enterprise|security|blog|docs)$/.test(ph)) phandles.push(ph); }
+  phandles=uniq(phandles).filter(function(h){ return (known.handles||[]).indexOf(h)<0; }).slice(0,6);
+  return { emails:emails, domains:doms.slice(0,4), names:names.slice(0,2), hashes:hashes, samples:samples, onions:onions, cryptos:cryptos, phandles:phandles };
 }
 
 async function runOsintFlow(q, od, c){
@@ -3153,13 +3157,14 @@ async function runOsintFlow(q, od, c){
     pv.emails.forEach(function(e){ pjobs.push(['breach_check '+e,'breach_check',e]); pjobs.push(['gravatar '+e,'gravatar',e]); pjobs.push(['email_recon '+e,'email_recon',e]); pjobs.push(['onion_search '+e,'onion_search',e]); });
     pv.domains.forEach(function(d){ pjobs.push(['tech_fingerprint '+d,'tech_fingerprint','https://'+d]); pjobs.push(['rdap_domain '+d,'rdap_domain',d]); pjobs.push(['dns_lookup '+d,'dns_lookup',d]); pjobs.push(['crtsh_subs '+d,'crtsh_subs',d]); });
     pv.names.forEach(function(nm){ pjobs.push(['web_search '+nm,'web_search','"'+nm+'"']); });
+    (pv.phandles||[]).forEach(function(h){ pjobs.push(['username_enum '+h,'username_enum',h]); pjobs.push(['github_user '+h,'github_user',h]); });
     pv.domains.forEach(function(d){ pjobs.push(['crawl '+d,'crawl','https://'+d]); });
     (pv.hashes||[]).forEach(function(h){ pjobs.push(['hash_lookup '+h,'hash_lookup',h]); });
     (pv.samples||[]).forEach(function(su){ pjobs.push(['file_analyze '+su,'file_analyze',su]); });
     (pv.onions||[]).forEach(function(o){ pjobs.push(['onion_fetch '+o,'onion_fetch',o]); });
     (pv.cryptos||[]).forEach(function(c){ pjobs.push(['crypto_addr '+c,'crypto_addr',c]); });
     if(pjobs.length){
-      addMsg('system','> pivot: discovered '+[].concat(pv.emails,pv.domains,pv.names,pv.hashes||[],pv.samples||[],pv.onions||[],pv.cryptos||[]).slice(0,10).join(', ')+' - digging deeper ('+Math.min(pjobs.length,22)+' tools)');
+      addMsg('system','> pivot: discovered '+[].concat(pv.emails,pv.domains,pv.names,pv.phandles||[],pv.hashes||[],pv.samples||[],pv.onions||[],pv.cryptos||[]).slice(0,12).join(', ')+' - digging deeper ('+Math.min(pjobs.length,22)+' tools)');
       var st2=addMsg('system','OSINT: round 2 (pivots) - 0/'+Math.min(pjobs.length,22)+' tools...');
       await runJobs(pjobs.slice(0,22), blocks, st2, 'round 2 (pivots)');
       st2.textContent='OSINT: round 2 complete.';
