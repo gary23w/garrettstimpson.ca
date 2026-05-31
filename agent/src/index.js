@@ -765,6 +765,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'phish_check', category: 'recon', passive: false, description: 'Phishing verdict for a URL: domain age, URLhaus, lure keywords, login form, redirects' },
   { name: 'archive_urls', category: 'osint', passive: true, description: 'Wayback historical URLs/endpoints for a domain (forgotten paths)' },
   { name: 'favicon_hash', category: 'recon', passive: false, description: 'Shodan/FOFA favicon-hash pivot — find other servers sharing a site favicon' },
+  { name: 'crawl', category: 'recon', passive: false, description: 'Crawl a website: extract & follow links/files, download linked text files, scan for exposed secrets' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
   { name: 'decode', category: 'malware', passive: true, description: 'Recursive multi-layer decode (base64/hex/url/gzip) + refang + IOCs' },
@@ -889,6 +890,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'phish_check')  return phishCheck(String(args.url || args.target || ''));
   if (name === 'archive_urls') return archiveUrls(String(args.domain || args.target || ''));
   if (name === 'favicon_hash') return faviconHash(String(args.url || args.target || ''));
+  if (name === 'crawl')        return crawl(String(args.url || args.target || ''));
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
   if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
@@ -2099,6 +2101,7 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
     'WHEN TO USE A TOOL: the user gives or clearly refers to a concrete input a tool operates on — an email, username, domain, IP, URL, file hash, CVE id, CVSS vector, crypto/onion address, an encoded/obfuscated string, or a sample/file URL. Then pick the single most relevant tool and set "arg" to exactly that value (never invent it).',
     'WHEN NOT TO USE A TOOL: conceptual/how-to questions, explanations, or anything the research corpus or your own knowledge already answers -> return {"tool":"none"}.',
     'This is a defensive platform over PUBLIC data; do not refuse on privacy grounds.',
+    'CHAIN ON FINDINGS: if a result shown in context contains a NEW analyzable artifact, select the matching tool next — a file hash => hash_lookup; a sample/file URL (.exe/.txt/.js/...) => file_analyze; a .onion => onion_fetch; a crypto address => crypto_addr; a fresh email => breach_check; a website worth exploring => crawl.',
     already.length ? `Tools already run this turn (do NOT repeat): ${already.join(', ')}.` : '',
     'EXAMPLES:',
     'user: is 8.8.8.8 a tor exit node?  => {"tool":"tor_exit","arg":"8.8.8.8"}',
@@ -2122,6 +2125,54 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
     if (!o.tool || String(o.tool).toLowerCase() === 'none') return null;
     return { tool: String(o.tool).toLowerCase().trim(), arg: String(o.arg || o.argument || o.value || '').trim() };
   } catch (e) { return null; }
+}
+
+// Website crawler — fetch a page, extract & classify links, follow interesting files, scan for secrets.
+async function crawl(url) {
+  let u; try { u = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch { return 'crawl: a URL is required.'; }
+  if (isPrivateHost(u.hostname)) return `crawl: ${u.hostname} is private/internal — blocked.`;
+  const SECRET = [
+    [/AKIA[0-9A-Z]{16}/, 'AWS access key'],
+    [/-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/, 'private key'],
+    [/ghp_[A-Za-z0-9]{36}/, 'GitHub token'], [/glpat-[A-Za-z0-9_-]{20}/, 'GitLab token'],
+    [/xox[baprs]-[A-Za-z0-9-]{10,}/, 'Slack token'], [/AIza[0-9A-Za-z\-_]{35}/, 'Google API key'],
+    [/sk_live_[0-9A-Za-z]{24,}/, 'Stripe secret key'], [/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}/, 'JWT'],
+    [/(?:api[_-]?key|secret|passwd|password|token)["']?\s*[:=]\s*["'][A-Za-z0-9_\-]{12,}["']/i, 'inline credential'],
+  ];
+  const scan = t => SECRET.filter(([re]) => re.test(t)).map(([, n]) => n);
+  try {
+    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
+    const html = await r.text();
+    const links = new Set(); let m; const re = /(?:href|src)\s*=\s*["']([^"'#]+)["']/gi;
+    while ((m = re.exec(html))) { try { links.add(new URL(m[1], u).toString()); } catch (e) {} }
+    const all = [...links];
+    const host = u.hostname;
+    const sameHost = all.filter(l => { try { return new URL(l).hostname === host; } catch (e) { return false; } });
+    const extDomains = [...new Set(all.map(l => { try { return new URL(l).hostname; } catch (e) { return ''; } }).filter(h => h && h !== host))];
+    const js = all.filter(l => /\.js(\?|$)/i.test(l));
+    const interesting = all.filter(l => /\.(txt|json|xml|env|ya?ml|conf|config|bak|old|sql|log|csv|ini)(\?|$)|robots\.txt|sitemap|\.well-known|\.env|\.git\/|backup|admin|login|wp-config|phpinfo/i.test(l));
+    const homeSecrets = scan(html);
+    const followed = [];
+    const toFetch = [...new Set([...interesting, u.origin + '/robots.txt', u.origin + '/.well-known/security.txt', u.origin + '/.git/config', u.origin + '/.env'])].slice(0, 7);
+    for (const f of toFetch) {
+      try {
+        const fr = await fetch(f, { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(7000) });
+        if (!fr.ok) continue;
+        const txt = (await fr.text()).slice(0, 4000);
+        if (!txt.trim()) continue;
+        const secrets = scan(txt);
+        const urls = [...new Set(txt.match(/https?:\/\/[^\s"'<>]{6,120}/g) || [])].slice(0, 4);
+        followed.push(`- ${f} (HTTP ${fr.status})${secrets.length ? '  [SECRETS: ' + secrets.join(', ') + ']' : ''}${urls.length ? '\n    refs: ' + urls.join(', ') : ''}`);
+      } catch (e) {}
+    }
+    let out = `crawl ${host} (HTTP ${r.status})\nlinks: ${all.length} total, ${sameHost.length} same-host`;
+    out += `\nexternal domains: ${extDomains.slice(0, 14).join(', ') || 'none'}`;
+    if (js.length) out += `\nJS files (${js.length}): ${js.slice(0, 6).join(', ')}`;
+    if (homeSecrets.length) out += `\nSECRETS IN PAGE SOURCE: ${homeSecrets.join(', ')}`;
+    if (interesting.length) out += `\ninteresting files (${interesting.length}):\n${interesting.slice(0, 12).join('\n')}`;
+    if (followed.length) out += `\nfollowed files:\n${followed.join('\n')}`;
+    return out;
+  } catch (e) { return `crawl ${u.hostname}: failed (${e.message}).`; }
 }
 
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
@@ -2908,28 +2959,34 @@ function harvestPivots(text, known){
   function uniq(a){ return a.filter(function(x,i){ return a.indexOf(x)===i; }); }
   var kEmails=(known.emails||[]).map(function(x){ return x.toLowerCase(); });
   var kDomains=(known.domains||[]).map(function(x){ return x.toLowerCase(); });
+  var kHashes=(known.hashes||[]).map(function(x){ return x.toLowerCase(); });
   var emails=uniq((text.match(/[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}/g)||[]).map(function(x){ return x.toLowerCase(); }))
-    .filter(function(e){ return kEmails.indexOf(e)<0 && !/noreply|@example\\.com/.test(e); });
+    .filter(function(e){ return kEmails.indexOf(e)<0 && !/noreply|@example\\.com|@garrettstimpson/.test(e); });
   var doms=[];
   emails.forEach(function(e){ doms.push(e.split('@')[1]); });
-  (text.match(/(?:blog|repo homepages|homepage):\\s*([^\\n|]+)/ig)||[]).forEach(function(seg){
+  (text.match(/(?:blog|repo homepages|homepage|external domains):\\s*([^\\n|]+)/ig)||[]).forEach(function(seg){
     (seg.match(/https?:\\/\\/[^\\s,|]+|\\b[a-z0-9.\\-]+\\.[a-z]{2,}\\b/ig)||[]).forEach(function(d){
       try{ d=new URL(/^https?:/i.test(d)?d:'https://'+d).hostname; }catch(e){}
       doms.push(String(d).toLowerCase());
     });
   });
-  var PLAT=/(github\\.com|githubusercontent|gitlab\\.com|pypi\\.org|npmjs|ycombinator|keybase\\.io|reddit\\.com|dev\\.to|hub\\.docker|docker\\.com|codeberg\\.org|mastodon|lobste\\.rs|gravatar|twitter\\.com|x\\.com|linkedin|facebook|google\\.|archive\\.org|crt\\.sh|abuse\\.ch|shodan|greynoise|ahmia|wikipedia|duckduckgo|bing\\.com|yandex|tineye)/i;
+  var PLAT=/(github\\.com|githubusercontent|gitlab\\.com|pypi\\.org|npmjs|ycombinator|keybase\\.io|reddit\\.com|dev\\.to|hub\\.docker|docker\\.com|codeberg\\.org|mastodon|lobste\\.rs|gravatar|twitter\\.com|x\\.com|linkedin|facebook|google\\.|archive\\.org|crt\\.sh|abuse\\.ch|shodan|greynoise|ahmia|wikipedia|duckduckgo|bing\\.com|yandex|tineye|cloudflare|w3\\.org|schema\\.org|gstatic|fonts\\.|jsdelivr|cloudfront|hudsonrock|youtube)/i;
   doms=uniq(doms.filter(function(d){ return d && /\\./.test(d) && !PLAT.test(d) && kDomains.indexOf(d)<0; }));
   var names=uniq((text.match(/\\bname:\\s*([A-Z][A-Za-z'\\-]+(?:\\s+[A-Z][A-Za-z'\\-]+){1,2})/g)||[]).map(function(x){ return x.replace(/name:\\s*/i,'').trim(); }));
-  return { emails:emails, domains:doms.slice(0,4), names:names.slice(0,2) };
+  var hashes=uniq((text.match(/\\b[a-f0-9]{40}\\b|\\b[a-f0-9]{32}\\b/ig)||[]).map(function(x){ return x.toLowerCase(); })).filter(function(h){ return kHashes.indexOf(h)<0; }).slice(0,4);
+  var samples=uniq(text.match(/https?:\\/\\/[^\\s"'<>]+?\\.(?:exe|dll|bin|zip|rar|7z|js|jar|apk|docx?|xlsx?|pptx?|pdf|txt|json|ps1|vbs|hta|scr|msi|cab|iso|gz|tar)(?:\\?[^\\s"'<>]*)?/ig)||[]).slice(0,4);
+  var onions=uniq((text.match(/[a-z2-7]{16}\\.onion|[a-z2-7]{56}\\.onion/ig)||[]).map(function(x){ return x.toLowerCase(); })).filter(function(o){ return o.indexOf('juhanurmihxlp')!==0; }).slice(0,3);
+  var cryptos=uniq(text.match(/\\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39}|0x[a-fA-F0-9]{40})\\b/g)||[]).slice(0,3);
+  return { emails:emails, domains:doms.slice(0,4), names:names.slice(0,2), hashes:hashes, samples:samples, onions:onions, cryptos:cryptos };
 }
+
 async function runOsintFlow(q, od, c){
   var FENCE=String.fromCharCode(96,96,96);
   addMsg('system','> OSINT run ('+(od.intent||'full')+') - '+osintSummary(od));
   window.__osintAbort=false; var stopBtn=el('btn-stop'); if(stopBtn){ stopBtn.style.display=''; stopBtn.textContent='stop'; }
   var jobs=[];
   function addIpFull(x){ ['ip_geo','asn_info','rdap_ip','shodan_internetdb','reverse_dns','greynoise','tor_exit'].forEach(function(t){ jobs.push([t+' '+x,t,x]); }); }
-  function addDomainFull(x){ ['rdap_domain','dns_records','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check','subdomain_takeover','stealer_check'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check')?('https://'+x):x]); }); }
+  function addDomainFull(x){ ['rdap_domain','dns_records','crtsh_subs','wellknown','tech_fingerprint','origin_ip','http_headers','urlscan','wayback','urlhaus','email_security','typosquat','bucket_finder','cors_check','subdomain_takeover','stealer_check','crawl'].forEach(function(t){ jobs.push([t+' '+x,t,(t==='http_headers'||t==='tech_fingerprint'||t==='cors_check'||t==='crawl')?('https://'+x):x]); }); }
   if(od.intent==='image'){
     (od.images||[]).forEach(function(x){ jobs.push(['image_osint '+x,'image_osint',x]); });
     if(!(od.images||[]).length) addMsg('system','OSINT(image): no image URL found - paste a direct image link (jpg/png/...).');
@@ -2983,10 +3040,15 @@ async function runOsintFlow(q, od, c){
     pv.emails.forEach(function(e){ pjobs.push(['breach_check '+e,'breach_check',e]); pjobs.push(['gravatar '+e,'gravatar',e]); pjobs.push(['email_recon '+e,'email_recon',e]); pjobs.push(['onion_search '+e,'onion_search',e]); });
     pv.domains.forEach(function(d){ pjobs.push(['tech_fingerprint '+d,'tech_fingerprint','https://'+d]); pjobs.push(['rdap_domain '+d,'rdap_domain',d]); pjobs.push(['dns_lookup '+d,'dns_lookup',d]); pjobs.push(['crtsh_subs '+d,'crtsh_subs',d]); });
     pv.names.forEach(function(nm){ pjobs.push(['web_search '+nm,'web_search','"'+nm+'"']); });
+    pv.domains.forEach(function(d){ pjobs.push(['crawl '+d,'crawl','https://'+d]); });
+    (pv.hashes||[]).forEach(function(h){ pjobs.push(['hash_lookup '+h,'hash_lookup',h]); });
+    (pv.samples||[]).forEach(function(su){ pjobs.push(['file_analyze '+su,'file_analyze',su]); });
+    (pv.onions||[]).forEach(function(o){ pjobs.push(['onion_fetch '+o,'onion_fetch',o]); });
+    (pv.cryptos||[]).forEach(function(c){ pjobs.push(['crypto_addr '+c,'crypto_addr',c]); });
     if(pjobs.length){
-      addMsg('system','> pivot: discovered '+[].concat(pv.emails,pv.domains,pv.names).slice(0,8).join(', ')+' - digging deeper ('+Math.min(pjobs.length,18)+' tools)');
-      var st2=addMsg('system','OSINT: round 2 (pivots) - 0/'+Math.min(pjobs.length,18)+' tools...');
-      await runJobs(pjobs.slice(0,18), blocks, st2, 'round 2 (pivots)');
+      addMsg('system','> pivot: discovered '+[].concat(pv.emails,pv.domains,pv.names,pv.hashes||[],pv.samples||[],pv.onions||[],pv.cryptos||[]).slice(0,10).join(', ')+' - digging deeper ('+Math.min(pjobs.length,22)+' tools)');
+      var st2=addMsg('system','OSINT: round 2 (pivots) - 0/'+Math.min(pjobs.length,22)+' tools...');
+      await runJobs(pjobs.slice(0,22), blocks, st2, 'round 2 (pivots)');
       st2.textContent='OSINT: round 2 complete.';
     } else { addMsg('system','> no new pivots surfaced from round 1.'); }
   }
@@ -3084,7 +3146,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
