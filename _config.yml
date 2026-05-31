@@ -4,6 +4,7 @@ description: >-
   10+ years in offensive security.
 baseurl: ""
 url: "https://garrettstimpson.ca"
+agent_url: ""   # deployed Agent Garrett worker URL (e.g. https://garrettstimpson-agent.<acct>.workers.dev)
 image: /assets/img/og-card.png   # default social/OG card (jekyll-seo-tag)
 
 # Cloudflare Web Analytics — paste your beacon token here
