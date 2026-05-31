@@ -1825,6 +1825,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
     </div>
     <div class="row">
       <select id="j-tpl">
+        <option value="osint">OSINT monitor (full)</option>
         <option value="cve">CVE profile</option>
         <option value="infra">Infra recon (passive)</option>
         <option value="malware">Malware/actor brief</option>
@@ -2399,6 +2400,9 @@ async function runOsintFlow(q, od, c){
   var dl=document.createElement('button'); dl.className='btn'; dl.style.marginTop='6px'; dl.textContent='\u2913 download report (.md)';
   dl.onclick=function(){ var blob=new Blob([report],{type:'text/markdown'}); var u=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=u; a.download='osint-'+(q.replace(/[^a-z0-9]+/ig,'-').replace(/^-|-$/g,'').slice(0,40)||'report')+'.md'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); };
   d2.appendChild(dl);
+  var cp=document.createElement('button'); cp.className='btn'; cp.style.marginTop='6px'; cp.style.marginLeft='6px'; cp.textContent='copy report';
+  cp.onclick=function(){ if(navigator.clipboard){ navigator.clipboard.writeText(report).then(function(){ cp.textContent='copied!'; setTimeout(function(){ cp.textContent='copy report'; },1500); }); } };
+  d2.appendChild(cp);
   c.msgs.push({role:'assistant',content:report});
   if(c.msgs.length===1||(c.title||'').indexOf('[osint]')!==0) c.title='[osint] '+q.slice(0,30);
   saveChats(chats); renderChats();
@@ -2427,7 +2431,7 @@ function startScheduler(){
       var j=jobs[k];
       if(j.schedule && (!j.lastRun || now-j.lastRun>=j.schedule)){
         j.lastRun=now; AGENT.saveJobs(jobs); changed=true;
-        await runSwarmToChat(j.objective, j.template);
+        await (j.template==='osint' ? startOsint(j.objective) : runSwarmToChat(j.objective, j.template));
         break;
       }
     }
@@ -2499,7 +2503,16 @@ el('t-run').onclick=async function(){
     pre.textContent='['+d.via+'] '+tool+(d.target?' ('+d.target+')':'')+'\\n\\n'+res; out.appendChild(pre);
   }catch(e){ out.innerHTML=''; var er2=document.createElement('div'); er2.className='t-out'; er2.textContent='error: '+e.message; out.appendChild(er2); }
 };
-el('j-run').onclick=function(){ runSwarmToChat(el('j-obj').value.trim(), el('j-tpl').value); };
+async function startOsint(obj){
+  if(!obj || !obj.trim()) return;
+  var od=detectOsint(obj, window.__lastOsint); od.isOsint=true;
+  window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto};
+  busy=true; inp.disabled=true;
+  var c=active(); addMsg('user',obj); c.msgs.push({role:'user',content:obj}); if(c.msgs.length===1) c.title='[osint] '+obj.slice(0,30); saveChats(chats); renderChats();
+  try{ await runOsintFlow(obj, od, c); }catch(e){ addMsg('system','OSINT error: '+e.message); }
+  busy=false; inp.disabled=false; inp.focus();
+}
+el('j-run').onclick=function(){ var tpl=el('j-tpl').value, obj=el('j-obj').value.trim(); if(tpl==='osint') startOsint(obj); else runSwarmToChat(obj, tpl); };
 var JOB_TEMPLATES=[
   {label:'CVE deep-dive', tpl:'cve', text:'Profile CVE-2026-2005: CVSS severity, EPSS score, CISA KEV status, affected PostgreSQL versions, the patched release, public PoC availability, and detection guidance.'},
   {label:'Passive domain recon', tpl:'infra', text:'Passive recon of example.com using OSINT only (no scanning): RDAP ownership/registrar, DNS records (A/MX/NS/TXT), TLS certificate-transparency subdomains, and any related items in the research corpus.'},
