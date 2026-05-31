@@ -3389,17 +3389,24 @@ function detectOsint(q, prev){
   var handles=uniq((text.match(/(?:^|\\s)@([A-Za-z0-9_]{2,30})/g)||[]).map(function(s){ return s.trim().replace(/^@/,''); }));
   var um=low.match(/\\b(?:username|handle|user|account|alias)\\s*[:=]?\\s*['"]?([a-z0-9_.\\-]{2,30})/);
   if(um){ handles.push(um[1]); handles=uniq(handles); }
+  // Generic vocabulary is NEVER an entity/target — stops 'show me malware examples' from
+  // running username/stealer/keybase on the literal word 'malware'.
+  var COMMON=/^(malware|samples?|virus(es)?|trojans?|ransomware|stealers?|payloads?|exploits?|code|snippets?|examples?|corpus|research|vulnerabilit(y|ies)|cve|hash(es)?|breach(es)?|leaks?|dumps?|dark|web|darkweb|onion|tor|phishing|scans?|recon|osint|targets?|demo|poc|attacks?|threats?|actors?|campaigns?|loaders?|injectors?|shellcode|exfil|techniques?|robots|txt|packs|assets|dist|static|login|about|home|search|malicious|security|info|data|something|anything|everything|nothing|stuff|things?|new|latest|update|recent)$/;
   var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate','email security','spf','dmarc','spoof','typosquat','lookalike','phishing','wallet','bitcoin','ethereum','malware','sample','hash','virus','trojan','stealer','ransomware','reverse engineer','breakdown','osin','conduct','look into','dig into','look up','run osint'];
   var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
   var persons=uniq(text.match(/\\b[A-Z][a-z'\\-]{1,}\\s+[A-Z][a-z'\\-]{1,}(?:\\s+[A-Z][a-z'\\-]{1,})?\\b/g)||[]);
   var pnm=low.match(/(?:look into|look up|investigate|osint(?: on)?|profile(?: of)?|recon|stalk|dig into|background on|person(?: named| called)?|named|called|info on|intel on|dossier on|about|who is|who's|search for)\\s+(?:the\\s+person\\s+|the\\s+|a\\s+|an\\s+)?([a-z][a-z'\\-]+(?:\\s+[a-z][a-z'\\-]+){1,2})/);
   if(pnm){ var cnm=pnm[1].trim(); if(!/\\b(the|this|that|dark|web|domain|website|site|email|address|ip|hash|sample|malware|exploit|onion|tor|breach|leak|leaked|exposure|company|server|forum|page|guy|persons?|people|profile|account|target|username|handle|everything|anything|info|information|details|more|whatever)\\b/.test(cnm)) persons.push(cnm.replace(/\\b[a-z]/g,function(ch){ return ch.toUpperCase(); })); }
   persons=uniq(persons.filter(function(p){ return !/^(the|a|an|agent|osint|hello|hi|hey|dear|mr|ms|dr|new|good)\\b/i.test(p); }));
-  if(hasTrigger && !handles.length && !emails.length && !persons.length){
-    var toks=low.replace(/[^a-z0-9_.@ -]/g,' ').split(' ').filter(Boolean);
-    var last=toks[toks.length-1]||'';
-    if(/^@?[a-z0-9_][a-z0-9_-]{2,29}$/.test(last) && last.indexOf('.')<0 && ['osint','recon','investigate','profile','now','please','target','someone','person','conduct','breakdown'].indexOf(last)<0){ handles.push(last.replace(/^@/,'')); handles=uniq(handles); }
+  // Handle only via an EXPLICIT command verb ('osint X', 'recon bob123', 'enumerate user42') —
+  // never by grabbing the last word of any sentence that merely mentions a topic word.
+  if(!handles.length && !emails.length){
+    var hcmd=low.match(/\\b(?:osint|investigate|recon|reconnaissance|enumerate|profile|footprint|stalk|trace|look (?:up|into)|dig (?:up|into)|run osint|background on|intel on)\\s+(?:on\\s+|the\\s+|user\\s+|account\\s+|handle\\s+)?@?([a-z0-9][a-z0-9_.\\-]{2,29})\\b/);
+    if(hcmd && hcmd[1].indexOf('.')<0 && !COMMON.test(hcmd[1])){ handles.push(hcmd[1]); handles=uniq(handles); }
   }
+  // Drop any generic-word handles/persons that slipped through.
+  handles=handles.filter(function(h){ return !COMMON.test(h); });
+  persons=persons.filter(function(p){ return !COMMON.test(p.toLowerCase()) && !COMMON.test(p.toLowerCase().split(' ')[0]); });
   var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
   var refPrev=/\\b(it|its|that|this|him|her|them|he|she|his|hers|their|theirs|this (guy|man|woman|person|individual|account|user)|that (guy|man|woman|person)|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo|person|individual|guy))\\b/i.test(low);
   var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length+persons.length;
