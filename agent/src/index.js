@@ -3168,6 +3168,9 @@ function detectOsint(q, prev){
   var actionable=hasTrigger||hasIntent||(refPrev&&!!prev);
   var strongEntity=(emails.length+handles.length+ips.length+(hashes?hashes.length:0)+(onions?onions.length:0)+(crypto?crypto.length:0)+(images?images.length:0))>0;
   var isOsint=(entityCount>0&&actionable)||soloEntity||(hasTrigger&&personHint)||strongEntity;
+  var explicitSweep=/\\b(osint|investigate|reconnaissance|recon|profile|dossier|footprint|background|everything|full (report|sweep|scan)|deep dive)\\b/.test(low);
+  var narrowAsk=(/\\?/.test(text)||/^(is|are|does|do|where|which|was|were|has|have|can)\\b/.test(low)) && /\\b(tor ?exit|exit node|geoloc|geolocat|located|location|who owns|reputation|malicious|blacklist|black ?listed|phish|phishing|open ports?|spf|dmarc|breached|pwned|proxy|vpn|takeover|typosquat|valid email|mx record)\\b/.test(low);
+  if(narrowAsk && !explicitSweep) isOsint=false;
   return { isOsint:!!isOsint, intent:intent, emails:emails, ips:ips, domains:domains, handles:handles, cves:cves, images:images, crypto:crypto, onions:onions, hashes:hashes, persons:persons, keyword:text };
 }
 
@@ -3220,7 +3223,7 @@ function riskScore(text){
   if(/SPF: NONE/i.test(text)){ pts+=8; reasons.push('no SPF'); }
   if(/lookalikes are REGISTERED/i.test(text)){ pts+=12; reasons.push('active typosquats'); }
   if(/onion site\\(s\\) referencing/i.test(text)){ pts+=20; reasons.push('dark-web mentions'); }
-  if(/KNOWN TOR RELAY/i.test(text)){ pts+=5; reasons.push('Tor relay IP'); }
+  if(/KNOWN TOR RELAY/.test(text)){ pts+=5; reasons.push('Tor relay IP'); }
   pts=Math.min(100,pts);
   var level= pts>=60?'HIGH':(pts>=30?'MEDIUM':(pts>0?'LOW':'MINIMAL'));
   return { score:pts, level:level, reasons:reasons };
@@ -3244,7 +3247,7 @@ function harvestPivots(text, known){
   doms=uniq(doms.filter(function(d){ return d && /\\./.test(d) && !PLAT.test(d) && kDomains.indexOf(d)<0; }));
   var names=uniq((text.match(/\\bname:\\s*([A-Z][A-Za-z'\\-]+(?:\\s+[A-Z][A-Za-z'\\-]+){1,2})/g)||[]).map(function(x){ return x.replace(/name:\\s*/i,'').trim(); }));
   var hashes=uniq((text.match(/\\b[a-f0-9]{40}\\b|\\b[a-f0-9]{32}\\b/ig)||[]).map(function(x){ return x.toLowerCase(); })).filter(function(h){ return kHashes.indexOf(h)<0; }).slice(0,4);
-  var samples=uniq(text.match(/https?:\\/\\/[^\\s"'<>]+?\\.(?:exe|dll|bin|zip|rar|7z|js|jar|apk|docx?|xlsx?|pptx?|pdf|txt|json|ps1|vbs|hta|scr|msi|cab|iso|gz|tar)(?:\\?[^\\s"'<>]*)?/ig)||[]).slice(0,4);
+  var samples=uniq(text.match(/https?:\\/\\/[^\\s"'<>\\/]+\\.[a-z]{2,}\\/[^\\s"'<>]*?\\.(?:exe|dll|bin|zip|rar|7z|js|jar|apk|docx?|xlsx?|pptx?|pdf|txt|json|ps1|vbs|hta|scr|msi|cab|iso|gz|tar)(?:\\?[^\\s"'<>]*)?/ig)||[]).slice(0,4);
   var onions=uniq((text.match(/[a-z2-7]{16}\\.onion|[a-z2-7]{56}\\.onion/ig)||[]).map(function(x){ return x.toLowerCase(); })).filter(function(o){ return o.indexOf('juhanurmihxlp')!==0; }).slice(0,3);
   var cryptos=uniq(text.match(/\\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39}|0x[a-fA-F0-9]{40})\\b/g)||[]).slice(0,3);
   var phandles=[];
@@ -3316,8 +3319,8 @@ async function runOsintFlow(q, od, c){
     (od.cves||[]).forEach(function(cv){ sterms.push(cv+' exploit advisory'); });
     if(!sterms.length) sterms.push(q);
     sterms.slice(0,3).forEach(function(tm){ jobs.push(['web_search '+tm,'web_search',tm]); });
-    var oterm=(od.emails[0]||od.domains[0]||od.handles[0]||q);
-    jobs.push(['onion_search '+oterm,'onion_search',oterm]);
+    var oterm=(od.emails[0]||od.domains[0]||od.handles[0]);
+    if(oterm) jobs.push(['onion_search '+oterm,'onion_search',oterm]);
   }
   if(!jobs.length){ addMsg('system','OSINT: no actionable entity detected.'); return; }
   var blocks=[];
@@ -3349,13 +3352,14 @@ async function runOsintFlow(q, od, c){
   if(window.__osintAbort){ if(stopBtn) stopBtn.style.display='none'; addMsg('system','OSINT run stopped - '+blocks.length+' partial result(s) shown above; synthesis skipped.'); return; }
   var synStatus=addMsg('system','OSINT: synthesizing write-up from '+blocks.length+' results...');
   var rs=riskScore(evidence);
+  var showRisk=['full','person','breach','darkweb'].indexOf(od.intent)>=0;
   var rsLine='exposure risk (heuristic): '+rs.score+'/100 ['+rs.level+']'+(rs.reasons.length?' - '+rs.reasons.join('; '):'');
-  addMsg('system','> '+rsLine);
+  if(showRisk) addMsg('system','> '+rsLine);
   var synth=blocks.map(function(b){ return b.slice(0,900); }).join('\\n\\n').slice(0,13500);
-  synth='RISK ASSESSMENT (heuristic, computed from the evidence): '+rsLine+'\\n\\n'+synth;
+  if(showRisk) synth='RISK ASSESSMENT (heuristic, computed from the evidence): '+rsLine+'\\n\\n'+synth;
   var objective=(od.intent==='malware') ? ('You are writing a FORMAL MALWARE ANALYSIS report for: "'+q+'". Use ONLY the tool evidence in the context; never invent a fact not present in it; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary\\n## Sample Identification (hashes, file type, size)\\n## Reputation & Classification (Cymru MHR / VirusTotal / MalwareBazaar verdicts, malware family)\\n## Capabilities & Suspicious Indicators (notable APIs/strings and what they imply)\\n## Indicators of Compromise (URLs, IPs, hashes)\\n## MITRE ATT&CK Mapping (only techniques clearly evidenced)\\n## Detection & Mitigation\\n## Detection Rules (draft a YARA rule from the notable strings/imports, and a Sigma rule if process/registry/network indicators are evident)\\nBe precise and defensive.') : ('You are writing a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence in the context - never invent a fact not present in it; mark anything missing as UNKNOWN. Do NOT merely restate tool output: ANALYZE it - infer the subject likely identity, connect accounts/emails/domains/repos that plausibly belong to the same person, and weigh your confidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences with your assessment)\\n## Entities and Identifiers\\n## Findings (per source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaked/commit emails - or state none found)\\n## Pivots and Links (how discovered emails/domains/repos connect and what they reveal)\\n## Gaps and Confidence (what is UNKNOWN, reliability, plus 3-5 concrete recommended next OSINT steps)\\nBe precise, defensive in framing, and analytical.');
   if(od.intent==='person') objective='Write a FORMAL PERSON / IDENTITY OSINT report for: "'+q+'". Use ONLY the tool evidence; never invent; mark missing as UNKNOWN. CRITICAL: separate accounts/data CONFIRMED to be THIS specific person (corroborated by matching name, bio, or the user-provided context/domain) from generic same-name or same-username matches that are likely UNRELATED people — never attribute breach/stealer data or accounts to the subject unless clearly theirs. Use this markdown structure:\\n## Executive Summary (who this likely is + confidence)\\n## Confirmed Identifiers (accounts/emails/domains tied to THIS person, and why)\\n## Candidate / Unconfirmed Matches (same name/handle, possibly unrelated)\\n## Exposure (breaches / stealer logs ONLY for confirmed emails)\\n## Gaps & Recommended Next Steps\\nBe precise and label confidence honestly.';
-  if(od.intent==='cve') objective='Write a FORMAL VULNERABILITY REPORT for: "'+q+'". Use ONLY the tool evidence; never invent CVSS/EPSS scores, affected versions, or dates. Use this markdown structure:\\n## Summary\\n## Severity (CVSS vector + base score, EPSS exploitation probability)\\n## Exploitation Status (CISA KEV listing, public PoC availability with links, any in-the-wild evidence)\\n## Affected & Fixed Versions\\n## Detection & Mitigation\\n## References\\nState UNKNOWN where evidence is missing.';
+  if(od.intent==='cve') objective='Write a FORMAL VULNERABILITY REPORT for: "'+q+'". Use ONLY the tool evidence; never invent CVSS/EPSS scores, affected versions, or dates. Use this markdown structure:\\n## Summary\\n## Severity (CVSS vector + base score, EPSS exploitation probability)\\n## Exploitation Status (CISA KEV listing, public PoC availability with links, any in-the-wild evidence)\\n## Affected & Fixed Versions\\n## Detection & Mitigation\\n## References\\nIMPORTANT: the NVD evidence often states affected/fixed versions inline (e.g. \"Versions before X, Y, Z are affected\") - extract those verbatim into Affected & Fixed Versions; only write UNKNOWN if no version string appears anywhere in the evidence.';
   if(od.intent==='darkweb') objective='Write a FORMAL DARK-WEB EXPOSURE report for: "'+q+'". Use ONLY the tool evidence; never invent; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary (overall exposure verdict)\\n## Stealer-Log / Infostealer Exposure (HudsonRock: infected hosts, dates, credential counts at risk)\\n## Breaches & Leaked Data (which breaches, exposed data classes, password exposure)\\n## Dark-Web / Onion Mentions\\n## Risk & Remediation (passwords to rotate, accounts at risk, monitoring advice)\\nBe precise and defensive.';
   var report;
   try{ report=await callTask(objective, synth); }
