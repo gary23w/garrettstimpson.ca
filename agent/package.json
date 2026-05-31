@@ -59,6 +59,12 @@
         "type": "secret_text",
         "name": "ABUSECH_API_KEY",
         "description": "Optional abuse.ch Auth-Key (free) — enables URLhaus malware-URL lookups."
+      },
+      {
+        "type": "plain_text",
+        "name": "DISCLOSURE_FROM",
+        "text": "",
+        "description": "Your name/handle used to sign responsible-disclosure drafts (disclosure_draft). Drafts only — nothing is sent."
       }
     ]
   }
