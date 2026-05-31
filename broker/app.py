@@ -10,7 +10,7 @@ Contract (matches the Worker's runBrokerTool):
   Auth:      Authorization: Bearer <BROKER_TOKEN>
   Returns:   { "ok": true, "tool": "<name>", "result": "<text>" }
 """
-import os, re, subprocess
+import os, re, time, hashlib, subprocess
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 import requests
@@ -92,11 +92,85 @@ def holehe(email):
     return f"holehe {email}:\n" + (out[:4000] if out.strip() else "(no used accounts reported)")
 
 
+def fetch_sample(url, max_mb=25):
+    if not url or ".onion" in url:
+        raise ValueError("a clearnet sample URL is required")
+    path = "/tmp/sample_%d" % int(time.time() * 1000)
+    with requests.get(url, stream=True, timeout=60, headers={"User-Agent": "gg-broker/1.0"}) as r:
+        r.raise_for_status()
+        n = 0
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(65536):
+                f.write(chunk); n += len(chunk)
+                if n > max_mb * 1024 * 1024:
+                    break
+    return path
+
+
+def re_analyze(url):
+    if not url:
+        return "re_analyze: a sample URL is required."
+    try:
+        path = fetch_sample(url)
+    except Exception as e:
+        return "re_analyze: download failed (%s)" % e
+    out = []
+    try:
+        data = open(path, "rb").read()
+        out.append("file: " + run_cli(["file", path], 30).strip())
+        out.append("sha256: " + hashlib.sha256(data).hexdigest())
+        strs = run_cli(["strings", "-n", "8", path], 60).splitlines()
+        out.append("strings (first 40 of %d):\n%s" % (len(strs), "\n".join(strs[:40])))
+        imp = run_cli(["r2", "-q", "-c", "ii", path], 90)
+        if imp.strip():
+            out.append("radare2 imports:\n" + imp[:2500])
+        capa = run_cli(["capa", "-q", path], 240)
+        if capa.strip() and "tool not installed" not in capa:
+            out.append("capa capabilities:\n" + capa[:3000])
+    finally:
+        try: os.remove(path)
+        except Exception: pass
+    return "re_analyze %s\n" % url + "\n\n".join(out)
+
+
+def ole_macros(url):
+    if not url:
+        return "ole_macros: an Office document URL is required."
+    try:
+        path = fetch_sample(url, max_mb=15)
+    except Exception as e:
+        return "ole_macros: download failed (%s)" % e
+    try:
+        out = run_cli(["olevba", "--no-color", path], 120)
+    finally:
+        try: os.remove(path)
+        except Exception: pass
+    return "ole_macros %s\n%s" % (url, out[:6000] if out.strip() else "(no macros / not an OLE/OOXML file)")
+
+
+def exif(url):
+    if not url:
+        return "exif: a file URL is required."
+    try:
+        path = fetch_sample(url, max_mb=15)
+    except Exception as e:
+        return "exif: download failed (%s)" % e
+    try:
+        out = run_cli(["exiftool", path], 40)
+    finally:
+        try: os.remove(path)
+        except Exception: pass
+    return "exif %s\n%s" % (url, out[:4000])
+
+
 TOOLS = {
     "onion_fetch":  lambda a: onion_fetch(a.get("url") or a.get("onion") or a.get("target") or ""),
     "onion_search": lambda a: onion_search(a.get("query") or a.get("target") or ""),
     "sherlock":     lambda a: sherlock(a.get("username") or a.get("user") or a.get("target") or ""),
     "holehe":       lambda a: holehe(a.get("email") or a.get("target") or ""),
+    "re_analyze":   lambda a: re_analyze(a.get("url") or a.get("target") or ""),
+    "ole_macros":   lambda a: ole_macros(a.get("url") or a.get("target") or ""),
+    "exif":         lambda a: exif(a.get("url") or a.get("target") or ""),
 }
 
 

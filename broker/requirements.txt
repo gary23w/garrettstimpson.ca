@@ -3,3 +3,5 @@ uvicorn[standard]>=0.29
 requests[socks]>=2.31
 sherlock-project>=0.14.4
 holehe>=1.61
+oletools>=0.60
+flare-capa>=7.0
