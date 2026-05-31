@@ -772,6 +772,9 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'subdomains', category: 'recon', passive: true, description: 'DNS-brute common subdomains (DoH) — complements crt.sh' },
   { name: 'jwt', category: 'recon', passive: true, description: 'Decode/inspect a JWT (claims, alg:none, expiry) — no verification' },
   { name: 'cidr', category: 'recon', passive: true, description: 'IPv4 CIDR math: network/broadcast/mask/range/host count' },
+  { name: 'hash_id', category: 'malware', passive: true, description: 'Identify likely hash type by format (MD5/SHA/NTLM/bcrypt/...)' },
+  { name: 'encode', category: 'malware', passive: true, description: 'Encode text to base64 / hex / url / rot13' },
+  { name: 'timestamp', category: 'recon', passive: true, description: 'Decode unix epoch or UUID (v1 -> embedded time + MAC)' },
   { name: 'disclosure_draft', category: 'recon', passive: true, description: 'Find a domain security contact (security.txt/abuse) and DRAFT a responsible-disclosure email (does not send)' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
@@ -904,6 +907,9 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'subdomains')   return subdomains(String(args.domain || args.target || ''));
   if (name === 'jwt')          return jwtDecode(String(args.token || args.target || args.input || ''));
   if (name === 'cidr')         return cidrTool(String(args.input || args.cidr || args.target || ''));
+  if (name === 'hash_id')      return hashId(String(args.hash || args.target || args.input || ''));
+  if (name === 'encode')       return encodeTool(String(args.input || args.text || args.target || ''));
+  if (name === 'timestamp')    return timestampDecode(String(args.input || args.target || ''));
   if (name === 'disclosure_draft') return disclosureDraft(env, String(args.target || args.domain || ''));
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
@@ -2315,6 +2321,60 @@ function cidrTool(input) {
   return `cidr ${m[1]}/${bits}\nnetwork: ${intToIp(net)} | broadcast: ${intToIp(bcast)}\nmask: ${intToIp(mask)}\nrange: ${intToIp(net)} - ${intToIp(bcast)}\ntotal addresses: ${total} | usable hosts: ${usable}`;
 }
 
+// Identify likely hash type by format.
+function hashId(h) {
+  const x = String(h || '').trim();
+  if (!x) return 'hash_id: paste a hash.';
+  const out = [];
+  if (/^\$2[aby]\$\d\d\$[./A-Za-z0-9]{53}$/.test(x)) out.push('bcrypt');
+  if (/^\$1\$/.test(x)) out.push('md5crypt');
+  if (/^\$5\$/.test(x)) out.push('sha256crypt');
+  if (/^\$6\$/.test(x)) out.push('sha512crypt');
+  if (/^\$argon2/i.test(x)) out.push('argon2');
+  if (/^\*[A-F0-9]{40}$/i.test(x)) out.push('MySQL 4.1+');
+  if (/^[a-f0-9]{16}$/i.test(x)) out.push('MySQL323 / CRC64');
+  if (/^[a-f0-9]{32}$/i.test(x)) out.push('MD5', 'NTLM', 'MD4', 'LM');
+  if (/^[a-f0-9]{40}$/i.test(x)) out.push('SHA-1', 'MySQL5', 'RIPEMD-160');
+  if (/^[a-f0-9]{56}$/i.test(x)) out.push('SHA-224');
+  if (/^[a-f0-9]{64}$/i.test(x)) out.push('SHA-256', 'SHA3-256', 'BLAKE2s');
+  if (/^[a-f0-9]{96}$/i.test(x)) out.push('SHA-384');
+  if (/^[a-f0-9]{128}$/i.test(x)) out.push('SHA-512', 'SHA3-512', 'Whirlpool');
+  if (!out.length) return `hash_id: no confident format match for "${x.slice(0, 24)}...".`;
+  return `hash_id ${x.slice(0, 24)}${x.length > 24 ? '…' : ''}\nlength: ${x.length} | likely: ${[...new Set(out)].join(', ')}`;
+}
+
+// Encode text -> base64 / hex / url / rot13.
+function encodeTool(input) {
+  const s = String(input || '');
+  if (!s) return 'encode: provide text to encode.';
+  let b64 = ''; try { b64 = btoa(unescape(encodeURIComponent(s))); } catch (e) { b64 = '(encode failed)'; }
+  let hex = ''; for (let i = 0; i < s.length; i++) hex += s.charCodeAt(i).toString(16).padStart(2, '0');
+  const url = encodeURIComponent(s);
+  const r13 = s.replace(/[a-z]/g, c => String.fromCharCode((c.charCodeAt(0) - 97 + 13) % 26 + 97)).replace(/[A-Z]/g, c => String.fromCharCode((c.charCodeAt(0) - 65 + 13) % 26 + 65));
+  return `encode "${s.slice(0, 60)}"\nbase64: ${b64.slice(0, 300)}\nhex: ${hex.slice(0, 240)}\nurl: ${url.slice(0, 240)}\nrot13: ${r13.slice(0, 140)}`;
+}
+
+// Decode unix epoch or UUID (v1 leaks timestamp + node MAC).
+function timestampDecode(input) {
+  const s = String(input || '').trim();
+  const u = s.match(/^([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f])([0-9a-f]{3})-([0-9a-f]{4})-([0-9a-f]{12})$/i);
+  if (u) {
+    const ver = u[3];
+    let out = `uuid ${s}\nversion: ${ver}`;
+    if (ver === '1') {
+      const timeLow = BigInt(parseInt(u[1], 16)), timeMid = BigInt(parseInt(u[2], 16)), timeHi = BigInt(parseInt(u[4], 16));
+      const ts = (timeHi << 48n) | (timeMid << 32n) | timeLow;
+      const ms = Number(ts / 10000n) - 12219292800000;
+      out += `\ntimestamp: ${new Date(ms).toISOString()}`;
+      out += `\nnode (MAC): ${u[6].replace(/(..)(?=.)/g, '$1:')}`;
+    }
+    return out;
+  }
+  if (/^\d{10}$/.test(s)) return `timestamp ${s} (unix seconds) = ${new Date(+s * 1000).toISOString()}`;
+  if (/^\d{13}$/.test(s)) return `timestamp ${s} (unix millis) = ${new Date(+s).toISOString()}`;
+  return 'timestamp: provide a unix epoch (10 or 13 digits) or a UUID.';
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -3355,7 +3415,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
