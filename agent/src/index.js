@@ -2073,6 +2073,31 @@ async function faviconHash(url) {
   } catch (e) { return `favicon_hash ${u.hostname}: failed (${e.message}).`; }
 }
 
+// Agentic tool router — the model decides which ONE tool (if any) the request needs.
+async function toolRouter(env, userMsg, already, contextSoFar) {
+  const menu = toolCatalog(env).map(t => `${t.name}: ${t.description}`).join('\n');
+  const sys = [
+    'You are the TOOL ROUTER for "Agent Garrett", a DEFENSIVE security / OSINT / malware-analysis agent.',
+    'Decide whether ONE tool would materially help answer the user message. Reply with ONLY one line of minified JSON, nothing else:',
+    '{"tool":"<tool_name>","arg":"<single argument value>"}  to run a tool, or  {"tool":"none"}  when no tool is needed.',
+    'WHEN TO USE A TOOL: the user gives or clearly refers to a concrete input a tool operates on — an email, username, domain, IP, URL, file hash, CVE id, CVSS vector, crypto/onion address, an encoded/obfuscated string, or a sample/file URL. Then pick the single most relevant tool and set "arg" to exactly that value (never invent it).',
+    'WHEN NOT TO USE A TOOL: conceptual/how-to questions, explanations, or anything the research corpus or your own knowledge already answers -> return {"tool":"none"}.',
+    'This is a defensive platform over PUBLIC data; do not refuse on privacy grounds.',
+    already.length ? `Tools already run this turn (do NOT repeat): ${already.join(', ')}.` : '',
+    'TOOLS (name: when to use):\n' + menu,
+  ].filter(Boolean).join('\n');
+  const u = contextSoFar ? `${userMsg}\n\n[results gathered so far — decide if a FURTHER tool is needed, else "none"]\n${contextSoFar.slice(0, 1200)}` : userMsg;
+  try {
+    const r = await env.AI.run(MODEL, { messages: [{ role: 'system', content: sys }, { role: 'user', content: u }], stream: false, max_tokens: 120, temperature: 0 });
+    const txt = (r.response || '').trim();
+    const m = txt.match(/\{[^{}]*\}/);
+    if (!m) return null;
+    const o = JSON.parse(m[0]);
+    if (!o.tool || String(o.tool).toLowerCase() === 'none') return null;
+    return { tool: String(o.tool).toLowerCase().trim(), arg: String(o.arg || o.argument || o.value || '').trim() };
+  } catch (e) { return null; }
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -3399,6 +3424,32 @@ export default {
             else {
               dbg('search result', 'all providers unavailable');
               toolContext.push('=== Search Unavailable ===\nAll web search providers failed. Do NOT fabricate CVE IDs, CVSS scores, affected versions, PoC URLs, or patch dates. If the corpus does not contain the answer, say so clearly.');
+            }
+          }
+
+          // ── Agentic tool loop — the AI chooses tools from the full catalog ──
+          if (opts.aiTools !== false) {
+            const ranTools = [];
+            for (let step = 0; step < 3; step++) {
+              const choice = await toolRouter(env, lastUser, ranTools, toolContext.join('\n'));
+              if (!choice || !choice.tool || !choice.arg) break;
+              const tool = choice.tool, arg = choice.arg;
+              if (ranTools.includes(tool)) break;
+              if (!toolCatalog(env).some(t => t.name === tool)) { dbg('ai_tool skip', tool + ' (unknown)'); break; }
+              dbg('ai_tool', tool + ' <- ' + arg.slice(0, 80));
+              try {
+                let result;
+                if (isBuiltinTool(tool)) {
+                  result = await runBuiltinTool(env, tool, { target: arg, url: arg, domain: arg, ip: arg, email: arg, hash: arg, query: arg, vector: arg, input: arg, text: arg, username: arg, host: arg, cveId: arg, address: arg, onion: arg });
+                } else {
+                  const out = await runBrokerTool(env, { tool, args: { target: arg, url: arg, query: arg }, target: arg, requestedAt: new Date().toISOString() });
+                  result = typeof out === 'string' ? out : (out && (out.result || JSON.stringify(out)));
+                }
+                result = String(result || '');
+                dbg('ai_tool result', result.slice(0, 160));
+                toolContext.push(`=== AI-selected tool: ${tool}(${arg}) ===\n${result.slice(0, 2800)}`);
+                ranTools.push(tool);
+              } catch (e) { dbg('ai_tool err', tool + ': ' + e.message); break; }
             }
           }
 
