@@ -769,6 +769,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'archive_urls', category: 'osint', passive: true, description: 'Wayback historical URLs/endpoints for a domain (forgotten paths)' },
   { name: 'favicon_hash', category: 'recon', passive: false, description: 'Shodan/FOFA favicon-hash pivot — find other servers sharing a site favicon' },
   { name: 'crawl', category: 'recon', passive: false, description: 'Crawl a website: extract & follow links/files, download linked text files, scan for exposed secrets' },
+  { name: 'subdomains', category: 'recon', passive: true, description: 'DNS-brute common subdomains (DoH) — complements crt.sh' },
   { name: 'disclosure_draft', category: 'recon', passive: true, description: 'Find a domain security contact (security.txt/abuse) and DRAFT a responsible-disclosure email (does not send)' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
@@ -898,6 +899,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'archive_urls') return archiveUrls(String(args.domain || args.target || ''));
   if (name === 'favicon_hash') return faviconHash(String(args.url || args.target || ''));
   if (name === 'crawl')        return crawl(String(args.url || args.target || ''));
+  if (name === 'subdomains')   return subdomains(String(args.domain || args.target || ''));
   if (name === 'disclosure_draft') return disclosureDraft(env, String(args.target || args.domain || ''));
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
@@ -2257,6 +2259,25 @@ async function mitreLookup(tech) {
   } catch (e) { return `mitre: failed (${e.message}).`; }
 }
 
+// DNS-brute subdomain enumeration (DoH) — complements crt.sh.
+async function subdomains(domain) {
+  const d = String(domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+  if (!d || d.indexOf('.') < 0) return 'subdomains: a domain is required.';
+  const words = ['www','mail','remote','blog','webmail','server','ns1','ns2','smtp','secure','vpn','m','shop','ftp','test','portal','ns','admin','dev','staging','api','app','cdn','cloud','git','gitlab','jenkins','jira','confluence','wiki','docs','support','help','status','dashboard','internal','intranet','owa','autodiscover','exchange','beta','demo','assets','static','img','media','db','backup','old','new','mobile','careers','jobs','store','login','sso','auth','proxy','gateway','monitor','grafana','kibana','sonar','nexus','registry','docker','prod','uat','qa','origin','direct','cpanel'];
+  const live = [];
+  await Promise.all(words.map(async w => {
+    const host = w + '.' + d;
+    try {
+      const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=A`, { headers: { 'Accept': 'application/dns-json' }, signal: AbortSignal.timeout(6000) });
+      const j = await r.json();
+      const a = (j.Answer || []).filter(x => x.type === 1).map(x => x.data);
+      if (a.length) live.push(`${host} -> ${a.slice(0, 2).join(', ')}`);
+    } catch (e) {}
+  }));
+  if (!live.length) return `subdomains ${d}: none of ${words.length} common subdomains resolved (try crtsh_subs for cert-transparency names).`;
+  return `subdomains ${d}: ${live.length}/${words.length} common subdomains resolve\n` + live.sort().join('\n');
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -3123,6 +3144,8 @@ async function runOsintFlow(q, od, c){
       jobs.push(['web_search '+nm,'web_search',ql]);
       jobs.push(['web_search '+nm+' profiles','web_search',ql+' (linkedin OR github OR twitter OR facebook OR instagram OR email)']);
       (od.domains||[]).slice(0,1).forEach(function(dm){ jobs.push(['web_search '+nm+' '+dm,'web_search',ql+' '+dm]); });
+      var ctx=q.toLowerCase().replace(/[",]/g,' ').split(/\\s+/).filter(function(w){ return w && w.length>1 && nm.toLowerCase().split(' ').indexOf(w)<0 && ['osint','investigate','profile','recon','stalk','who','whos','is','person','named','called','about','the','a','an','please','find','look','into','up','on','background','info','intel','dossier','search','for','of','people','dig','everything','anything'].indexOf(w)<0; }).join(' ').trim();
+      if(ctx.length>2) jobs.push(['web_search '+nm+' ['+ctx+']','web_search',ql+' '+ctx]);
       jobs.push(['github code search '+nm,'github_osint',ql]);
       var p=nm.toLowerCase().replace(/[^a-z ]/g,'').split(/\\s+/).filter(Boolean);
       if(p.length>=2){ var f=p[0],l=p[p.length-1]; [f+l,f[0]+l,f+'.'+l,f+'_'+l,l+f].slice(0,5).forEach(function(u){ jobs.push(['username_enum '+u,'username_enum',u]); jobs.push(['github_user '+u,'github_user',u]); }); }
@@ -3295,7 +3318,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
