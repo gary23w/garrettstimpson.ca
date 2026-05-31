@@ -816,3 +816,28 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 .tag-posts .tag-post-date { color: var(--green-dim) !important; font-size: 11px !important; flex-shrink: 0 !important; min-width: 80px !important; }
 .tag-posts a { color: var(--text) !important; text-decoration: none !important; }
 .tag-posts a:hover { color: var(--green) !important; }
+
+/* ============================================================
+   404 + POST TOC
+   ============================================================ */
+.error-404 { text-align: center !important; padding: 50px 0 !important; }
+.error-404 .err-code { display: inline-block !important; color: var(--green) !important; text-shadow: 0 0 16px rgba(0,255,65,0.5) !important; font-size: 14px !important; line-height: 1.1 !important; margin-bottom: 18px !important; }
+.error-404 h1 { border: none !important; color: var(--red-alert) !important; text-shadow: 0 0 12px rgba(255,45,85,0.4) !important; }
+.error-404 .err-msg { color: var(--text-muted) !important; max-width: 50ch !important; margin: 0 auto 24px auto !important; }
+.error-404 .err-actions { display: flex !important; gap: 12px !important; justify-content: center !important; flex-wrap: wrap !important; }
+.error-404 .err-btn { font-family: var(--font-mono) !important; font-size: 12px !important; color: var(--green) !important; text-decoration: none !important; border: 1px solid var(--border) !important; border-radius: 4px !important; padding: 8px 16px !important; transition: all .15s !important; }
+.error-404 .err-btn:hover { background: var(--green-glow) !important; box-shadow: 0 0 12px var(--green-glow) !important; }
+
+.post-toc {
+  border: 1px solid var(--border-dim) !important; border-left: 2px solid var(--green-dim) !important;
+  border-radius: 6px !important; background: var(--bg-card) !important;
+  padding: 14px 18px !important; margin: 0 0 30px 0 !important; font-size: 12px !important;
+}
+.post-toc .toc-title { color: var(--green) !important; font-weight: 700 !important; letter-spacing: 0.05em !important; }
+.post-toc ul { list-style: none !important; margin: 8px 0 0 0 !important; padding: 0 !important; }
+.post-toc li { margin: 3px 0 !important; }
+.post-toc li.toc-h3 { padding-left: 18px !important; }
+.post-toc li.toc-h3 a { color: var(--text-muted) !important; }
+.post-toc a { color: var(--text) !important; text-decoration: none !important; }
+.post-toc a:hover { color: var(--green) !important; }
+.post-content h2, .post-content h3 { scroll-margin-top: 80px !important; }
