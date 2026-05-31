@@ -10,7 +10,7 @@ In-the-wild exploit analysis, CVE breakdowns, and offensive security research.
 ## What's in this repo
 
 - **`/` (Jekyll site)** — the blog: dark terminal theme, matrix rain, responsive nav, post cards, tags, full-text search, reading progress, code-copy, share buttons, Giscus comments, RSS, and an Open Graph card.
-- **`/agent`** — **Agent Garrett**, a Cloudflare Worker (Workers AI, free tier) with a terminal chat UI *and* an autonomous, multi-round OSINT engine (44 passive tools).
+- **`/agent`** — **Agent Garrett**, a Cloudflare Worker (Workers AI, free tier) with a terminal chat UI *and* an autonomous, multi-round OSINT engine — **68 in-worker tools** the AI selects via an agentic tool-router, plus broker-backed Tor/RE tools.
 - **`llms.txt`** — a RAG corpus of every post, rebuilt daily by GitHub Actions.
 
 ---
@@ -34,13 +34,26 @@ Set these as Cloudflare Worker **Variables/Secrets** (dashboard → Settings →
 | `GITHUB_TOKEN` | Read-only PAT — enables `github_osint` code search (anonymous is impossible) and raises GitHub rate limits |
 | `HIBP_API_KEY` | Enables HaveIBeenPwned results in `breach_check` (XposedOrNot works without it) |
 | `GOOGLE_CSE_KEY` + `GOOGLE_CSE_CX`, or `BING_API_KEY` | Reliable `web_search` (keyless SearXNG/DuckDuckGo/Wikipedia fallback otherwise) |
-| `TOOL_BROKER_URL` | Optional Tor/Python broker for live `.onion` crawling + heavy tools |
+| `TOOL_BROKER_URL` + `TOOL_BROKER_TOKEN` | Optional Tor/Python broker for live `.onion` crawling + Sherlock/Holehe/radare2/capa/yara (see `broker/`) |
+| `VT_API_KEY` / `MALWAREBAZAAR_API_KEY` | Richer `hash_lookup` (Cymru MHR works keyless) |
+| `ABUSECH_API_KEY` | Enables `urlhaus` (abuse.ch now requires a free Auth-Key) |
+| `DISCLOSURE_*` / `RESEND_API_KEY` / `MAILGUN_*` | Optional, off-by-default human-confirmed disclosure sending |
 
 ### Autonomous OSINT
 
-Name an **email / domain / @handle / IP / CVE / image URL / crypto address / .onion** in chat and the agent auto-detects the entity, runs a two-round tool sweep (pivoting on what it finds — leaked git emails, repo domains, etc.), computes an exposure-risk score, and writes a formal Markdown report you can copy or download. A red **stop** button cancels long runs.
+Two ways tools run: (1) **autonomous flows** — name an email / domain / @handle / person name / IP / CVE / image URL / crypto address / .onion / file hash and the agent auto-detects the entity, picks the right *intent* (person, dark-web, malware, origin, tech, breach, full), runs a multi-round sweep that **pivots on what it finds** (leaked git/commit emails, repo & blog domains, discovered profile handles, sample URLs → analyzed, hashes → reputation), computes an exposure-risk score, and writes a formal Markdown report (copy/download). A red **stop** button cancels long runs. (2) **agentic chat** — for any other request, an LLM tool-router selects from the full catalogue using each tool's when-to-use description and chains on findings, showing 🔧 chips as it works.
 
-**Tool families (44):** intel (NVD/EPSS/KEV/CIRCL/cve_search) · OSINT (RDAP, DNS, cert-transparency, IP geo/ASN, Shodan InternetDB, GreyNoise, reverse DNS, tor_exit, crypto_addr, dns_records) · people (username enumeration, GitHub profile, gravatar, email recon, breach_check, pwned_password, email_permutations) · recon (HTTP headers, tech fingerprint, origin IP behind Cloudflare, subdomain takeover, typosquat, email_security/SPF-DMARC, bucket_finder, cors_check) · dark-web (onion_search, onion_fetch via free gateways) · image (EXIF/GPS + reverse-image links) · search/fetch.
+**Tool families (68 in-worker):**
+- **intel** — nvd_lookup, epss_lookup, kev_lookup, kev_recent, circl_cve, cve_search, cve_poc (public exploits), mitre (ATT&CK), cvss
+- **OSINT** — rdap_ip/domain, dns_lookup, dns_records, cert_ct, crtsh_subs, ip_geo, asn_info, shodan_internetdb, greynoise, reverse_dns, tor_exit, wayback, archive_urls, crypto_addr
+- **people** — username_enum, github_user, gravatar, email_recon, email_permutations, breach_check, pwned_password
+- **recon** — http_headers, tech_fingerprint, origin_ip, subdomain_takeover, subdomains, typosquat, email_security (SPF/DMARC), bucket_finder, cors_check, crawl (links+secrets), favicon_hash, disclosure_draft, jwt, cidr, hash_id, encode, timestamp
+- **dark-web** — stealer_check (HudsonRock infostealer logs), leakcheck, paste_search, onion_search, onion_fetch
+- **malware** — file_analyze, hash_lookup (Cymru/VT/MalwareBazaar), decode (recursive), ioc_extract, dork
+- **image** — image_osint (EXIF/GPS + reverse-image links)
+- **broker (optional, real Tor + binaries)** — onion_fetch/onion_search over Tor, sherlock, holehe, re_analyze (radare2/capa), ole_macros, yara_scan, exif
+
+Responsible disclosure: `disclosure_draft` composes an attributable blue-team email to a domain's security contact; an optional, off-by-default, human-confirmed send path (`/api/send-disclosure`) uses your own verified provider (never anonymous).
 
 ---
 
