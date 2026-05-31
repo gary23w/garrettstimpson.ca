@@ -755,6 +755,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'onion_fetch', category: 'darkweb', passive: true, description: 'Fetch .onion content over clearnet via free tor2web gateways (no Tor needed)' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
+  { name: 'decode', category: 'malware', passive: true, description: 'Auto-decode/deobfuscate base64/hex/URL/ROT13 and extract IOCs' },
 ];
 
 function parseCsvSet(value) {
@@ -868,6 +869,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'onion_fetch')  return onionFetch(env, String(args.url || args.onion || args.target || ''));
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
+  if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1739,6 +1741,33 @@ async function fileAnalyze(url) {
   } catch (e) { return `file_analyze ${u.hostname}: failed (${e.message}).`; }
 }
 
+// Auto-decode/deobfuscate base64 / hex / URL / ROT13 and surface IOCs.
+function gsPrintableRatio(s) {
+  if (!s) return 0;
+  let p = 0;
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if ((c >= 32 && c < 127) || c === 9 || c === 10 || c === 13) p++; }
+  return p / s.length;
+}
+function decodeTool(input) {
+  const s = String(input || '').trim();
+  if (!s) return 'decode: paste an encoded string (base64 / hex / url / rot13).';
+  const results = [];
+  const compact = s.replace(/\s+/g, '');
+  if (/^[A-Za-z0-9+/=]{8,}$/.test(compact) && compact.length % 4 === 0) {
+    try { const b = atob(compact); if (gsPrintableRatio(b) > 0.7) results.push('base64 -> ' + b.slice(0, 1000)); } catch (e) {}
+  }
+  if (/^[0-9a-fA-F]{8,}$/.test(compact) && compact.length % 2 === 0) {
+    try { let o = ''; for (let i = 0; i < compact.length; i += 2) o += String.fromCharCode(parseInt(compact.substr(i, 2), 16)); if (gsPrintableRatio(o) > 0.7) results.push('hex -> ' + o.slice(0, 1000)); } catch (e) {}
+  }
+  if (/%[0-9a-fA-F]{2}/.test(s)) { try { const u = decodeURIComponent(s); if (u !== s) results.push('url-decoded -> ' + u.slice(0, 1000)); } catch (e) {} }
+  const r13 = s.replace(/[a-z]/g, c => String.fromCharCode((c.charCodeAt(0) - 97 + 13) % 26 + 97)).replace(/[A-Z]/g, c => String.fromCharCode((c.charCodeAt(0) - 65 + 13) % 26 + 65));
+  if (/\b(http|cmd|powershell|exec|function|var |IEX)\b/i.test(r13) && r13 !== s) results.push('rot13 -> ' + r13.slice(0, 600));
+  if (!results.length) return 'decode: no confident decoding (tried base64 / hex / url / rot13). Input may be plaintext, compressed, or multi-layer.';
+  const all = results.join('\n');
+  const iocs = [...new Set(all.match(/https?:\/\/[^\s"'<>]{6,200}|\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])].slice(0, 10);
+  return 'decode\n' + results.join('\n') + (iocs.length ? '\n\nIOCs in decoded output:\n' + iocs.join('\n') : '');
+}
+
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
 
 const PERSONA = [
@@ -2604,7 +2633,7 @@ async function runOsintFlow(q, od, c){
   addMsg('system','> '+rsLine);
   var synth=blocks.map(function(b){ return b.slice(0,900); }).join('\\n\\n').slice(0,13500);
   synth='RISK ASSESSMENT (heuristic, computed from the evidence): '+rsLine+'\\n\\n'+synth;
-  var objective=(od.intent==='malware') ? ('You are writing a FORMAL MALWARE ANALYSIS report for: "'+q+'". Use ONLY the tool evidence in the context; never invent a fact not present in it; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary\\n## Sample Identification (hashes, file type, size)\\n## Reputation & Classification (Cymru MHR / VirusTotal / MalwareBazaar verdicts, malware family)\\n## Capabilities & Suspicious Indicators (notable APIs/strings and what they imply)\\n## Indicators of Compromise (URLs, IPs, hashes)\\n## MITRE ATT&CK Mapping (only techniques clearly evidenced)\\n## Detection & Mitigation\\nBe precise and defensive.') : ('You are writing a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence in the context - never invent a fact not present in it; mark anything missing as UNKNOWN. Do NOT merely restate tool output: ANALYZE it - infer the subject likely identity, connect accounts/emails/domains/repos that plausibly belong to the same person, and weigh your confidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences with your assessment)\\n## Entities and Identifiers\\n## Findings (per source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaked/commit emails - or state none found)\\n## Pivots and Links (how discovered emails/domains/repos connect and what they reveal)\\n## Gaps and Confidence (what is UNKNOWN, reliability, plus 3-5 concrete recommended next OSINT steps)\\nBe precise, defensive in framing, and analytical.');
+  var objective=(od.intent==='malware') ? ('You are writing a FORMAL MALWARE ANALYSIS report for: "'+q+'". Use ONLY the tool evidence in the context; never invent a fact not present in it; mark anything missing as UNKNOWN. Use this markdown structure:\\n## Executive Summary\\n## Sample Identification (hashes, file type, size)\\n## Reputation & Classification (Cymru MHR / VirusTotal / MalwareBazaar verdicts, malware family)\\n## Capabilities & Suspicious Indicators (notable APIs/strings and what they imply)\\n## Indicators of Compromise (URLs, IPs, hashes)\\n## MITRE ATT&CK Mapping (only techniques clearly evidenced)\\n## Detection & Mitigation\\n## Detection Rules (draft a YARA rule from the notable strings/imports, and a Sigma rule if process/registry/network indicators are evident)\\nBe precise and defensive.') : ('You are writing a FORMAL OSINT WRITE-UP for the request: "'+q+'". Use ONLY the tool evidence in the context - never invent a fact not present in it; mark anything missing as UNKNOWN. Do NOT merely restate tool output: ANALYZE it - infer the subject likely identity, connect accounts/emails/domains/repos that plausibly belong to the same person, and weigh your confidence. Use this markdown structure:\\n## Executive Summary (3-5 sentences with your assessment)\\n## Entities and Identifiers\\n## Findings (per source; note which tool produced each fact)\\n## Dark-web & Exposure (onion index, breaches, leaked/commit emails - or state none found)\\n## Pivots and Links (how discovered emails/domains/repos connect and what they reveal)\\n## Gaps and Confidence (what is UNKNOWN, reliability, plus 3-5 concrete recommended next OSINT steps)\\nBe precise, defensive in framing, and analytical.');
   var report;
   try{ report=await callTask(objective, synth); }
   catch(e){ report='# OSINT write-up: '+q+'\\n\\n(synthesis failed: '+e.message+')\\n\\n'+evidence; }
@@ -2687,7 +2716,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input' };
 async function loadCatalog(){
   try{
     var d=await (await fetch('/api/tools/catalog')).json();
