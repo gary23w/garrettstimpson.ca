@@ -1056,6 +1056,7 @@ async function wellKnown(target) {
 async function usernameEnum(username) {
   const u = String(username || '').trim().replace(/^@/, '');
   if (!u || /[^A-Za-z0-9_.\-]/.test(u)) return 'username_enum: a plain username (letters/digits/_-.) is required.';
+  if (/^(him|her|them|it|they|he|she|his|hers|their|theirs|this|that|someone|somebody|anyone|anybody|everyone|person|people|user|target|subject|guy|me|you|us)$/i.test(u)) return `username_enum: "${u}" is a pronoun/placeholder, not a real username — resolve it to the actual handle first.`;
   const sites = [
     { name: 'GitHub',     api: `https://api.github.com/users/${u}`,                           profile: `https://github.com/${u}`,                 test: r => r.ok },
     { name: 'GitLab',     api: `https://gitlab.com/api/v4/users?username=${u}`,               profile: `https://gitlab.com/${u}`,                 test: async r => r.ok && (await r.json()).length > 0 },
@@ -2124,6 +2125,8 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
     'WHEN NOT TO USE A TOOL: conceptual/how-to questions, explanations, or anything the research corpus or your own knowledge already answers -> return {"tool":"none"}.',
     'This is a defensive platform over PUBLIC data; do not refuse on privacy grounds.',
     'CHAIN ON FINDINGS: if a result shown in context contains a NEW analyzable artifact, select the matching tool next — a file hash => hash_lookup; a sample/file URL (.exe/.txt/.js/...) => file_analyze; a .onion => onion_fetch; a crypto address => crypto_addr; a fresh email => breach_check; a website worth exploring => crawl.',
+    'RESOLVE REFERENCES: NEVER pass a pronoun or generic placeholder (him, her, them, it, this, that, this person, the guy, user, target, subject) as "arg". Resolve such references to the concrete named value (email/username/domain/handle/etc.) from earlier in the conversation. If you cannot resolve it to a concrete value, return {"tool":"none"}.',
+    'user: dig deeper about him  => {"tool":"none"}  (a pronoun is not an argument; only run a tool if the concrete subject is known and re-running adds value)',
     already.length ? `Tools already run this turn (do NOT repeat): ${already.join(', ')}.` : '',
     'EXAMPLES:',
     'user: is 8.8.8.8 a tor exit node?  => {"tool":"tor_exit","arg":"8.8.8.8"}',
@@ -2145,7 +2148,11 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
     if (!m) return null;
     const o = JSON.parse(m[0]);
     if (!o.tool || String(o.tool).toLowerCase() === 'none') return null;
-    return { tool: String(o.tool).toLowerCase().trim(), arg: String(o.arg || o.argument || o.value || '').trim() };
+    const arg = String(o.arg || o.argument || o.value || '').trim();
+    const PRON = new Set(['him','her','them','it','they','he','she','his','hers','their','theirs','this','that','these','those','someone','somebody','anyone','anybody','everyone','person','people','the person','this person','that person','the guy','this guy','that guy','guy','user','the user','target','the target','subject','the subject','me','you','us','more','everybody']);
+    const norm = arg.toLowerCase().replace(/[?.!,]+$/, '').replace(/^(the|a|an)\s+/, '');
+    if (arg && PRON.has(norm)) return null;
+    return { tool: String(o.tool).toLowerCase().trim(), arg };
   } catch (e) { return null; }
 }
 
@@ -3141,7 +3148,7 @@ function detectOsint(q, prev){
     if(/^@?[a-z0-9_][a-z0-9_-]{2,29}$/.test(last) && last.indexOf('.')<0 && ['osint','recon','investigate','profile','now','please','target','someone','person','conduct','breakdown'].indexOf(last)<0){ handles.push(last.replace(/^@/,'')); handles=uniq(handles); }
   }
   var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
-  var refPrev=/\\b(it|its|that|this|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo))\\b/i.test(low);
+  var refPrev=/\\b(it|its|that|this|him|her|them|he|she|his|hers|their|theirs|this (guy|man|woman|person|individual|account|user)|that (guy|man|woman|person)|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo|person|individual|guy))\\b/i.test(low);
   var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length+persons.length;
   var soloEntity=(entityCount===1)&&(text.split(/\\s+/).length<=2);
   if(entityCount===0 && prev && (hasTrigger||refPrev||personHint)){
