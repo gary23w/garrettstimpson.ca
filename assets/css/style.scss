@@ -787,3 +787,18 @@ pre code {
   .post-title { font-size: 1.45em !important; }
   .post-nav-link { flex: 1 1 100% !important; }
 }
+
+/* ============================================================
+   CODE COPY BUTTONS
+   ============================================================ */
+.code-copy {
+  position: absolute !important; top: 6px !important; right: 6px !important;
+  font-family: var(--font-mono) !important; font-size: 10px !important;
+  color: var(--text-muted) !important; background: rgba(0,0,0,0.65) !important;
+  border: 1px solid var(--border) !important; border-radius: 3px !important;
+  padding: 2px 8px !important; cursor: pointer !important; opacity: 0 !important;
+  transition: opacity .15s, color .15s, border-color .15s !important; z-index: 5 !important;
+}
+div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight:hover .code-copy { opacity: 1 !important; }
+.code-copy:hover { color: var(--green) !important; border-color: var(--green) !important; }
+@media (hover: none) { .code-copy { opacity: 1 !important; } }
