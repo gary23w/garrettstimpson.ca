@@ -882,3 +882,14 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   box-shadow: 0 0 18px var(--green-glow) !important; transition: transform .15s, box-shadow .15s !important;
 }
 .hero-cta:hover { transform: translateY(-2px) !important; box-shadow: 0 4px 26px rgba(0,255,65,0.5) !important; }
+
+/* ============================================================
+   RELATED RESEARCH (post footer)
+   ============================================================ */
+.more-posts { margin-top: 40px !important; padding-top: 22px !important; border-top: 1px solid var(--border) !important; }
+.more-posts .more-title { font-size: 1.1em !important; color: var(--green) !important; margin: 0 0 12px 0 !important; }
+.more-posts ul { list-style: none !important; margin: 0 !important; padding: 0 !important; }
+.more-posts li { display: flex !important; gap: 14px !important; align-items: baseline !important; padding: 6px 0 !important; border-bottom: 1px solid var(--border-dim) !important; }
+.more-posts .post-date { color: var(--green-dim) !important; font-size: 11px !important; min-width: 80px !important; flex-shrink: 0 !important; }
+.more-posts a { color: var(--text) !important; text-decoration: none !important; }
+.more-posts a:hover { color: var(--green) !important; }
