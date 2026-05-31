@@ -1323,6 +1323,43 @@ async function reasonPass(env, query, toolContext, chunks, temp) {
 
 // ── UI ──────────────────────────────────────────────────────────────────────────
 
+function loginUI(siteName, needUser, needPass) {
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Login — ${siteName}</title>
+<style>
+:root{--green:#00ff41;--blue:#00d4ff;--border:#1a1a1a;--muted:#444;--err:#ff5555;}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;background:#000;color:var(--green);font-family:'JetBrains Mono',Menlo,monospace;font-size:13px;display:flex;align-items:center;justify-content:center;}
+.box{border:1px solid var(--border);border-radius:6px;padding:26px 24px;width:320px;max-width:92vw;background:#070b07;}
+.t{font-size:13px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;}
+.s{font-size:10px;color:var(--muted);margin:4px 0 18px;letter-spacing:.1em;}
+label{display:block;font-size:10px;color:#bbb;margin:10px 0 4px;text-transform:uppercase;letter-spacing:.08em;}
+input{width:100%;background:#000;border:1px solid #0f5a26;border-radius:4px;color:var(--green);font:inherit;padding:8px 10px;}
+input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 2px rgba(0,212,255,.25);}
+button{width:100%;margin-top:16px;background:transparent;border:1px solid var(--green);color:var(--green);font:inherit;padding:9px;border-radius:4px;cursor:pointer;letter-spacing:.1em;text-transform:uppercase;}
+button:hover{background:#0a2a12;}
+.err{color:var(--err);font-size:10px;margin-top:10px;min-height:12px;}
+</style><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"></head>
+<body><form class="box" id="f">
+<div class="t">Agent Garrett</div><div class="s">${siteName} — restricted access</div>
+${needUser ? '<label>user</label><input id="u" autocomplete="username" autofocus>' : ''}
+${needPass ? ('<label>password</label><input id="p" type="password" autocomplete="current-password"' + (needUser ? '' : ' autofocus') + '>') : ''}
+<button type="submit">enter</button><div class="err" id="e"></div>
+</form>
+<script>
+document.getElementById('f').addEventListener('submit', async function(ev){
+  ev.preventDefault();
+  var body={}; var uel=document.getElementById('u'); var pel=document.getElementById('p');
+  if(uel) body.user=uel.value; if(pel) body.password=pel.value;
+  if((uel && !uel.value) || (pel && !pel.value)){ document.getElementById('e').textContent='Enter your credentials.'; return; }
+  try{
+    var r=await fetch('/api/login',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    if(r.ok){ location.href='/'; return; }
+    document.getElementById('e').textContent='Access denied.';
+  }catch(e){ document.getElementById('e').textContent='Error: '+e.message; }
+});
+</script></body></html>`;
+}
+
 function terminalUI(siteName) {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1546,6 +1583,9 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
     <span id="prompt">&gt;_</span>
     <input id="inp" autocomplete="off" autocorrect="off" spellcheck="false"
            placeholder="ask Agent Garrett about a CVE, exploit, technique, IP…" autofocus>
+  </div>
+  <div id="footer" style="text-align:center;padding:9px 0 4px;border-top:1px solid var(--border);margin-top:4px;">
+    <button class="btn" id="btn-export" title="Download all your chats, memory, jobs and settings as a JSON file">&#8675; export my data (JSON)</button>
   </div>
 </div>
 <script>
@@ -2038,6 +2078,18 @@ function startScheduler(){
 // ============ Agent-panel wiring ============
 el('btn-job').onclick=function(){ var on=el('jobs').classList.toggle('show'); el('btn-job').classList.toggle('on',on); };
 el('btn-tools').onclick=function(){ var on=el('tools').classList.toggle('show'); el('btn-tools').classList.toggle('on',on); if(on) loadCatalog(); };
+el('btn-export').onclick=function(){
+  var data={ app:'Agent Garrett', exportedAt:new Date().toISOString(), schema:1,
+    chats:(function(){ try{ return JSON.parse(localStorage.getItem('gsa_chats')||'[]'); }catch(e){ return chats; } })(),
+    activeChat:(function(){ try{ return localStorage.getItem('gsa_active'); }catch(e){ return null; } })(),
+    memory: MEM.all(), jobs: AGENT.loadJobs(),
+    settings:(function(){ try{ return JSON.parse(localStorage.getItem('gsa_settings')||'{}'); }catch(e){ return {}; } })() };
+  var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url;
+  a.download='agent-garrett-export-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  addMsg('system','Exported '+data.chats.length+' chat(s), '+data.memory.length+' memory item(s), '+data.jobs.length+' job(s) to JSON.');
+};
 var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query' };
 async function loadCatalog(){
   try{
@@ -2125,15 +2177,17 @@ export default {
 
     // ── Access gate (custom login overlay) ──────────────────────────────────
     const ACCESS_PW = String(env.ACCESS_PASSWORD || '');
-    if (ACCESS_PW) {
-      const expected = await sha256hex('gsa|' + ACCESS_PW);
+    const ACCESS_USER = String(env.ACCESS_USER || '');
+    if (ACCESS_PW || ACCESS_USER) {
+      const expected = await sha256hex('gsa|' + ACCESS_USER + '|' + ACCESS_PW);
       const cookie = request.headers.get('Cookie') || '';
       const authed = cookie.split(/;\s*/).some(c => c === 'gsa_auth=' + expected);
       const setCookie = `gsa_auth=${expected}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400`;
       if (url.pathname === '/api/login' && request.method === 'POST') {
         let b = {}; try { b = await request.json(); } catch {}
-        const okUser = !env.ACCESS_USER || String(b.user || '') === String(env.ACCESS_USER);
-        if (okUser && String(b.password || '') === ACCESS_PW) {
+        const okUser = !ACCESS_USER || String(b.user || '') === ACCESS_USER;
+        const okPass = !ACCESS_PW   || String(b.password || '') === ACCESS_PW;
+        if (okUser && okPass) {
           return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...cors, 'Content-Type': 'application/json', 'Set-Cookie': setCookie } });
         }
         return json({ ok: false, error: 'Invalid credentials' }, 401);
@@ -2143,7 +2197,7 @@ export default {
       }
       if (!authed) {
         if (url.pathname === '/' && request.method === 'GET') {
-          return new Response(loginUI(env.SITE_NAME || 'Security Research', !!env.ACCESS_USER), { status: 401, headers: { ...cors, 'Content-Type': 'text/html;charset=UTF-8' } });
+          return new Response(loginUI(env.SITE_NAME || 'Security Research', !!ACCESS_USER, !!ACCESS_PW), { status: 401, headers: { ...cors, 'Content-Type': 'text/html;charset=UTF-8' } });
         }
         return json({ ok: false, error: 'Authentication required' }, 401);
       }
