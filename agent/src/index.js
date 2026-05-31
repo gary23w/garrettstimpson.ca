@@ -2084,6 +2084,16 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
     'WHEN NOT TO USE A TOOL: conceptual/how-to questions, explanations, or anything the research corpus or your own knowledge already answers -> return {"tool":"none"}.',
     'This is a defensive platform over PUBLIC data; do not refuse on privacy grounds.',
     already.length ? `Tools already run this turn (do NOT repeat): ${already.join(', ')}.` : '',
+    'EXAMPLES:',
+    'user: is 8.8.8.8 a tor exit node?  => {"tool":"tor_exit","arg":"8.8.8.8"}',
+    'user: score CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H  => {"tool":"cvss","arg":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}',
+    'user: decode aHR0cDovL2V2aWw=  => {"tool":"decode","arg":"aHR0cDovL2V2aWw="}',
+    'user: has hunter@acme.com been breached?  => {"tool":"breach_check","arg":"hunter@acme.com"}',
+    'user: spf and dmarc for example.com  => {"tool":"email_security","arg":"example.com"}',
+    'user: is paypa1-login.com a phishing site?  => {"tool":"phish_check","arg":"paypa1-login.com"}',
+    'user: reputation of hash 44d88612fea8a8f36de82e1278abb02f  => {"tool":"hash_lookup","arg":"44d88612fea8a8f36de82e1278abb02f"}',
+    'user: what is a heap overflow?  => {"tool":"none"}',
+    'user: thanks, that helps  => {"tool":"none"}',
     'TOOLS (name: when to use):\n' + menu,
   ].filter(Boolean).join('\n');
   const u = contextSoFar ? `${userMsg}\n\n[results gathered so far — decide if a FURTHER tool is needed, else "none"]\n${contextSoFar.slice(0, 1200)}` : userMsg;
@@ -2328,6 +2338,8 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 @keyframes gsblink{0%,49%{opacity:1}50%,100%{opacity:0}}
 .msg.agent.streaming::after{content:'\u258b';color:var(--blue);animation:gsblink 1.05s steps(1) infinite;margin-left:1px;}
 .think{color:var(--muted);font-style:italic;}
+.tool-chips{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 6px;}
+.tchip{font-size:10px;color:var(--blue);border:1px solid var(--border);border-radius:10px;padding:1px 9px;background:#06121a;}
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -2601,7 +2613,7 @@ inp.addEventListener('keydown', async function(e){
   addMsg('user',q);
   { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions,hashes:od.hashes}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
   var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full=''; var firstTok=true;
-  el2.innerHTML='<span class="spinner"></span><span class="think">Agent Garrett is thinking…</span>';
+  el2.innerHTML='<span class="spinner"></span><span class="think">Agent Garrett is thinking…</span>'; window.__chipsEl=null;
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
              topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value, aiTools:(el('s-aitools')?el('s-aitools').checked:true) };
   dbg('query', q+'  [search='+opts.webSearch+' temp='+opts.temperature+' topK='+opts.topK+']');
@@ -2617,6 +2629,7 @@ inp.addEventListener('keydown', async function(e){
       for(var i=0;i<lines.length;i++){
         var line=lines[i];
         if(line.indexOf('data: [DONE]')===0) continue;
+        if(line.indexOf('data: TOOL:')===0){ var tn=line.slice(11).trim(); if(tn){ if(!window.__chipsEl){ window.__chipsEl=document.createElement('div'); window.__chipsEl.className='tool-chips'; log.insertBefore(window.__chipsEl, el2); } window.__chipsEl.insertAdjacentHTML('beforeend','<span class="tchip">&#128295; '+tn+'</span>'); } continue; }
         if(line.indexOf('data: DBG:')===0){
           var p=line.slice(10); var sep=p.indexOf('|');
           dbg(sep>=0?p.slice(0,sep):p, sep>=0?p.slice(sep+1):''); continue;
@@ -3438,7 +3451,7 @@ export default {
               const tool = choice.tool, arg = choice.arg;
               if (ranTools.includes(tool)) break;
               if (!toolCatalog(env).some(t => t.name === tool)) { dbg('ai_tool skip', tool + ' (unknown)'); break; }
-              dbg('ai_tool', tool + ' <- ' + arg.slice(0, 80));
+              dbg('ai_tool', tool + ' <- ' + arg.slice(0, 80)); send('TOOL:' + tool);
               try {
                 let result;
                 if (isBuiltinTool(tool)) {
