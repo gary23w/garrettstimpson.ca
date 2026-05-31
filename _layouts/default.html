@@ -27,6 +27,7 @@
 </head>
 
 <body>
+  <div id="read-progress" aria-hidden="true"></div>
   <!-- Matrix rain canvas background -->
   <canvas id="matrix-canvas" aria-hidden="true"></canvas>
 
@@ -147,6 +148,15 @@
       resize();
       draw();
     });
+  })();
+  </script>
+
+  <!-- Reading progress -->
+  <script>
+  (function(){
+    var bar=document.getElementById('read-progress'); if(!bar) return;
+    function upd(){ var h=document.documentElement; var sc=h.scrollTop||document.body.scrollTop; var max=(h.scrollHeight-h.clientHeight)||1; bar.style.width=Math.min(100,(sc/max)*100)+'%'; }
+    window.addEventListener('scroll',upd,{passive:true}); window.addEventListener('resize',upd); upd();
   })();
   </script>
 </body>
