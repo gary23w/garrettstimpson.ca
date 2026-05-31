@@ -99,6 +99,7 @@
               </a>
             </li>
             {%- endif -%}
+            <li><a href="{{ '/feed.xml' | relative_url }}"><span>rss / feed.xml</span></a></li>
           </ul>
         </div>
 
@@ -157,6 +158,24 @@
     var bar=document.getElementById('read-progress'); if(!bar) return;
     function upd(){ var h=document.documentElement; var sc=h.scrollTop||document.body.scrollTop; var max=(h.scrollHeight-h.clientHeight)||1; bar.style.width=Math.min(100,(sc/max)*100)+'%'; }
     window.addEventListener('scroll',upd,{passive:true}); window.addEventListener('resize',upd); upd();
+  })();
+  </script>
+
+  <!-- Code copy buttons -->
+  <script>
+  (function(){
+    var blocks=document.querySelectorAll('div.highlight, figure.highlight, pre.highlight');
+    blocks.forEach(function(b){
+      if(b.querySelector('.code-copy')) return;
+      var btn=document.createElement('button'); btn.className='code-copy'; btn.type='button'; btn.textContent='copy';
+      btn.addEventListener('click',function(){
+        var code=b.querySelector('code')||b.querySelector('pre')||b;
+        var text=code.innerText||code.textContent||'';
+        if(navigator.clipboard){ navigator.clipboard.writeText(text).then(function(){ btn.textContent='copied'; setTimeout(function(){ btn.textContent='copy'; },1200); }); }
+      });
+      b.style.position='relative';
+      b.appendChild(btn);
+    });
   })();
   </script>
 </body>
