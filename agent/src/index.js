@@ -2368,6 +2368,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
       </select>
     </label>
     <label><input type="checkbox" id="s-debug"> show debug pane by default</label>
+    <label><input type="checkbox" id="s-aitools" checked> AI tool use — let the agent pick &amp; run tools to answer</label>
     <label>brave api key (optional, stored in your browser) <input type="password" id="s-brave" placeholder="leave blank to skip"></label>
     <div style="color:var(--muted);margin-top:6px;font-size:10px;">Settings &amp; chats are saved in this browser. Up to 3 conversations are kept.</div>
   </div>
@@ -2476,7 +2477,7 @@ function loadSettings(){ try{ return JSON.parse(localStorage.getItem('gsa_settin
 function saveSettings(){
   try{ localStorage.setItem('gsa_settings', JSON.stringify({
     search:el('s-search').checked, temp:el('s-temp').value, topk:el('s-topk').value,
-    debug:el('s-debug').checked, brave:el('s-brave').value, reason:el('s-reason').value })); }catch(e){}
+    debug:el('s-debug').checked, brave:el('s-brave').value, reason:el('s-reason').value, aitools:(el('s-aitools')?el('s-aitools').checked:true) })); }catch(e){}
 }
 
 // ---------- chats (memory on by default, max 3) ----------
@@ -2563,7 +2564,7 @@ function dbg(head,body){
 el('btn-set').onclick=function(){ settings.classList.toggle('show'); };
 el('btn-dbg').onclick=function(){ var on=dbgPane.classList.toggle('show'); el('btn-dbg').classList.toggle('on',on); };
 el('btn-new').onclick=newChat;
-['s-search','s-temp','s-topk','s-debug','s-brave','s-reason'].forEach(function(id){
+['s-search','s-temp','s-topk','s-debug','s-brave','s-reason','s-aitools'].forEach(function(id){
   var n=el(id); n.addEventListener('change',saveSettings); n.addEventListener('input',saveSettings);
 });
 el('s-temp').addEventListener('input',function(){ el('s-temp-v').textContent=el('s-temp').value; });
@@ -2575,6 +2576,7 @@ el('s-topk').addEventListener('input',function(){ el('s-topk-v').textContent=el(
   if('temp' in s){ el('s-temp').value=s.temp; el('s-temp-v').textContent=s.temp; }
   if('topk' in s){ el('s-topk').value=s.topk; el('s-topk-v').textContent=s.topk; }
   if('debug' in s) el('s-debug').checked=s.debug;
+  if('aitools' in s && el('s-aitools')) el('s-aitools').checked=s.aitools;
   if('brave' in s) el('s-brave').value=s.brave;
   if('reason' in s) el('s-reason').value=s.reason;
   if(s.debug){ dbgPane.classList.add('show'); el('btn-dbg').classList.add('on'); }
@@ -2601,7 +2603,7 @@ inp.addEventListener('keydown', async function(e){
   var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full=''; var firstTok=true;
   el2.innerHTML='<span class="spinner"></span><span class="think">Agent Garrett is thinking…</span>';
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
-             topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value };
+             topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value, aiTools:(el('s-aitools')?el('s-aitools').checked:true) };
   dbg('query', q+'  [search='+opts.webSearch+' temp='+opts.temperature+' topK='+opts.topK+']');
   try{
     var res=await fetch('/api/chat',{ method:'POST', headers:{'Content-Type':'application/json'},
@@ -2707,7 +2709,7 @@ var AGENT=(function(){
 // ============ Swarm runner (browser orchestration) ============
 function curOpts(){
   return { webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
-           topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value };
+           topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value, aiTools:(el('s-aitools')?el('s-aitools').checked:true) };
 }
 async function callTask(objective, context){
   var res=await fetch('/api/task',{ method:'POST', headers:{'Content-Type':'application/json'},
