@@ -30,3 +30,11 @@ permalink: /posts/:year/:month/:day/:title/
 
 exclude:
   - README.
+
+# Giscus comments (GitHub Discussions). Enable Discussions on the repo, install the
+# giscus app (https://giscus.app), then paste repo_id + category_id below.
+giscus:
+  repo: "gary23w/garrettstimpson.ca"
+  repo_id: ""
+  category: "General"
+  category_id: ""
