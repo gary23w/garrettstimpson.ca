@@ -194,5 +194,10 @@
     content.insertBefore(toc, content.firstChild);
   })();
   </script>
+
+  <!-- Share: copy link -->
+  <script>
+  (function(){ var sc=document.getElementById('share-copy'); if(!sc) return; sc.addEventListener('click',function(){ if(navigator.clipboard){ navigator.clipboard.writeText(location.href).then(function(){ sc.textContent='copied!'; setTimeout(function(){ sc.textContent='copy link'; },1200); }); } }); })();
+  </script>
 </body>
 </html>

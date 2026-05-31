@@ -841,3 +841,16 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 .post-toc a { color: var(--text) !important; text-decoration: none !important; }
 .post-toc a:hover { color: var(--green) !important; }
 .post-content h2, .post-content h3 { scroll-margin-top: 80px !important; }
+
+/* ============================================================
+   POST SHARE BUTTONS
+   ============================================================ */
+.post-share { display: flex !important; flex-wrap: wrap !important; align-items: center !important; gap: 8px !important; margin-top: 16px !important; }
+.post-share .share-label { font-size: 11px !important; color: var(--text-muted) !important; text-transform: uppercase !important; letter-spacing: 0.06em !important; }
+.share-btn {
+  font-family: var(--font-mono) !important; font-size: 11px !important; color: var(--text-muted) !important;
+  text-decoration: none !important; background: transparent !important; cursor: pointer !important;
+  border: 1px solid var(--border-dim) !important; border-radius: 3px !important; padding: 3px 10px !important;
+  transition: color .15s, border-color .15s, box-shadow .15s !important;
+}
+.share-btn:hover { color: var(--green) !important; border-color: var(--border) !important; box-shadow: 0 0 8px var(--green-glow) !important; }

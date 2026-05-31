@@ -13,6 +13,14 @@ layout: default
     {%- if page.tags.size > 0 -%}
     <div class="post-tags">{%- for tag in page.tags -%}<span class="tag">{{ tag }}</span>{%- endfor -%}</div>
     {%- endif -%}
+    <div class="post-share">
+      <span class="share-label">share &rarr;</span>
+      <a class="share-btn" href="https://twitter.com/intent/tweet?url={{ page.url | absolute_url | url_encode }}&text={{ page.title | url_encode }}" target="_blank" rel="noopener">X</a>
+      <a class="share-btn" href="https://news.ycombinator.com/submitlink?u={{ page.url | absolute_url | url_encode }}&t={{ page.title | url_encode }}" target="_blank" rel="noopener">HN</a>
+      <a class="share-btn" href="https://www.reddit.com/submit?url={{ page.url | absolute_url | url_encode }}&title={{ page.title | url_encode }}" target="_blank" rel="noopener">reddit</a>
+      <a class="share-btn" href="https://www.linkedin.com/sharing/share-offsite/?url={{ page.url | absolute_url | url_encode }}" target="_blank" rel="noopener">linkedin</a>
+      <button class="share-btn" id="share-copy" type="button">copy link</button>
+    </div>
   </header>
 
   <div class="post-content" itemprop="articleBody">
