@@ -41,4 +41,22 @@ layout: default
     </a>
     {%- endif -%}
   </nav>
+
+  {%- assign related = "" | split: "," -%}
+  {%- for p in site.posts -%}
+    {%- if p.url != page.url -%}
+      {%- assign common = p.tags | where_exp: "t", "page.tags contains t" -%}
+      {%- if common.size > 0 -%}{%- assign related = related | push: p -%}{%- endif -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {%- if related.size > 0 -%}
+  <aside class="more-posts" aria-label="Related research">
+    <h2 class="more-title">// related research</h2>
+    <ul>
+      {%- for p in related limit: 3 -%}
+      <li><span class="post-date">{{ p.date | date: "%Y.%m.%d" }}</span><a href="{{ p.url | relative_url }}">{{ p.title | escape }}</a></li>
+      {%- endfor -%}
+    </ul>
+  </aside>
+  {%- endif -%}
 </article>
