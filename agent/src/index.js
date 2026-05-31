@@ -1741,31 +1741,60 @@ async function fileAnalyze(url) {
   } catch (e) { return `file_analyze ${u.hostname}: failed (${e.message}).`; }
 }
 
-// Auto-decode/deobfuscate base64 / hex / URL / ROT13 and surface IOCs.
+// Recursive multi-layer decoder (CyberChef-style): url / base64 / hex / gzip + refang.
 function gsPrintableRatio(s) {
   if (!s) return 0;
   let p = 0;
   for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if ((c >= 32 && c < 127) || c === 9 || c === 10 || c === 13) p++; }
   return p / s.length;
 }
-function decodeTool(input) {
-  const s = String(input || '').trim();
-  if (!s) return 'decode: paste an encoded string (base64 / hex / url / rot13).';
-  const results = [];
+function gsBytesToStr(b) { let o = ''; for (let i = 0; i < b.length; i++) o += String.fromCharCode(b[i]); return o; }
+function gsStrToBytes(s) { const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i) & 0xff; return b; }
+async function gsGunzip(bytes, fmt) {
+  try {
+    const ds = new DecompressionStream(fmt || 'gzip');
+    const stream = new Blob([bytes]).stream().pipeThrough(ds);
+    const ab = await new Response(stream).arrayBuffer();
+    return new Uint8Array(ab);
+  } catch (e) { return null; }
+}
+async function decodeOne(s) {
+  if (/%[0-9a-fA-F]{2}/.test(s)) { try { const u = decodeURIComponent(s); if (u !== s) return { label: 'url', value: u }; } catch (e) {} }
   const compact = s.replace(/\s+/g, '');
-  if (/^[A-Za-z0-9+/=]{8,}$/.test(compact) && compact.length % 4 === 0) {
-    try { const b = atob(compact); if (gsPrintableRatio(b) > 0.7) results.push('base64 -> ' + b.slice(0, 1000)); } catch (e) {}
+  if (/^[A-Za-z0-9+/=]{16,}$/.test(compact) && compact.length % 4 === 0) {
+    try {
+      const bin = atob(compact); const bytes = gsStrToBytes(bin);
+      if (bytes[0] === 0x1f && bytes[1] === 0x8b) { const g = await gsGunzip(bytes, 'gzip'); if (g) return { label: 'base64+gzip', value: gsBytesToStr(g) }; }
+      if (bytes[0] === 0x78) { const g = await gsGunzip(bytes, 'deflate'); if (g) return { label: 'base64+zlib', value: gsBytesToStr(g) }; }
+      if (gsPrintableRatio(bin) > 0.75) return { label: 'base64', value: bin };
+    } catch (e) {}
   }
-  if (/^[0-9a-fA-F]{8,}$/.test(compact) && compact.length % 2 === 0) {
-    try { let o = ''; for (let i = 0; i < compact.length; i += 2) o += String.fromCharCode(parseInt(compact.substr(i, 2), 16)); if (gsPrintableRatio(o) > 0.7) results.push('hex -> ' + o.slice(0, 1000)); } catch (e) {}
+  if (/^[0-9a-fA-F]{16,}$/.test(compact) && compact.length % 2 === 0) {
+    try {
+      const bytes = new Uint8Array(compact.length / 2);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(compact.substr(i * 2, 2), 16);
+      if (bytes[0] === 0x1f && bytes[1] === 0x8b) { const g = await gsGunzip(bytes, 'gzip'); if (g) return { label: 'hex+gzip', value: gsBytesToStr(g) }; }
+      const str = gsBytesToStr(bytes); if (gsPrintableRatio(str) > 0.75) return { label: 'hex', value: str };
+    } catch (e) {}
   }
-  if (/%[0-9a-fA-F]{2}/.test(s)) { try { const u = decodeURIComponent(s); if (u !== s) results.push('url-decoded -> ' + u.slice(0, 1000)); } catch (e) {} }
-  const r13 = s.replace(/[a-z]/g, c => String.fromCharCode((c.charCodeAt(0) - 97 + 13) % 26 + 97)).replace(/[A-Z]/g, c => String.fromCharCode((c.charCodeAt(0) - 65 + 13) % 26 + 65));
-  if (/\b(http|cmd|powershell|exec|function|var |IEX)\b/i.test(r13) && r13 !== s) results.push('rot13 -> ' + r13.slice(0, 600));
-  if (!results.length) return 'decode: no confident decoding (tried base64 / hex / url / rot13). Input may be plaintext, compressed, or multi-layer.';
-  const all = results.join('\n');
-  const iocs = [...new Set(all.match(/https?:\/\/[^\s"'<>]{6,200}|\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])].slice(0, 10);
-  return 'decode\n' + results.join('\n') + (iocs.length ? '\n\nIOCs in decoded output:\n' + iocs.join('\n') : '');
+  return null;
+}
+async function decodeTool(input) {
+  let s = String(input || '').trim();
+  if (!s) return 'decode: paste an encoded/obfuscated string (url / base64 / hex / gzip — multi-layer).';
+  const refanged = s.replace(/\[:?\/\/\]/g, '://').replace(/\[\.\]/g, '.').replace(/\(\.\)/g, '.').replace(/\[:\]/g, ':').replace(/hxxp/gi, 'http');
+  const chain = [];
+  let cur = refanged, layers = 0;
+  if (refanged !== s) chain.push('refang -> ' + refanged.slice(0, 200));
+  while (layers < 8) {
+    const step = await decodeOne(cur);
+    if (!step) break;
+    chain.push('[' + (layers + 1) + '] ' + step.label + ' -> ' + step.value.slice(0, 400));
+    cur = step.value; layers++;
+  }
+  if (!chain.length) return 'decode: no confident decoding (tried url / base64 / hex / gzip, multi-layer). May be plaintext or an unsupported codec.';
+  const iocs = [...new Set(cur.match(/https?:\/\/[^\s"'<>]{6,200}|\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])].slice(0, 12);
+  return 'decode (' + layers + ' layer' + (layers === 1 ? '' : 's') + ')\n' + chain.join('\n') + (iocs.length ? '\n\nIOCs in final output:\n' + iocs.join('\n') : '');
 }
 
 // ── Prompt assembly ─────────────────────────────────────────────────────────────
