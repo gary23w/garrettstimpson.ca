@@ -27,6 +27,16 @@
         "name": "ACCESS_USER",
         "text": "",
         "description": "Optional username for the login gate (blank = password only)"
+      },
+      {
+        "type": "secret_text",
+        "name": "GITHUB_TOKEN",
+        "description": "Optional read-only GitHub PAT — enables github_osint code search (anonymous is impossible)."
+      },
+      {
+        "type": "secret_text",
+        "name": "HIBP_API_KEY",
+        "description": "Optional HaveIBeenPwned API key — enables HIBP results in breach_check (XposedOrNot works without it)."
       }
     ]
   }
