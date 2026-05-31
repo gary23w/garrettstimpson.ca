@@ -802,3 +802,17 @@ pre code {
 div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight:hover .code-copy { opacity: 1 !important; }
 .code-copy:hover { color: var(--green) !important; border-color: var(--green) !important; }
 @media (hover: none) { .code-copy { opacity: 1 !important; } }
+
+/* ============================================================
+   TAGS PAGE
+   ============================================================ */
+.tag-cloud { display: flex !important; flex-wrap: wrap !important; gap: 8px !important; margin: 18px 0 36px 0 !important; }
+.tag-link { text-decoration: none !important; display: inline-flex !important; align-items: center !important; gap: 6px !important; }
+.tag-link:hover { border-color: var(--green) !important; color: var(--green) !important; box-shadow: 0 0 10px var(--green-glow) !important; }
+.tag-count { color: var(--text-muted) !important; font-size: 9px !important; }
+.tag-section { font-size: 1.15em !important; color: var(--blue-accent) !important; margin: 30px 0 10px 0 !important; scroll-margin-top: 80px !important; text-shadow: none !important; }
+.tag-posts { list-style: none !important; margin: 0 !important; padding: 0 !important; }
+.tag-posts li { display: flex !important; gap: 14px !important; align-items: baseline !important; padding: 5px 0 !important; border-bottom: 1px solid var(--border-dim) !important; }
+.tag-posts .tag-post-date { color: var(--green-dim) !important; font-size: 11px !important; flex-shrink: 0 !important; min-width: 80px !important; }
+.tag-posts a { color: var(--text) !important; text-decoration: none !important; }
+.tag-posts a:hover { color: var(--green) !important; }
