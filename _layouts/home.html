@@ -1,0 +1,50 @@
+---
+layout: default
+---
+
+<div class="home">
+
+  <section class="hero" aria-label="Intro">
+    <div class="hero-term">
+      <span class="hero-prompt">root@garrett</span>:<span class="hero-path">~</span>$ <span class="hero-cmd">whoami</span>
+    </div>
+    <h1 class="hero-title">{{ site.title | escape }}</h1>
+    <p class="hero-desc">{{ site.description | strip_newlines }}</p>
+    <div class="hero-meta">
+      <span>[ in-the-wild exploits ]</span>
+      <span>[ PoC breakdowns ]</span>
+      <span>[ vulnerability research ]</span>
+    </div>
+  </section>
+
+  {%- if page.content != "" -%}{{ content }}{%- endif -%}
+
+  <h2 class="post-list-heading">// latest research</h2>
+
+  {%- if site.posts.size > 0 -%}
+  <ul class="post-list">
+    {%- for post in site.posts -%}
+    <li class="post-card">
+      <a class="post-card-link" href="{{ post.url | relative_url }}">
+        <div class="post-card-meta">
+          <span class="post-date">{{ post.date | date: "%Y.%m.%d" }}</span>
+          <span class="post-read">~{{ post.content | number_of_words | divided_by: 200 | plus: 1 }} min</span>
+        </div>
+        <h3 class="post-card-title">{{ post.title | escape }}</h3>
+        {%- if post.excerpt -%}
+        <p class="post-card-excerpt">{{ post.excerpt | strip_html | strip_newlines | truncate: 200 }}</p>
+        {%- endif -%}
+        {%- if post.tags.size > 0 -%}
+        <div class="post-tags">
+          {%- for tag in post.tags limit: 6 -%}<span class="tag">{{ tag }}</span>{%- endfor -%}
+        </div>
+        {%- endif -%}
+      </a>
+    </li>
+    {%- endfor -%}
+  </ul>
+  {%- else -%}
+  <p class="text-muted">No posts yet.</p>
+  {%- endif -%}
+
+</div>
