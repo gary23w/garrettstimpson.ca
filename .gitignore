@@ -1,0 +1,14 @@
+# Jekyll
+_site/
+.jekyll-cache/
+.jekyll-metadata
+.sass-cache/
+# Python (broker)
+__pycache__/
+*.pyc
+.venv/
+# Node (agent dev)
+agent/node_modules/
+# OS
+.DS_Store
+Thumbs.db
