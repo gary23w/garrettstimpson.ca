@@ -38,3 +38,31 @@ CUSTOM_TOOL_NAMES  = sherlock,holehe,re_analyze,ole_macros,exif,yara_scan       
 - Always terminate TLS in front of it (Caddy/nginx/Cloudflare Tunnel) — never expose `:8080` raw.
 - Use a long random `BROKER_TOKEN`; the Worker sends it as `Authorization: Bearer`.
 - Firewall the port to Cloudflare egress where possible. Keep usage lawful and defensive.
+
+## 5-minute deploy with HTTPS (Cloudflare Tunnel — no open ports)
+
+On any box with Docker:
+```bash
+cd broker
+cp .env.example .env && sed -i "s/change-me.*/$(openssl rand -hex 24)/" .env
+docker compose up -d --build
+grep BROKER_TOKEN .env          # note this value
+```
+Expose it over HTTPS with a free quick tunnel (no firewall/DNS needed):
+```bash
+cloudflared tunnel --url http://localhost:8080
+# -> prints https://<random>.trycloudflare.com
+```
+Then set in the Worker (dashboard -> Settings -> Variables, or wrangler.toml):
+```
+TOOL_BROKER_URL    = https://<random>.trycloudflare.com/run
+TOOL_BROKER_TOKEN  = <the BROKER_TOKEN from .env>
+CUSTOM_TOOL_NAMES  = sherlock,holehe,re_analyze,ole_macros,exif,yara_scan
+```
+Now `onion_fetch` / `onion_search` route through **real Tor**, and Sherlock/Holehe/
+radare2/capa/yara run for real. Check it: `curl https://<random>.trycloudflare.com/health`.
+
+> Workers cannot open Tor circuits themselves — this broker is the only way to get
+> genuine .onion access. The in-worker dark-web *exposure* tools (stealer_check,
+> leakcheck, breach_check) work without it.
+

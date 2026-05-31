@@ -1,0 +1,9 @@
+services:
+  broker:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - BROKER_TOKEN=${BROKER_TOKEN:?set BROKER_TOKEN in .env}
+      # - YARA_RULES=/app/rules.yar
