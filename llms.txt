@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-05-31T16:09:00Z
+GENERATED    : 2026-06-01T00:13:04Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 23
+TOTAL POSTS  : 24
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -246,6 +246,71 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 <DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
+TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
+DATE       : 2026-05-31
+URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
+CVE        : cve-2026-34926, CVE-2026-34926
+CATEGORIES : exploits, windows
+TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
+WORD_COUNT : 1153
+EXCERPT    : A path traversal in the Apex One server lets an admin-level attacker rewrite a key table and push code to every managed agent through the trusted update channel. The EDR becomes the dropper.
+</FRONTMATTER>
+<BODY>
+Most of what I cover here is memory corruption. Page cache writes, skb coalescing, the usual kernel plumbing. This one is different and I think it is more interesting than its 6.7 CVSS suggests. CVE-2026-34926 is a relative path traversal in the on-premises Trend Micro Apex One server. On paper that sounds boring. A traversal bug in a security console, medium severity, requires admin already. Yawn.
+
+Here is what gets me about it. The thing you traverse into is the mechanism Apex One uses to ship code to every endpoint it manages. So the payoff is not "read a file you shouldn't." The payoff is "the EDR pushes my code to the whole fleet, signed off as a legitimate update." Trend Micro confirmed at least one exploitation attempt in the wild before they ever published the advisory. CISA put it in the KEV catalog the same day Trend disclosed, May 21, and gave federal agencies until June 4 to patch.
+
+## What it actually is
+
+Apex One on-prem has a central server that acts as the control plane. It deploys updates, enforces policy, and coordinates the agents sitting on every laptop and server in the org. The agents trust that server completely. That is the whole design. When the server says "here is new code, run it," the agents run it. That trust is the point of the product and it is also the blast radius.
+
+The bug is classified CWE-23, relative path traversal. The server does not properly sanitize a file path when it accesses one of its own internal directories. Feed it a path with enough `..\` sequences and you walk out of the directory the code expected to stay inside. Trend's own wording is that an attacker can "modify a key table on the server to inject malicious code to deploy to agents." Read that twice. The traversal lets you write to a table the distribution logic reads from. Once that table is poisoned, the normal agent check-in does the rest. No exploit needs to run on the endpoints. They pull the payload themselves because that is their job.
+
+CVSS v3.1 lands at 6.7. The vector tells the real story: local access, high privileges required, high attack complexity. Trend is upfront that the attacker "must have access to the Apex One Server and already obtained administrative credentials to the server via some other method." So this is not an initial access bug. Nobody is popping your network with this. It is a post-compromise primitive, and post-compromise primitives that turn one box into the whole estate are exactly what ransomware crews pay for.
+
+## Why the "needs admin already" caveat does not save you
+
+Every time a vendor says "requires administrative access," half the room stops reading. I get it. But think about who has admin on the Apex One server. The security team. The same console an attacker lands on after phishing a SOC analyst or grabbing a service account from a domain controller. If you have already worked your way to the EDR management server, you are not looking for a quieter way to read config. You are looking for distribution. CVE-2026-34926 hands it to you, and it hands it to you through a channel that is allowlisted, expected, and almost never inspected, because the security tool is supposed to be the trustworthy thing on the wire.
+
+That is the inversion that bugs me. We tell people to centralize endpoint management so they get one pane of glass. The flip side is one pane of glass is also one lever. Pull it and everything moves.
+
+Here is roughly the shape of the abuse, reconstructed from the advisory. I want to be clear there is no public PoC, and Trend has not shared the exploited request. This is mechanism, not copy-paste:
+
+```
+# Conceptual. The vulnerable handler joins a server-controlled base dir
+# with an attacker-influenced relative path, then writes.
+POST /officescan/console/...   (authenticated admin session)
+  param = ..\..\..\PCCSRV\HTTPDB\<key_table>
+
+# The traversal lands the write inside the agent deployment data,
+# not the directory the handler assumed it was confined to.
+# Next agent check-in reads the poisoned table and pulls the payload.
+```
+
+The agents do the heavy lifting on their own schedule. From a detection standpoint that is nasty, because the malicious deployment looks identical to a normal one until you diff the payloads.
+
+## Affected builds and the fix
+
+This hits Apex One 2019 on-premises, server and agent builds below 17079 on Windows. Trend shipped the fix on May 21 as SP1 Critical Patch Build 18012 for existing SP1 deployments, or SP1 Build 17079 for fresh installs, with agents needing at least build 14.0.0.17079. If you run Apex One as a Service or Vision One Endpoint Security, the server side was already patched by Trend back in April, but you still need the agent builds below 14.0.20731 brought up to date. The advisory is KA-0023430 if you want the vendor's exact matrix.
+
+Patch the server first. The server is the lever. An unpatched agent talking to a patched server is a much smaller problem than the reverse.
+
+## What to actually do
+
+Update the on-prem server to build 18012 or 17079 and roll the agents to 14.0.0.17079 or later. That removes the vulnerable code path, which is the only real fix here. Everything else is about shrinking the window.
+
+Lock down who can touch the Apex One console. This bug requires server admin, so server admin is your control. Pull the access list and justify every account on it. Service accounts with console rights that nobody remembers creating are how attackers get the privileges this CVE assumes. Put the management server behind MFA and segment it away from general user VLANs so a phished workstation cannot reach it directly.
+
+Then watch the distribution channel itself. The exploitation looks like a normal deployment, so your signal is integrity, not behavior. Monitor the `PCCSRV` directory tree on the server for unexpected writes, especially to the HTTPDB tables. Alert on agent package or policy changes that nobody scheduled. If your config management has a change window, anything pushed outside it is worth a hard look. And keep an eye out for agents fetching update payloads that do not match the build you actually published.
+
+The uncomfortable part is that the security product is the trusted delivery channel, which means it deserves the same scrutiny you would put on a software update server or a code signing box. If you would not let a random admin silently rewrite your CI pipeline, do not let one silently rewrite the table that ships code to every endpoint you own. Patch is out. June 4 is the federal deadline. There is no reason to be the org that learns this one the hard way.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="004" type="security-research-post">
+<FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
@@ -354,7 +419,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -466,7 +531,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -536,7 +601,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -713,7 +778,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -807,7 +872,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -970,7 +1035,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -1128,7 +1193,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -1262,7 +1327,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -1484,7 +1549,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -1612,7 +1677,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -1819,7 +1884,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -1933,7 +1998,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -2117,7 +2182,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -2273,7 +2338,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -2426,7 +2491,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -2526,7 +2591,7 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
@@ -2677,12 +2742,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431
+CVE        : cve-2026-31431, CVE-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -2885,7 +2950,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -3000,12 +3065,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -3097,7 +3162,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -3244,5 +3309,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 23 documents — 2026-05-31T16:09:00Z
+END OF CORPUS — 24 documents — 2026-06-01T00:13:04Z
 ================================================================================
