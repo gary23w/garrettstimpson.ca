@@ -1,24 +1,7 @@
 /**
- * Agent Garrett — Security Research Agent  v4.1
+ * Agent Garrett - Security Research Agent  v4.2
  *
- * Canonical source: garrettstimpson.ca/agent/  (this repo).
- * garrettstimpson-agent is a CF deploy-bot template clone — do NOT hand-edit it.
- *
- * Pipeline (deterministic pre-processing → single streaming LLM call):
- *   1. Semantic RAG — embed query (bge-base-en-v1.5), query Cloudflare Vectorize
- *      for the most relevant *chunks*. Falls back to in-worker BM25 over chunks
- *      when no Vectorize binding is present (keeps the one-click template working).
- *   2. Deterministic tools — regex CVE extraction → NVD + EPSS lookup; passive
- *      RDAP IP-ownership lookup (no scanning); web search (Brave → SearXNG → DuckDuckGo).
- *   3. Session memory — KV-backed conversation persistence + rolling summary of
- *      older turns. No-ops gracefully when no KV binding is present.
- *   4. Single streaming LLM call with a tight, budgeted prompt.
- *
- * Bindings (all optional — code degrades gracefully):
- *   AI        — Workers AI            (required; free tier)
- *   VECTORIZE — Vectorize index       (optional; enables semantic RAG)
- *   SESSIONS  — KV namespace          (optional; enables persistent memory)
- */
+**/
 
 const MODEL        = '@cf/meta/llama-3.1-8b-instruct';
 const BUILD_VERSION = '2026-05-31-r1';  // bump per deploy; shown in header + /api/tools/catalog
@@ -868,6 +851,27 @@ function getAgentPolicy(env) {
   const enforceRouterPolicy = isTruthy(env.ROUTER_ENFORCE_POLICY, true);
   const routerMaxSteps = Math.max(0, Math.min(6, parseInt(env.ROUTER_MAX_STEPS || '3', 10) || 3));
   return { ...base, citationsRequired, uncertaintyRequired, enforceRouterPolicy, routerMaxSteps };
+}
+
+function sanitizeBrokerUrl(v) {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    if (!/^https?:$/.test(u.protocol)) return '';
+    if (isPrivateHost(u.hostname)) return '';
+    return u.toString().replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function withRuntimeSettings(env, settings) {
+  const s = (settings && typeof settings === 'object') ? settings : {};
+  const e = Object.create(env);
+  const broker = sanitizeBrokerUrl(s.brokerUrl || s.toolBrokerUrl || '');
+  if (broker) e.TOOL_BROKER_URL = broker;
+  return e;
 }
 
 function getToolSpec(name) {
@@ -2522,6 +2526,169 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
   } catch (e) { return null; }
 }
 
+function htmlDecodeLite(s) {
+  return String(s || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function summarizeHtmlPage(url, html) {
+  const src = String(html || '');
+  const title = htmlDecodeLite(((src.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').replace(/\s+/g, ' ').trim());
+  const metaDesc = htmlDecodeLite(((src.match(/<meta[^>]+name=["']description["'][^>]+content=["']([\s\S]*?)["'][^>]*>/i) || [])[1] || '').replace(/\s+/g, ' ').trim());
+  const h1 = htmlDecodeLite(((src.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+  const h2s = [...src.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)]
+    .map(m => htmlDecodeLite(String(m[1] || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()))
+    .filter(Boolean)
+    .slice(0, 3);
+
+  const bodyText = htmlDecodeLite(
+    src
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<!--([\s\S]*?)-->/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+
+  const preview = bodyText.slice(0, 520);
+  const cves = [...new Set((bodyText.match(/CVE-\d{4}-\d+/gi) || []).map(x => x.toUpperCase()))].slice(0, 6);
+  const emails = [...new Set((bodyText.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || []))].slice(0, 4);
+  const ips = [...new Set((bodyText.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || []))].slice(0, 4);
+  const urls = [...new Set((bodyText.match(/https?:\/\/[^\s"'<>]{8,}/g) || []))].slice(0, 4);
+  const hashes = [...new Set((bodyText.match(/\b[a-f0-9]{32}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{64}\b/ig) || []).map(x => x.toLowerCase()))].slice(0, 4);
+  const onions = [...new Set((bodyText.match(/\b[a-z2-7]{16}\.onion\b|\b[a-z2-7]{56}\.onion\b/ig) || []).map(x => x.toLowerCase()))].slice(0, 3);
+  const crypto = [...new Set((bodyText.match(/\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39}|0x[a-fA-F0-9]{40})\b/g) || []))].slice(0, 3);
+  const domains = [...new Set((bodyText.match(/\b(?:[a-z0-9\-]+\.)+[a-z]{2,24}\b/ig) || []).map(x => x.toLowerCase()))]
+    .filter(d => !/^\d+\.\d+\.\d+\.\d+$/.test(d))
+    .slice(0, 8);
+
+  const lines = [
+    `page summary for ${url}`,
+    `title: ${title || 'UNKNOWN'}`,
+    `meta description: ${metaDesc || 'UNKNOWN'}`,
+    `h1: ${h1 || 'UNKNOWN'}`,
+    h2s.length ? `h2: ${h2s.join(' | ')}` : 'h2: none',
+    `content preview: ${preview || 'UNKNOWN'}`,
+  ];
+  if (cves.length) lines.push(`cves in page text: ${cves.join(', ')}`);
+  if (emails.length) lines.push(`emails in page text: ${emails.join(', ')}`);
+  if (ips.length) lines.push(`ips in page text: ${ips.join(', ')}`);
+  if (urls.length) lines.push(`urls in page text: ${urls.join(', ')}`);
+  if (hashes.length) lines.push(`hashes in page text: ${hashes.join(', ')}`);
+  if (onions.length) lines.push(`onion addresses in page text: ${onions.join(', ')}`);
+  if (crypto.length) lines.push(`crypto addresses in page text: ${crypto.join(', ')}`);
+
+  return {
+    text: lines.join('\n'),
+    title,
+    metaDesc,
+    h1,
+    h2s,
+    preview,
+    artifacts: { cves, emails, ips, urls, hashes, onions, crypto, domains },
+  };
+}
+
+function buildCrawlReasoning(pageUrl, summary, ctx) {
+  const host = (() => { try { return new URL(pageUrl).hostname; } catch { return pageUrl; } })();
+  const a = summary.artifacts || {};
+  const extDomains = ctx.extDomains || [];
+  const followed = ctx.followedMeta || [];
+  const followedRefs = [...new Set(followed.flatMap(x => x.refs || []))].slice(0, 6);
+  const followedSecrets = [...new Set(followed.flatMap(x => x.secrets || []))].slice(0, 8);
+  const intentSource = `${summary.title || ''} ${summary.metaDesc || ''} ${summary.h1 || ''} ${summary.preview || ''}`.toLowerCase();
+
+  let intent = 'general content';
+  if (/\b(cve|vulnerability|advisory|exploit|poc|rce)\b/.test(intentSource)) intent = 'vulnerability / exploit discussion';
+  else if (/\b(login|sign in|verify|account|password|security check)\b/.test(intentSource)) intent = 'credential collection / account workflow';
+  else if (/\b(wallet|seed phrase|metamask|crypto|token)\b/.test(intentSource)) intent = 'crypto-targeting content';
+  else if (/\b(download|update|installer|patch|setup|exe|msi)\b/.test(intentSource)) intent = 'software delivery / update flow';
+
+  const leads = [];
+  const seenLead = new Set();
+  const addLead = (priority, tool, arg, why) => {
+    if (!arg) return;
+    const k = tool + '|' + String(arg).toLowerCase();
+    if (seenLead.has(k)) return;
+    seenLead.add(k);
+    leads.push({ priority, tool, arg, why });
+  };
+
+  (a.cves || []).slice(0, 2).forEach(v => {
+    addLead(1, 'circl_cve', v, 'extract concrete CVE details and references');
+    addLead(1, 'epss_lookup', v, 'estimate exploitation probability');
+    addLead(1, 'kev_lookup', v, 'check known-exploited status');
+    addLead(2, 'cve_poc', v, 'find public PoC repositories');
+  });
+  (a.emails || []).slice(0, 2).forEach(v => {
+    addLead(1, 'breach_check', v, 'check breach exposure');
+    addLead(2, 'email_recon', v, 'validate mail infrastructure and risk context');
+    addLead(2, 'exposure_search', v, 'cross-source exposure correlation');
+  });
+  (a.ips || []).slice(0, 2).forEach(v => {
+    addLead(1, 'rdap_ip', v, 'owner and abuse contact attribution');
+    addLead(2, 'ip_geo', v, 'geo + ASN context');
+    addLead(2, 'tor_exit', v, 'Tor relay overlap check');
+  });
+  (a.hashes || []).slice(0, 2).forEach(v => addLead(1, 'hash_lookup', v, 'file-hash reputation lookup'));
+  (a.onions || []).slice(0, 2).forEach(v => {
+    addLead(1, 'onion_fetch', v, 'retrieve onion content for triage');
+    addLead(2, 'onion_search', v, 'search darknet references by onion indicator');
+  });
+  (a.crypto || []).slice(0, 2).forEach(v => addLead(2, 'crypto_addr', v, 'threat-intel on wallet activity'));
+  extDomains.slice(0, 2).forEach(v => {
+    addLead(1, 'rdap_domain', v, 'ownership/registrar attribution');
+    addLead(2, 'dns_records', v, 'full DNS footprint');
+    addLead(2, 'urlscan', v, 'public scan history pivot');
+  });
+  followedRefs.slice(0, 2).forEach(v => {
+    if (/\.(?:exe|dll|msi|ps1|vbs|hta|js|jar|apk|bin)(?:\?|$)/i.test(v)) addLead(1, 'file_analyze', v, 'possible downloadable sample from crawl');
+    addLead(2, 'unshorten', v, 'resolve redirects and final destination');
+    addLead(2, 'phish_check', v, 'phishing signal scoring');
+  });
+
+  const riskSignals = [];
+  if (ctx.homeSecrets && ctx.homeSecrets.length) riskSignals.push('secrets detected in primary page source');
+  if (followedSecrets.length) riskSignals.push('secrets detected in followed files/endpoints');
+  if (a.cves && a.cves.length) riskSignals.push('explicit CVE indicators present in page text');
+  if ((a.emails && a.emails.length) || (a.ips && a.ips.length)) riskSignals.push('contact/network indicators exposed in content');
+  if (/\b(login|verify|password|account)\b/.test(intentSource) && extDomains.length) riskSignals.push('credential-themed content with external-domain pivots');
+  if (riskSignals.length === 0) riskSignals.push('no high-confidence malicious indicators from deterministic rules');
+
+  const lines = [];
+  lines.push('second-stage reasoning:');
+  lines.push(`page intent hypothesis: ${intent}`);
+  lines.push(`context: host=${host}, external_domains=${extDomains.length}, links=${ctx.totalLinks || 0}, interesting_files=${ctx.interestingCount || 0}`);
+  lines.push('risk signals:');
+  riskSignals.slice(0, 5).forEach((r, i) => lines.push(`- [${i + 1}] ${r}`));
+  if (leads.length) {
+    lines.push('prioritized leads (tool pivots):');
+    leads.sort((x, y) => x.priority - y.priority).slice(0, 12).forEach((l, i) => {
+      lines.push(`- [${i + 1}] ${l.tool}(${l.arg}) — ${l.why}`);
+    });
+  } else {
+    lines.push('prioritized leads (tool pivots): none from deterministic indicators');
+  }
+  lines.push('lead artifacts for router chaining:');
+  const flatArtifacts = []
+    .concat((a.cves || []).map(v => `CVE=${v}`))
+    .concat((a.emails || []).map(v => `EMAIL=${v}`))
+    .concat((a.ips || []).map(v => `IP=${v}`))
+    .concat((a.hashes || []).map(v => `HASH=${v}`))
+    .concat((a.onions || []).map(v => `ONION=${v}`))
+    .concat((a.crypto || []).map(v => `CRYPTO=${v}`))
+    .concat(extDomains.slice(0, 4).map(v => `DOMAIN=${v}`))
+    .concat(followedRefs.slice(0, 4).map(v => `URL=${v}`));
+  lines.push(flatArtifacts.length ? flatArtifacts.join(' | ') : 'none');
+  return lines.join('\n');
+}
+
 // Website crawler — fetch a page, extract & classify links, follow interesting files, scan for secrets.
 async function crawl(url) {
   let u; try { u = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch { return 'crawl: a URL is required.'; }
@@ -2538,6 +2705,7 @@ async function crawl(url) {
   try {
     const r = await fetch(u.toString(), { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
     const html = await r.text();
+    const summary = summarizeHtmlPage(u.toString(), html);
     const links = new Set(); let m; const re = /(?:href|src)\s*=\s*["']([^"'#]+)["']/gi;
     while ((m = re.exec(html))) { try { links.add(new URL(m[1], u).toString()); } catch (e) {} }
     const all = [...links];
@@ -2548,6 +2716,7 @@ async function crawl(url) {
     const interesting = all.filter(l => /\.(txt|json|xml|env|ya?ml|conf|config|bak|old|sql|log|csv|ini)(\?|$)|robots\.txt|sitemap|\.well-known|\.env|\.git\/|backup|admin|login|wp-config|phpinfo/i.test(l));
     const homeSecrets = scan(html);
     const followed = [];
+    const followedMeta = [];
     const toFetch = [...new Set([...interesting, u.origin + '/robots.txt', u.origin + '/.well-known/security.txt', u.origin + '/.git/config', u.origin + '/.env'])].slice(0, 7);
     for (const f of toFetch) {
       try {
@@ -2557,10 +2726,20 @@ async function crawl(url) {
         if (!txt.trim()) continue;
         const secrets = scan(txt);
         const urls = [...new Set(txt.match(/https?:\/\/[^\s"'<>]{6,120}/g) || [])].slice(0, 4);
+        followedMeta.push({ url: f, status: fr.status, secrets, refs: urls });
         followed.push(`- ${f} (HTTP ${fr.status})${secrets.length ? '  [SECRETS: ' + secrets.join(', ') + ']' : ''}${urls.length ? '\n    refs: ' + urls.join(', ') : ''}`);
       } catch (e) {}
     }
+    const reasoning = buildCrawlReasoning(u.toString(), summary, {
+      totalLinks: all.length,
+      extDomains,
+      interestingCount: interesting.length,
+      homeSecrets,
+      followedMeta,
+    });
     let out = `crawl ${host} (HTTP ${r.status})\nlinks: ${all.length} total, ${sameHost.length} same-host`;
+    out += `\n\n${summary.text}`;
+    out += `\n\n${reasoning}`;
     out += `\nexternal domains: ${extDomains.slice(0, 14).join(', ') || 'none'}`;
     if (js.length) out += `\nJS files (${js.length}): ${js.slice(0, 6).join(', ')}`;
     if (homeSecrets.length) out += `\nSECRETS IN PAGE SOURCE: ${homeSecrets.join(', ')}`;
@@ -3109,6 +3288,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 
   <div id="settings">
     <label><input type="checkbox" id="s-search" checked> web search (NVD + EPSS + RDAP + Brave/SearXNG/DuckDuckGo)</label>
+    <label><input type="checkbox" id="s-darkweb" checked> enable dark-web/onion tools in AI + OSINT flows</label>
     <label>temperature <input type="range" id="s-temp" min="0" max="1" step="0.1" value="0.3"><span class="set-val" id="s-temp-v">0.3</span></label>
     <label>top-K chunks <input type="range" id="s-topk" min="1" max="10" step="1" value="5"><span class="set-val" id="s-topk-v">5</span></label>
     <label>reasoning effort
@@ -3121,6 +3301,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
     <label><input type="checkbox" id="s-debug"> show debug pane by default</label>
     <label><input type="checkbox" id="s-aitools" checked> AI tool use — let the agent pick &amp; run tools to answer</label>
     <label>brave api key (optional, stored in your browser) <input type="password" id="s-brave" placeholder="leave blank to skip"></label>
+    <label>runtime broker url (optional; overrides TOOL_BROKER_URL for this browser session) <input type="text" id="s-broker-url" placeholder="https://your-broker.example/api"></label>
     <div style="color:var(--muted);margin-top:6px;font-size:10px;">Settings &amp; chats are saved in this browser. Up to 3 conversations are kept.</div>
   </div>
 
@@ -3277,7 +3458,10 @@ function loadSettings(){ try{ return JSON.parse(localStorage.getItem('gsa_settin
 function saveSettings(){
   try{ localStorage.setItem('gsa_settings', JSON.stringify({
     search:el('s-search').checked, temp:el('s-temp').value, topk:el('s-topk').value,
-    debug:el('s-debug').checked, brave:el('s-brave').value, reason:el('s-reason').value, aitools:(el('s-aitools')?el('s-aitools').checked:true) })); }catch(e){}
+    debug:el('s-debug').checked, brave:el('s-brave').value, reason:el('s-reason').value,
+    darkweb:(el('s-darkweb')?el('s-darkweb').checked:true),
+    brokerUrl:(el('s-broker-url')?el('s-broker-url').value:''),
+    aitools:(el('s-aitools')?el('s-aitools').checked:true) })); }catch(e){}
 }
 
 // ---------- chats (memory on by default, max 3) ----------
@@ -3364,7 +3548,7 @@ function dbg(head,body){
 el('btn-set').onclick=function(){ settings.classList.toggle('show'); };
 el('btn-dbg').onclick=function(){ var on=dbgPane.classList.toggle('show'); el('btn-dbg').classList.toggle('on',on); };
 el('btn-new').onclick=newChat;
-['s-search','s-temp','s-topk','s-debug','s-brave','s-reason','s-aitools'].forEach(function(id){
+['s-search','s-darkweb','s-temp','s-topk','s-debug','s-brave','s-broker-url','s-reason','s-aitools'].forEach(function(id){
   var n=el(id); n.addEventListener('change',saveSettings); n.addEventListener('input',saveSettings);
 });
 el('s-temp').addEventListener('input',function(){ el('s-temp-v').textContent=el('s-temp').value; });
@@ -3377,7 +3561,9 @@ el('s-topk').addEventListener('input',function(){ el('s-topk-v').textContent=el(
   if('topk' in s){ el('s-topk').value=s.topk; el('s-topk-v').textContent=s.topk; }
   if('debug' in s) el('s-debug').checked=s.debug;
   if('aitools' in s && el('s-aitools')) el('s-aitools').checked=s.aitools;
+  if('darkweb' in s && el('s-darkweb')) el('s-darkweb').checked=s.darkweb;
   if('brave' in s) el('s-brave').value=s.brave;
+  if('brokerUrl' in s && el('s-broker-url')) el('s-broker-url').value=s.brokerUrl;
   if('reason' in s) el('s-reason').value=s.reason;
   if(s.debug){ dbgPane.classList.add('show'); el('btn-dbg').classList.add('on'); }
 })();
@@ -3404,7 +3590,10 @@ inp.addEventListener('keydown', async function(e){
   var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full=''; var firstTok=true;
   el2.innerHTML='<span class="spinner"></span><span class="think">Agent Garrett is thinking…</span>'; window.__chipsEl=null;
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
-             topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value, aiTools:(el('s-aitools')?el('s-aitools').checked:true) };
+             topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'',
+             brokerUrl:(el('s-broker-url')?el('s-broker-url').value.trim():''),
+             darkweb:(el('s-darkweb')?el('s-darkweb').checked:true),
+             reasoning:el('s-reason').value, aiTools:(el('s-aitools')?el('s-aitools').checked:true) };
   dbg('query', q+'  [search='+opts.webSearch+' temp='+opts.temperature+' topK='+opts.topK+']');
   try{
     var res=await fetch('/api/chat',{ method:'POST', headers:{'Content-Type':'application/json'},
@@ -3511,7 +3700,10 @@ var AGENT=(function(){
 // ============ Swarm runner (browser orchestration) ============
 function curOpts(){
   return { webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
-           topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'', reasoning:el('s-reason').value, aiTools:(el('s-aitools')?el('s-aitools').checked:true) };
+           topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'',
+           brokerUrl:(el('s-broker-url')?el('s-broker-url').value.trim():''),
+           darkweb:(el('s-darkweb')?el('s-darkweb').checked:true),
+           reasoning:el('s-reason').value, aiTools:(el('s-aitools')?el('s-aitools').checked:true) };
 }
 async function callTask(objective, context, grounded){
   var res=await fetch('/api/task',{ method:'POST', headers:{'Content-Type':'application/json'},
@@ -3732,6 +3924,9 @@ function harvestPivots(text, known){
 
 async function runOsintFlow(q, od, c){
   var FENCE=String.fromCharCode(96,96,96);
+  var opts=curOpts();
+  var darkwebOn=(opts.darkweb!==false);
+  var DARKWEB_TOOLS={ onion_search:1, onion_fetch:1, stealer_check:1, leakcheck:1, paste_search:1 };
   addMsg('system','> OSINT run ('+(od.intent||'full')+') - '+osintSummary(od));
   window.__osintAbort=false; var stopBtn=el('btn-stop'); if(stopBtn){ stopBtn.style.display=''; stopBtn.textContent='stop'; }
   var jobs=[];
@@ -3797,6 +3992,11 @@ async function runOsintFlow(q, od, c){
     sterms.slice(0,3).forEach(function(tm){ jobs.push(['web_search '+tm,'web_search',tm]); });
     var oterm=(od.emails[0]||od.domains[0]||od.handles[0]);
     if(oterm) jobs.push(['onion_search '+oterm,'onion_search',oterm]);
+  }
+  if(!darkwebOn){
+    var before=jobs.length;
+    jobs=jobs.filter(function(j){ return !DARKWEB_TOOLS[j[1]]; });
+    if(before!==jobs.length) addMsg('system','> dark-web/onion tools are disabled in settings; skipped '+(before-jobs.length)+' job(s).');
   }
   if(!jobs.length){ addMsg('system','OSINT: no actionable entity detected.'); return; }
   var blocks=[];
@@ -3984,8 +4184,10 @@ el('imp-file').onchange=function(ev){
 var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email', exposure_search:'selector' };
 async function loadCatalog(){
   try{
-    var d=await (await fetch('/api/tools/catalog')).json();
-    el('t-mode').textContent=(d.safeMode?'SAFE MODE on':'safe mode OFF')+(d.requireConfirm?' · confirm unlocks all tools':'')+(d.brokerConfigured?' · broker wired':' · no broker');
+    var broker=(el('s-broker-url')?el('s-broker-url').value.trim():'');
+    var u='/api/tools/catalog'+(broker?('?brokerUrl='+encodeURIComponent(broker)):''), d=await (await fetch(u)).json();
+    var runtimeBroker=broker?(' · runtime broker '+broker):'';
+    el('t-mode').textContent=(d.safeMode?'SAFE MODE on':'safe mode OFF')+(d.requireConfirm?' · confirm unlocks all tools':'')+(d.brokerConfigured?' · broker wired':' · no broker')+runtimeBroker;
     el('t-mode').className='t-badge'+(d.safeMode?' safe':'');
     var cat=el('t-catalog'); cat.innerHTML=''; var sel=el('t-tool'); sel.innerHTML='';
     var tools=(d.tools||[]).slice().sort(function(a,b){ return (a.category+a.name).localeCompare(b.category+b.name); });
@@ -4140,7 +4342,8 @@ export default {
 
     // GET /api/tools/catalog — advertise wired tools and current policy state
     if (url.pathname === '/api/tools/catalog' && request.method === 'GET') {
-      const policy = getAgentPolicy(env);
+      const runtimeEnv = withRuntimeSettings(env, { brokerUrl: url.searchParams.get('brokerUrl') || '' });
+      const policy = getAgentPolicy(runtimeEnv);
       return json({
         ok: true,
         safeMode: policy.safeMode,
@@ -4151,28 +4354,35 @@ export default {
         routerMaxSteps: policy.routerMaxSteps,
         allowlistedTools: [...policy.toolAllowlist],
         targetAllowlist: [...policy.targetAllowlist],
-        tools: toolCatalog(env),
-        brokerConfigured: !!env.TOOL_BROKER_URL,
+        tools: toolCatalog(runtimeEnv),
+        brokerConfigured: !!runtimeEnv.TOOL_BROKER_URL,
       });
     }
 
     // POST /api/tools/run — guarded tool execution entrypoint for CTF workflows
     if (url.pathname === '/api/tools/run' && request.method === 'POST') {
       let body; try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }
+      const runtimeEnv = withRuntimeSettings(env, body.settings || {});
       const tool = String(body.tool || '').trim().toLowerCase();
       const args = body.args && typeof body.args === 'object' ? body.args : {};
       for (const k in args) { if (typeof args[k] === 'string') { const mm = args[k].match(/\]\((https?:\/\/[^)\s]+)\)/); if (mm) args[k] = mm[1]; args[k] = args[k].replace(/^[\[<("'\s]+|[\]>)"'\s]+$/g, '').trim(); } }
       const target = normalizeTarget(body.target || args.target || args.url || args.domain || args.ip || '');
-      const policy = getToolPolicy(env);
+      const policy = getToolPolicy(runtimeEnv);
       if (!tool) return json({ ok: false, error: 'tool is required' }, 400);
       if (policy.requireConfirm && body.confirm !== true) {
         return json({ ok: false, error: 'confirm=true is required in CTF safe mode' }, 400);
       }
 
+      const selected = toolCatalog(runtimeEnv).find(t => t.name === tool);
+      const darkwebEnabled = !body.settings || body.settings.darkweb !== false;
+      if (!darkwebEnabled && selected && selected.category === 'darkweb') {
+        return json({ ok: false, error: 'dark-web/onion tools are disabled in settings' }, 403);
+      }
+
       const access = validateToolAccess(policy, tool, target, body.confirm === true);
       if (!access.ok) return json(access, access.status || 403);
 
-      const known = toolCatalog(env).some(t => t.name === tool);
+      const known = toolCatalog(runtimeEnv).some(t => t.name === tool);
       if (!known) return json({ ok: false, error: `Unknown tool: ${tool}` }, 404);
 
       try {
@@ -4180,10 +4390,10 @@ export default {
         let result;
         let via = 'builtin';
         if (isBuiltinTool(tool)) {
-          result = await runBuiltinCached(env, tool, args);
+          result = await runBuiltinCached(runtimeEnv, tool, args);
         } else {
           via = 'broker';
-          result = await runBrokerTool(env, {
+          result = await runBrokerTool(runtimeEnv, {
             tool,
             args,
             target,
@@ -4263,30 +4473,31 @@ export default {
     // POST /api/debug — show the assembled prompt without calling the chat model
     if (url.pathname === '/api/debug' && request.method === 'POST') {
       let body; try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }
+      const runtimeEnv = withRuntimeSettings(env, body.settings || {});
       const q = body.message || '';
-      const policy = getAgentPolicy(env);
+      const policy = getAgentPolicy(runtimeEnv);
       const { cveIds, ips, domains, wantSearch } = analyseQuery(q);
       const evidence = [];
       const toolContext = [];
       for (const cveId of cveIds.slice(0, 3)) {
-        await runToolWithEvidence(env, evidence, toolContext, 'nvd_lookup', { cveId, target: cveId }, 'builtin');
-        await runToolWithEvidence(env, evidence, toolContext, 'epss_lookup', { cveId, target: cveId }, 'builtin');
-        await runToolWithEvidence(env, evidence, toolContext, 'kev_lookup', { cveId, target: cveId }, 'builtin');
+        await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'nvd_lookup', { cveId, target: cveId }, 'builtin');
+        await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'epss_lookup', { cveId, target: cveId }, 'builtin');
+        await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'kev_lookup', { cveId, target: cveId }, 'builtin');
       }
       for (const ip of (ips || []).slice(0, 2)) {
-        await runToolWithEvidence(env, evidence, toolContext, 'rdap_ip', { ip, target: ip }, 'builtin');
-        await runToolWithEvidence(env, evidence, toolContext, 'reverse_dns', { ip, target: ip }, 'builtin');
-        await runToolWithEvidence(env, evidence, toolContext, 'ip_geo', { ip, target: ip }, 'builtin');
+        await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'rdap_ip', { ip, target: ip }, 'builtin');
+        await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'reverse_dns', { ip, target: ip }, 'builtin');
+        await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'ip_geo', { ip, target: ip }, 'builtin');
       }
       for (const dom of (domains || []).slice(0, 2)) {
-        await runToolWithEvidence(env, evidence, toolContext, 'rdap_domain', { domain: dom, target: dom }, 'builtin');
-        await runToolWithEvidence(env, evidence, toolContext, 'dns_lookup', { domain: dom, target: dom }, 'builtin');
-        await runToolWithEvidence(env, evidence, toolContext, 'cert_ct', { domain: dom, target: dom }, 'builtin');
+        await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'rdap_domain', { domain: dom, target: dom }, 'builtin');
+        await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'dns_lookup', { domain: dom, target: dom }, 'builtin');
+        await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'cert_ct', { domain: dom, target: dom }, 'builtin');
       }
-      let chunks = await vectorRetrieve(env, q, body.topK || TOP_K);
+      let chunks = await vectorRetrieve(runtimeEnv, q, body.topK || TOP_K);
       const usedVectorize = chunks !== null;
-      if (!chunks) chunks = bm25Chunks(await getChunks(env), q, body.topK || TOP_K);
-      const sys = buildSystemPrompt(env, {
+      if (!chunks) chunks = bm25Chunks(await getChunks(runtimeEnv), q, body.topK || TOP_K);
+      const sys = buildSystemPrompt(runtimeEnv, {
         summary: '', chunks, toolContext,
         evidenceLedger: buildEvidenceLedger(evidence),
         policy,
@@ -4306,12 +4517,13 @@ export default {
     if (url.pathname === '/api/task' && request.method === 'POST') {
       let body; try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }
       const opts      = body.settings || {};
-      const policy    = getAgentPolicy(env);
+      const runtimeEnv = withRuntimeSettings(env, opts);
+      const policy    = getAgentPolicy(runtimeEnv);
       const topK      = Math.max(1, Math.min(10, opts.topK || TOP_K));
       const temp      = typeof opts.temperature === 'number' ? opts.temperature : 0.3;
       const useSearch = opts.webSearch !== false;
       const reasoning = String(opts.reasoning || 'normal').toLowerCase();
-      const braveKey  = opts.brave || env.BRAVE_API_KEY || '';
+      const braveKey  = opts.brave || runtimeEnv.BRAVE_API_KEY || '';
       const objective = (body.objective || body.message || '').toString();
       const context   = (body.context || '').toString();
       const clientMemory = typeof body.memory === 'string' ? body.memory : '';
@@ -4330,7 +4542,7 @@ export default {
               msgsG.push({ role: 'assistant', content: full });
               msgsG.push({ role: 'user', content: 'Continue the report from EXACTLY where you stopped. Do not repeat any text already written, do not restart sections, do not add a preamble. If the report is already complete, reply with only: <<END>>' });
             }
-            let rG; try { rG = await env.AI.run(MODEL, { messages: msgsG, stream: false, max_tokens: MAX_TOK, temperature: 0.2 }); } catch (e) { break; }
+            let rG; try { rG = await runtimeEnv.AI.run(MODEL, { messages: msgsG, stream: false, max_tokens: MAX_TOK, temperature: 0.2 }); } catch (e) { break; }
             let chunk = (rG.response || '').trim();
             if (/<<END>>/.test(chunk)) { full += chunk.replace(/<<END>>/g, '').trim(); finished = true; break; }
             if (!chunk) { finished = true; break; }
@@ -4344,26 +4556,26 @@ export default {
         const evidence = [];
         const toolContext = [];
         for (const cveId of cveIds.slice(0, 3)) {
-          await runToolWithEvidence(env, evidence, toolContext, 'nvd_lookup', { cveId, target: cveId }, 'builtin');
-          await runToolWithEvidence(env, evidence, toolContext, 'epss_lookup', { cveId, target: cveId }, 'builtin');
-          await runToolWithEvidence(env, evidence, toolContext, 'kev_lookup', { cveId, target: cveId }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'nvd_lookup', { cveId, target: cveId }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'epss_lookup', { cveId, target: cveId }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'kev_lookup', { cveId, target: cveId }, 'builtin');
         }
         for (const ip of (ips || []).slice(0, 2)) {
-          await runToolWithEvidence(env, evidence, toolContext, 'rdap_ip', { ip, target: ip }, 'builtin');
-          await runToolWithEvidence(env, evidence, toolContext, 'reverse_dns', { ip, target: ip }, 'builtin');
-          await runToolWithEvidence(env, evidence, toolContext, 'shodan_internetdb', { ip, target: ip }, 'builtin');
-          await runToolWithEvidence(env, evidence, toolContext, 'ip_geo', { ip, target: ip }, 'builtin');
-          await runToolWithEvidence(env, evidence, toolContext, 'asn_info', { target: ip, ip }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'rdap_ip', { ip, target: ip }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'reverse_dns', { ip, target: ip }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'shodan_internetdb', { ip, target: ip }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'ip_geo', { ip, target: ip }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'asn_info', { target: ip, ip }, 'builtin');
         }
         for (const dom of (domains || []).slice(0, 2)) {
-          await runToolWithEvidence(env, evidence, toolContext, 'rdap_domain', { domain: dom, target: dom }, 'builtin');
-          await runToolWithEvidence(env, evidence, toolContext, 'dns_lookup', { domain: dom, target: dom }, 'builtin');
-          await runToolWithEvidence(env, evidence, toolContext, 'cert_ct', { domain: dom, target: dom }, 'builtin');
-          await runToolWithEvidence(env, evidence, toolContext, 'wayback', { domain: dom, target: dom }, 'builtin');
-          await runToolWithEvidence(env, evidence, toolContext, 'urlscan', { domain: dom, target: dom }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'rdap_domain', { domain: dom, target: dom }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'dns_lookup', { domain: dom, target: dom }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'cert_ct', { domain: dom, target: dom }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'wayback', { domain: dom, target: dom }, 'builtin');
+          await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'urlscan', { domain: dom, target: dom }, 'builtin');
         }
         if (useSearch && wantSearch) {
-          const s = await webSearch(cveIds.length ? `${cveIds[0]} exploit PoC advisory` : objective, braveKey, env);
+          const s = await webSearch(cveIds.length ? `${cveIds[0]} exploit PoC advisory` : objective, braveKey, runtimeEnv);
           const result = s ? formatSearch(s) : 'Search unavailable across all providers.';
           const entry = makeEvidenceEntry({
             tool: 'web_search',
@@ -4376,20 +4588,20 @@ export default {
           evidence.push(entry);
           toolContext.push(formatEvidenceForPrompt(entry));
         }
-        let chunks = await vectorRetrieve(env, objective, topK);
+        let chunks = await vectorRetrieve(runtimeEnv, objective, topK);
         const usedVectorize = chunks !== null;
-        if (!chunks) chunks = bm25Chunks(await getChunks(env), objective, topK);
-        let sysPrompt = buildSystemPrompt(env, {
+        if (!chunks) chunks = bm25Chunks(await getChunks(runtimeEnv), objective, topK);
+        let sysPrompt = buildSystemPrompt(runtimeEnv, {
           summary: '', chunks, toolContext, clientMemory, reasoning,
           evidenceLedger: buildEvidenceLedger(evidence),
           policy,
         });
         if (reasoning === 'deep') {
-          const notes = await reasonPass(env, objective, toolContext, chunks, temp);
+          const notes = await reasonPass(runtimeEnv, objective, toolContext, chunks, temp);
           if (notes) sysPrompt += `\n\nPRELIMINARY ANALYSIS (your private notes — verify, do not treat as fact):\n${notes}`;
         }
         const userContent = context ? `${objective}\n\nContext from earlier steps:\n${context.slice(0, 14000)}` : objective;
-        const r = await env.AI.run(MODEL, {
+        const r = await runtimeEnv.AI.run(MODEL, {
           messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userContent }],
           stream: false, max_tokens: 2048, temperature: temp,
         });
@@ -4402,12 +4614,14 @@ export default {
       let body; try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400, headers: cors }); }
 
       const opts      = body.settings || {};
-      const policy    = getAgentPolicy(env);
+      const runtimeEnv = withRuntimeSettings(env, opts);
+      const policy    = getAgentPolicy(runtimeEnv);
+      const darkwebEnabled = opts.darkweb !== false;
       const topK      = Math.max(1, Math.min(10, opts.topK || TOP_K));
       const temp      = typeof opts.temperature === 'number' ? opts.temperature : 0.3;
       const useSearch = opts.webSearch !== false;
       const reasoning = String(opts.reasoning || 'normal').toLowerCase();
-      const braveKey  = opts.brave || env.BRAVE_API_KEY || '';
+      const braveKey  = opts.brave || runtimeEnv.BRAVE_API_KEY || '';
       const clientMemory = typeof body.memory === 'string' ? body.memory : '';
 
       // Resolve conversation: server session (KV) is authoritative when present.
@@ -4439,31 +4653,31 @@ export default {
           // CVE intel — NVD + EPSS + CISA KEV
           for (const cveId of cveIds.slice(0, 3)) {
             dbg('cve_intel', cveId);
-            await runToolWithEvidence(env, evidence, toolContext, 'nvd_lookup', { cveId, target: cveId }, 'builtin');
-            await runToolWithEvidence(env, evidence, toolContext, 'epss_lookup', { cveId, target: cveId }, 'builtin');
-            await runToolWithEvidence(env, evidence, toolContext, 'kev_lookup', { cveId, target: cveId }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'nvd_lookup', { cveId, target: cveId }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'epss_lookup', { cveId, target: cveId }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'kev_lookup', { cveId, target: cveId }, 'builtin');
             dbg('cve result', `evidence+3 (${cveId})`);
           }
 
           // Passive IP intel — RDAP + reverse DNS + Shodan InternetDB. No scanning by us.
           for (const ip of (ips || []).slice(0, 2)) {
             dbg('ip_intel', ip);
-            await runToolWithEvidence(env, evidence, toolContext, 'rdap_ip', { ip, target: ip }, 'builtin');
-            await runToolWithEvidence(env, evidence, toolContext, 'reverse_dns', { ip, target: ip }, 'builtin');
-            await runToolWithEvidence(env, evidence, toolContext, 'shodan_internetdb', { ip, target: ip }, 'builtin');
-            await runToolWithEvidence(env, evidence, toolContext, 'ip_geo', { ip, target: ip }, 'builtin');
-            await runToolWithEvidence(env, evidence, toolContext, 'asn_info', { target: ip, ip }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'rdap_ip', { ip, target: ip }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'reverse_dns', { ip, target: ip }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'shodan_internetdb', { ip, target: ip }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'ip_geo', { ip, target: ip }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'asn_info', { target: ip, ip }, 'builtin');
             dbg('ip result', `evidence+5 (${ip})`);
           }
 
           // Passive domain intel — RDAP + DNS (DoH) + certificate transparency. No scanning.
           for (const dom of (domains || []).slice(0, 2)) {
             dbg('domain_intel', dom);
-            await runToolWithEvidence(env, evidence, toolContext, 'rdap_domain', { domain: dom, target: dom }, 'builtin');
-            await runToolWithEvidence(env, evidence, toolContext, 'dns_lookup', { domain: dom, target: dom }, 'builtin');
-            await runToolWithEvidence(env, evidence, toolContext, 'cert_ct', { domain: dom, target: dom }, 'builtin');
-            await runToolWithEvidence(env, evidence, toolContext, 'wayback', { domain: dom, target: dom }, 'builtin');
-            await runToolWithEvidence(env, evidence, toolContext, 'urlscan', { domain: dom, target: dom }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'rdap_domain', { domain: dom, target: dom }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'dns_lookup', { domain: dom, target: dom }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'cert_ct', { domain: dom, target: dom }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'wayback', { domain: dom, target: dom }, 'builtin');
+            await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'urlscan', { domain: dom, target: dom }, 'builtin');
             dbg('domain result', `evidence+5 (${dom})`);
           }
 
@@ -4471,7 +4685,7 @@ export default {
           if (useSearch && wantSearch) {
             const q = cveIds.length ? `${cveIds[0]} exploit PoC advisory` : lastUser;
             dbg('search_web', q);
-            const s = await webSearch(q, braveKey, env);
+            const s = await webSearch(q, braveKey, runtimeEnv);
             const result = s ? formatSearch(s) : 'Search unavailable across all providers.';
             const entry = makeEvidenceEntry({ tool: 'web_search', input: q, args: { query: q }, result, via: 'builtin', index: evidence.length + 1 });
             evidence.push(entry);
@@ -4483,11 +4697,13 @@ export default {
           if (opts.aiTools !== false) {
             const ranTools = [];
             for (let step = 0; step < policy.routerMaxSteps; step++) {
-              const choice = await toolRouter(env, lastUser, ranTools, toolContext.join('\n'));
+              const choice = await toolRouter(runtimeEnv, lastUser, ranTools, toolContext.join('\n'));
               if (!choice || !choice.tool || !choice.arg) break;
               const tool = choice.tool, arg = choice.arg;
               if (ranTools.includes(tool)) break;
-              if (!toolCatalog(env).some(t => t.name === tool)) { dbg('ai_tool skip', tool + ' (unknown)'); break; }
+              const pickedSpec = toolCatalog(runtimeEnv).find(t => t.name === tool);
+              if (!pickedSpec) { dbg('ai_tool skip', tool + ' (unknown)'); break; }
+              if (!darkwebEnabled && pickedSpec.category === 'darkweb') { dbg('ai_tool blocked', tool + ' (darkweb disabled)'); break; }
               if (policy.enforceRouterPolicy) {
                 const target = normalizeTarget(arg);
                 const access = validateToolAccess(policy, tool, target, false);
@@ -4496,7 +4712,7 @@ export default {
               dbg('ai_tool', tool + ' <- ' + arg.slice(0, 80)); send('TOOL:' + tool);
               try {
                 const result = await runToolWithEvidence(
-                  env,
+                  runtimeEnv,
                   evidence,
                   toolContext,
                   tool,
@@ -4510,21 +4726,21 @@ export default {
           }
 
           // Retrieval — Vectorize semantic, BM25 fallback
-          let chunks = await vectorRetrieve(env, lastUser, topK);
+          let chunks = await vectorRetrieve(runtimeEnv, lastUser, topK);
           const usedVectorize = chunks !== null;
-          if (!chunks) chunks = bm25Chunks(await getChunks(env), lastUser, topK);
+          if (!chunks) chunks = bm25Chunks(await getChunks(runtimeEnv), lastUser, topK);
           dbg('retrieval', (usedVectorize ? 'vectorize' : 'bm25') + ' · ' + chunks.length + ' chunks · ' +
               chunks.map(c => (c.title || '?').slice(0, 24) + '(' + (c.score ?? '') + ')').join(', '));
 
           // Build prompt
-          let sysPrompt = buildSystemPrompt(env, {
+          let sysPrompt = buildSystemPrompt(runtimeEnv, {
             summary: sess?.summary || '', chunks, toolContext, clientMemory, reasoning,
             evidenceLedger: buildEvidenceLedger(evidence),
             policy,
           });
           if (reasoning === 'deep') {
             dbg('reasoning', 'deep analysis pass');
-            const notes = await reasonPass(env, lastUser, toolContext, chunks, temp);
+            const notes = await reasonPass(runtimeEnv, lastUser, toolContext, chunks, temp);
             if (notes) sysPrompt += `\n\nPRELIMINARY ANALYSIS (your private notes — verify against tools/corpus, do not treat as fact):\n${notes}`;
           }
           const messages = [
@@ -4534,7 +4750,7 @@ export default {
           dbg('prompt', 'sys=' + sysPrompt.length + 'ch · msgs=' + messages.length + ' · ' + (Date.now() - t0) + 'ms prep');
 
           // Stream
-          const stream = await env.AI.run(MODEL, { messages, stream: true, max_tokens: 1024, temperature: temp });
+          const stream = await runtimeEnv.AI.run(MODEL, { messages, stream: true, max_tokens: 1024, temperature: temp });
           const reader = stream.getReader();
           const dec = new TextDecoder();
           let buf = '', full = '';
