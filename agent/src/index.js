@@ -3398,7 +3398,8 @@ function detectOsint(q, prev){
   var persons=uniq(text.match(/\\b[A-Z][a-z'\\-]{1,}\\s+[A-Z][a-z'\\-]{1,}(?:\\s+[A-Z][a-z'\\-]{1,})?\\b/g)||[]);
   var pnm=low.match(/(?:look into|look up|investigate|osint(?: on)?|profile(?: of)?|recon|stalk|dig into|background on|person(?: named| called)?|named|called|info on|intel on|dossier on|about|who is|who's|search for)\\s+(?:the\\s+person\\s+|the\\s+|a\\s+|an\\s+)?([a-z][a-z'\\-]+(?:\\s+[a-z][a-z'\\-]+){1,2})/);
   if(pnm){ var cnm=pnm[1].trim(); if(!/\\b(the|this|that|dark|web|domain|website|site|email|address|ip|hash|sample|malware|exploit|onion|tor|breach|leak|leaked|exposure|company|server|forum|page|guy|persons?|people|profile|account|target|username|handle|everything|anything|info|information|details|more|whatever)\\b/.test(cnm)) persons.push(cnm.replace(/\\b[a-z]/g,function(ch){ return ch.toUpperCase(); })); }
-  persons=uniq(persons.filter(function(p){ return !/^(the|a|an|agent|osint|hello|hi|hey|dear|mr|ms|dr|new|good)\\b/i.test(p); }));
+  persons=uniq(persons.filter(function(p){ return !/^(the|a|an|on|of|for|about|to|in|at|by|do|run|agent|osint|recon|investigate|enumerate|scan|check|hello|hi|hey|dear|mr|ms|dr|new|good)\\b/i.test(p); }));
+  persons=persons.filter(function(p){ return !/^(on|of|for|about|to|in|at|by|the|a|an|do|run|get|my|your)\s/i.test(p.toLowerCase()); });
   // Handle only via an EXPLICIT command verb ('osint X', 'recon bob123', 'enumerate user42') —
   // never by grabbing the last word of any sentence that merely mentions a topic word.
   if(!handles.length && !emails.length){
@@ -3409,10 +3410,11 @@ function detectOsint(q, prev){
   handles=handles.filter(function(h){ return !COMMON.test(h); });
   persons=persons.filter(function(p){ return !COMMON.test(p.toLowerCase()) && !COMMON.test(p.toLowerCase().split(' ')[0]); });
   var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
+  var metaAsk=/\\b(corpus|blog|posts?|articles?|knowledge base|dataset|your (data|info|knowledge|tools?|capabilit)|what (can|do) you|how (do|does) (you|this|it)|what is this|what else|tell me about (the|your)|inside)\\b/.test(low);
   var refPrev=/\\b(it|its|that|this|him|her|them|he|she|his|hers|their|theirs|this (guy|man|woman|person|individual|account|user)|that (guy|man|woman|person)|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo|person|individual|guy))\\b/i.test(low);
   var entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length+persons.length;
   var soloEntity=(entityCount===1)&&(text.split(/\\s+/).length<=2);
-  if(entityCount===0 && prev && (hasTrigger||refPrev||personHint)){
+  if(entityCount===0 && prev && (hasTrigger||refPrev||personHint) && !metaAsk){
     emails=(prev.emails||[]).slice(); ips=(prev.ips||[]).slice(); domains=(prev.domains||[]).slice(); handles=(prev.handles||[]).slice(); cves=(prev.cves||[]).slice(); images=(prev.images||[]).slice(); crypto=(prev.crypto||[]).slice(); onions=(prev.onions||[]).slice(); hashes=(prev.hashes||[]).slice(); persons=(prev.persons||[]).slice();
     entityCount=emails.length+ips.length+domains.length+handles.length+cves.length+images.length+crypto.length+onions.length+hashes.length+persons.length;
   }
@@ -3426,7 +3428,7 @@ function detectOsint(q, prev){
   else if(persons.length && (personHint || /\\b(look into|look up|background|investigate|profile|who is|find|search for|named|recon|dossier|osint|footprint|dig)\\b/.test(low))) intent='person';
   else if(cves.length && !domains.length && !ips.length && !emails.length && !handles.length) intent='cve';
   var hasIntent=intent!=='full';
-  var actionable=hasTrigger||hasIntent||(refPrev&&!!prev);
+  var actionable=(hasTrigger||hasIntent||(refPrev&&!!prev)) && !metaAsk;
   var strongEntity=(emails.length+handles.length+ips.length+(hashes?hashes.length:0)+(onions?onions.length:0)+(crypto?crypto.length:0)+(images?images.length:0))>0;
   var isOsint=(entityCount>0&&actionable)||soloEntity||(hasTrigger&&personHint)||strongEntity;
   var explicitSweep=/\\b(osint|investigate|reconnaissance|recon|profile|dossier|footprint|background|everything|full (report|sweep|scan)|deep dive)\\b/.test(low);
