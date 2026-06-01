@@ -21,6 +21,7 @@
  */
 
 const MODEL        = '@cf/meta/llama-3.1-8b-instruct';
+const BUILD_VERSION = '2026-05-31-r1';  // bump per deploy; shown in header + /api/tools/catalog
 const EMBED_MODEL   = '@cf/baai/bge-base-en-v1.5'; // 768-dim
 const EMBED_DIM     = 768;
 
@@ -3182,7 +3183,7 @@ async function init(){
   try{
     var d=await (await fetch('/api/status')).json();
     modeline.textContent='llama-3.1-8b · '+(d.retrieval||'?')+' RAG · memory on · NVD/EPSS/KEV · RDAP/DNS/CT/Shodan · web'+(d.ctfSafeMode?' · CTF safe':'');
-    stat.textContent=ts()+' · corpus: '+d.docCount+' posts / '+(d.chunkCount||0)+' chunks · '+(d.totalChars||0).toLocaleString()+' chars'+(d.memory?' · KV sync':'')+(d.ctfSafeMode?' · CTF safe-mode':'');
+    stat.textContent=ts()+' · corpus: '+d.docCount+' posts / '+(d.chunkCount||0)+' chunks · '+(d.totalChars||0).toLocaleString()+' chars'+(d.memory?' · KV sync':'')+(d.ctfSafeMode?' · CTF safe-mode':'')+(d.version?' · build '+d.version:'');
     if(d.docCount===0) stat.textContent+=' · WARNING corpus empty';
   }catch(e){ stat.textContent='status unavailable — '+e.message; }
 }
@@ -3911,6 +3912,7 @@ export default {
           toolAllowlistCount: policy.toolAllowlist.size,
           targetAllowlistCount: policy.targetAllowlist.size,
           customToolCount: parseCustomTools(env).length,
+          version:    BUILD_VERSION,
         });
       } catch (e) { return json({ ok: false, error: e.message }, 500); }
     }
