@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-06-01T08:01:27Z
+GENERATED    : 2026-06-01T09:29:06Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 24
+TOTAL POSTS  : 25
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,88 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
+DATE       : 2026-06-01
+URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
+CVE        : cve-2026-0257, CVE-2026-0257
+CATEGORIES : exploits, network-security
+TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
+WORD_COUNT : 1255
+EXCERPT    : A reused TLS certificate turns GlobalProtect's session cookie into a skeleton key, and somebody has been walking through the front door since May 17.
+</FRONTMATTER>
+<BODY>
+I spend most of my time on kernel bugs. Page cache writes, skb coalescing, the slow grind of memory corruption. So when a vulnerability shows up that is basically "the server decrypts a cookie and then just believes whatever falls out," I pay attention. CVE-2026-0257 is exactly that. It is an authentication bypass in Palo Alto's GlobalProtect, the VPN portal and gateway that sits on the edge of a huge number of enterprise networks, and the root cause is so plain it almost feels rude.
+
+Here is the part that gets me. Palo Alto scored this medium. CVSSv4 medium, AV:N, the works. Then they quietly raised the severity after the attacks started, which tells you everything about how the original number aged. An unauthenticated bypass on an internet-facing VPN concentrator is not a medium. It is a key to the building. Rapid7 said it plainly, treat it as critical, and CISA agreed enough to drop it into the KEV catalog on May 29 with a remediation deadline of June 1. That deadline is today.
+
+## The bug
+
+GlobalProtect has an optional feature called authentication override. When it is on, the portal or gateway hands an authenticated user an encrypted cookie. On later requests the client presents that cookie instead of credentials, like a bearer token. Fine in principle. Plenty of systems do this.
+
+The implementation is where it falls apart. Rapid7 Labs pulled apart the `gpsvc` binary on a PAN-OS 10.2.8 box and walked the path. A POST to `/ssl-vpn/login.esp` carrying a `portal-userauthcookie` or `portal-prelogonuserauthcookie` form value routes into `main_AuthWithCookie`, which calls `main_DecryptAppAuthCookie`. That function base64 decodes the cookie, decrypts it with the configured private key, and pulls out the username, domain, host id, client OS, remote address, and a timestamp.
+
+```c
+error main_DecryptAppAuthCookie(... string privateCert, string *user, ...) {
+  if ( privateCert.len ) {
+    *(...) = paloaltonetworks_com_libs_common_DecryptRsaPrivateWithBase64Std(
+               privateCert, (string)0LL, authCookie);
+    // decrypted fields are trusted from here on. no MAC. no signature.
+  }
+}
+```
+
+Read that again. After the RSA decryption, the plaintext is trusted as-is. There is no signature check, no MAC, nothing that proves the server is the thing that minted this cookie. The whole security model rests on a single assumption: that only the server knows the key needed to produce a cookie that decrypts cleanly.
+
+RSA breaks that assumption in the most boring way possible. You encrypt with the public key and decrypt with the private key. The server decrypts incoming cookies with its private key, so a valid cookie is just a blob someone encrypted with the matching public key. Public keys are, by design, public. So the real question is not "how do I forge a cookie." It is "how do I learn which public key this box uses for auth override cookies."
+
+And that is the second half of the bug. Palo Alto's own hardening guidance says do not reuse the portal or gateway certificate for the auth override feature, and do not share it with other services. When an operator ignores that, when the same certificate that encrypts auth cookies is also bound to the HTTPS service, the public key is sitting right there in the TLS handshake. You connect, you read the cert chain, you extract the public key, you encrypt a cookie that says you are `admin`, and the gateway waves you through.
+
+## The PoC
+
+Stephen Fewer at Rapid7 published a tester, `sfewer-r7/CVE-2026-0257`, and the logic is about as simple as the bug. Pull every certificate in the HTTPS chain, forge an auth override cookie against each one's public key, and see which the gateway accepts.
+
+```
+$ python3 forge_cookie.py --target 192.168.86.99 --user haxor
+[*] Retrieving certificate chain from 192.168.86.99:443 ...
+  Found 2 certificate(s) in chain:
+  [0] CN=192.168.86.99 (RSA 2048 bits, CA=False)
+  [1] CN=GP-Lab-CA (RSA 2048 bits, CA=True)
+
+[*] Forging cookie for user 'haxor', testing each key
+  Trying [0] CN=192.168.86.99
+  [-] Failure - Gateway did not accepted the forged cookie
+  Trying [1] CN=GP-Lab-CA
+  [+] Success - Gateway accepted the forged cookie
+```
+
+Notice it was the CA cert in the chain, not the leaf, that did the job here. The script just tries them all, which is what you would do too. No race, no heap grooming, no timing window. The bug is deterministic. Either the box reused the cert and you win on the first run, or it did not and you move on.
+
+## Somebody is already doing this
+
+This is not theoretical and it is not a researcher flexing on a lab box. Rapid7 MDR caught real exploitation across multiple customers, earliest hit May 17. The tell was a cookie authentication to the local `admin` account from a non-human client, all coming from the same Vultr ranges.
+
+```
+GLOBALPROTECT,...,gateway-auth,login,Cookie,,admin,US,GP-CLIENT,104.207.144.154,...,aa:bb:cc:dd:ee:ff,...,Linux,"linux-64",...,success
+```
+
+A second wave landed May 21 from Dromatics Systems infrastructure. Same spoofed MAC, `aa:bb:cc:dd:ee:ff`, across both waves, so Rapid7 reads it as one actor. In the second wave the gateway actually assigned VPN IPs after the forged cookie auth, which means the attacker got a tunnel into the internal network with the access level of any authenticated remote employee. Rapid7 did not see lateral movement after that, but a working tunnel into the soft interior of a corporate network is not a place you want an unknown party sitting.
+
+## What to do about it
+
+Patch. That is the real fix and the version matrix is specific. On 10.2 you want 10.2.7-h34, 10.2.10-h36, 10.2.13-h21, 10.2.16-h7, or 10.2.18-h6 depending on your train. On 11.1, 11.1.4-h33 through 11.1.15. On 11.2, 11.2.4-h17 through 11.2.12. On 12.1, 12.1.4-h6 or 12.1.7. Prisma Access 10.2.0 wants 10.2.10-h36 and 11.2.0 wants 11.2.7-h13. Check your exact branch against the Palo Alto advisory before you pull the trigger, because the hotfix letters matter.
+
+If you cannot patch in the next few hours, kill the conditions instead. Disable the authentication override feature outright if you do not depend on it. If you do depend on it, generate a fresh certificate used only for auth override and stop sharing the HTTPS cert with it. That single change removes the attacker's path to your public key and the forgery falls apart.
+
+Then go hunt. Audit GlobalProtect gateway logs for cookie authentications to the local `admin` account, for the spoofed MAC `aa:bb:cc:dd:ee:ff`, and for sessions sourced from `104.207.144.154`, `146.19.216.119`, `146.19.216.120`, and `146.19.216.125`. The machine names `GP-CLIENT` and `DESKTOP-GP01` showed up alongside the forged logins. If any of that is in your logs, assume the cookie was real to the gateway and treat the resulting VPN session as a live intrusion, not a false positive.
+
+The lesson here is older than RSA. Encryption is not authentication. If you decrypt a blob and trust the contents without verifying who produced it, you have not built a session token. You have built a lock that opens for anyone holding the public key, and the public key was never a secret to begin with.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -154,12 +236,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -244,12 +326,12 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : cve-2026-34926, CVE-2026-34926
+CVE        : CVE-2026-34926, cve-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -309,12 +391,12 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : CVE-2026-46300, cve-2026-46300
+CVE        : cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -419,7 +501,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -531,7 +613,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -601,7 +683,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -778,7 +860,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -872,7 +954,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -1035,7 +1117,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -1193,7 +1275,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -1327,7 +1409,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -1549,7 +1631,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -1677,7 +1759,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -1884,7 +1966,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -1998,7 +2080,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -2182,12 +2264,12 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
+CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -2338,7 +2420,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -2491,7 +2573,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -2591,12 +2673,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : cve-2026-42945, CVE-2026-42945
+CVE        : CVE-2026-42945, cve-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -2742,7 +2824,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
@@ -2950,12 +3032,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -3065,12 +3147,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -3162,7 +3244,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -3309,5 +3391,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 24 documents — 2026-06-01T08:01:27Z
+END OF CORPUS — 25 documents — 2026-06-01T09:29:06Z
 ================================================================================
