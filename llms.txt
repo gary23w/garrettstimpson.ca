@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-06-02T07:50:40Z
+GENERATED    : 2026-06-02T09:24:16Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 27
+TOTAL POSTS  : 28
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,70 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
+DATE       : 2026-06-02
+URL        : https://garrettstimpson.ca/posts/2026/06/02/yellowkey-cve-2026-45585-bitlocker-winre-txf-bypass/
+CVE        : cve-2026-45585, CVE-2026-45585
+CATEGORIES : exploits, windows
+TAGS       : cve-2026-45585, bitlocker, winre, transactional-ntfs, physical-access
+WORD_COUNT : 1166
+EXCERPT    : A crafted FsTx directory on a USB drive makes Windows Recovery Environment delete winpeshl.ini on a different volume, dropping you to cmd.exe with the BitLocker volume already unlocked. TPM-only or TPM plus PIN, it does not matter.
+</FRONTMATTER>
+<BODY>
+Here is what gets me about YellowKey. We have spent years telling people that BitLocker plus a TPM is good enough for a laptop, that the encryption key never leaves the chip, that an attacker who grabs your machine at a coffee shop gets a brick. And then a researcher who signs their work "Chaotic Eclipse" drops a proof of concept that says: plug in this USB stick, reboot, hold CTRL, and you are sitting at a command prompt looking at the decrypted C: drive. No PIN prompt. No password. The TPM happily handed the key over because from its point of view nothing was wrong.
+
+CVE-2026-45585. CVSS 6.8, which feels low until you remember that the "physical access required" caveat is exactly the threat model BitLocker exists to defend against. A stolen laptop. A border crossing. An evil maid with ten minutes and a hotel keycard. That is the whole point of full disk encryption, and this bug walks right through it.
+
+## The part of WinRE nobody documented
+
+The vulnerable code lives in the Windows Recovery Environment. WinRE is the little WinPE-based rescue OS that boots when your machine cannot, the thing that shows you "Automatic Repair" and the reset options. It runs from a separate image, usually `X:`, while your real Windows install sits on `C:`. And critically, by the time WinRE is running, the BitLocker volume has already been unlocked, because WinRE needs to read and repair it.
+
+During WinRE startup, a utility called `autofstx.exe` runs. It is registered in the Session Manager `BootExecute` value, so it fires automatically before anything interactive happens. Its job is to replay Transactional NTFS metadata, the journaling layer NTFS uses so that a half-finished file operation can be rolled back or completed cleanly after a crash. That metadata lives in a hidden directory called `\System Volume Information\FsTx` on each volume.
+
+Nobody wrote this down anywhere. The FsTx replay path inside WinRE does not appear in Microsoft docs, it is not in the usual NTFS internals references, and as far as I can tell no public security research had touched it before this. It was just sitting there, running as the most privileged thing on the machine at the most sensitive moment of boot.
+
+## Crossing the volume boundary
+
+The trick, and the reason Will Dormann called this the real story when he reproduced it, is that the transaction replay does not stay on its own volume. You craft FsTx metadata on a USB drive. You boot into WinRE. `autofstx.exe` reads the transaction log off the attacker volume and replays it. And the replayed transaction reaches across and modifies a file on `X:`.
+
+The file it deletes is `X:\Windows\System32\winpeshl.ini`. That file tells WinRE what shell to launch. Remove it, and WinRE falls back to the oldest behavior it knows: spawn `cmd.exe`. So instead of the recovery menu you get a SYSTEM command prompt inside the recovery environment, with the real BitLocker-protected volume mounted and decrypted right there. From the encryption's perspective everything is legitimate. WinRE is trusted, WinRE asked for the key, the TPM sealed measurements matched, the volume unlocked. The fact that a USB stick rewrote the recovery shell out from under it never enters the calculation.
+
+A rough sketch of the chain:
+
+```
+1. Prepare a USB volume with crafted \System Volume Information\FsTx metadata
+   (a TxF transaction whose target resolves to X:\Windows\System32\winpeshl.ini)
+2. Plug it into the locked, powered-off target. BitLocker on, TPM-only.
+3. Boot into WinRE (Shift+Restart, or interrupt boot twice, or the EFI path).
+4. autofstx.exe runs from BootExecute, replays the transaction log,
+   deletes winpeshl.ini on X:.
+5. With no shell config, WinRE drops to cmd.exe as SYSTEM.
+6. The OS volume is already unlocked. Hold CTRL during the transition to
+   keep the prompt. Read, copy, or backdoor C: at will.
+```
+
+That CTRL-hold detail is what the researcher described as making the whole thing feel like a backdoor rather than a bug. And here is the line that should bother you most: TPM plus PIN does not save you. The researcher tested it. The PIN gates the normal boot path, but the WinRE path and its FsTx replay happen inside the trusted boundary, so the extra factor never gets a chance to matter.
+
+## Why this one is different
+
+Most BitLocker bypasses I have read are downgrade attacks or sniffing attacks. Intrinsec's recent BitUnlocker work, for instance, abuses a signed-but-old `bootmgfw.efi` and the fact that Secure Boot checks the certificate and not the version. TPM bus sniffing physically taps the LPC or SPI lines to grab the key in transit. Those are real, but they need either a vulnerable signed binary still trusted by Secure Boot or a logic analyzer and steady hands.
+
+YellowKey needs a USB stick and the ability to reboot. That is it. No soldering, no oscilloscope, no hunting for an unrevoked old boot manager. It is a logic flaw in undocumented recovery code, deterministic, and it works on a default Windows 11 consumer install because Windows 11 turns on BitLocker in TPM-only mode out of the box. Most people with an encrypted Windows 11 laptop have no idea they are running exactly the configuration this targets.
+
+## What to actually do
+
+Microsoft has not shipped a real code fix as of this writing. What they pushed is a mitigation, and you can apply the same thing yourself right now. The fix is to stop `autofstx.exe` from running automatically during WinRE boot by pulling it out of the `BootExecute` list in the recovery image. From an elevated prompt you can mount the WinRE image and edit the Session Manager key so the `autofstx.exe` entry is gone from the `BootExecute` `REG_MULTI_SZ`. No `autofstx.exe`, no transaction replay, no `winpeshl.ini` deletion, no shell.
+
+Beyond that, the durable answer is the one BitLocker always had for physical-access threats and that people keep skipping because it is mildly annoying: set a pre-boot PIN, yes, but more importantly disable the boot-to-WinRE paths an attacker can reach without authenticating, and treat the recovery environment as part of your attack surface rather than a safety net. If you manage a fleet, audit your WinRE images and confirm the mitigation actually landed in them, because a reimaged or older recovery partition will happily reintroduce the vulnerable `autofstx.exe`. And for the genuinely sensitive machines, TPM plus PIN with WinRE disabled entirely is the configuration that closes this, since the bug lives in the recovery environment you just removed.
+
+The thing I keep coming back to is how long this sat there. A whole privileged code path in the recovery environment, replaying transactions across volume boundaries, and it took someone with a grudge against Microsoft's disclosure process to go look at it. Makes you wonder what else is in WinRE that nobody has read.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -111,12 +175,12 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : cve-2026-20817, CVE-2026-20817
+CVE        : CVE-2026-20817, cve-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1052
@@ -184,12 +248,12 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
-CVE        : CVE-2026-0257, cve-2026-0257
+CVE        : cve-2026-0257, CVE-2026-0257
 CATEGORIES : exploits, network-security
 TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
 WORD_COUNT : 1255
@@ -266,7 +330,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -405,7 +469,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
@@ -495,7 +559,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
@@ -560,7 +624,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
@@ -670,7 +734,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -782,7 +846,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -852,7 +916,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -1029,7 +1093,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -1123,7 +1187,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -1286,7 +1350,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -1444,7 +1508,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -1578,7 +1642,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -1800,7 +1864,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -1928,7 +1992,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -2135,12 +2199,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -2249,7 +2313,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -2433,7 +2497,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -2589,7 +2653,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -2742,12 +2806,12 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : cve-2026-46333, CVE-2026-46333
+CVE        : CVE-2026-46333, cve-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -2842,12 +2906,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : cve-2026-42945, CVE-2026-42945
+CVE        : CVE-2026-42945, cve-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -2993,12 +3057,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -3201,12 +3265,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -3316,7 +3380,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
@@ -3413,7 +3477,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -3560,5 +3624,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 27 documents — 2026-06-02T07:50:40Z
+END OF CORPUS — 28 documents — 2026-06-02T09:24:16Z
 ================================================================================
