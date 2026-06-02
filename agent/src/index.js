@@ -214,6 +214,123 @@ async function getChunks(env) {
   return chunks;
 }
 
+function cleanOneLine(s) {
+  return String(s || '').replace(/\s+/g, ' ').trim();
+}
+
+function inferDocDate(doc) {
+  const fm = String(doc?.frontmatter || '');
+  const byFm = (fm.match(/(?:^|\n)\s*(?:DATE|PUBLISHED|PUBLISHED_AT)\s*:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/i) || [])[1];
+  if (byFm) return byFm;
+  const u = String(doc?.url || '');
+  const byUrlA = u.match(/\/(20\d{2})\/(\d{2})\/(\d{2})\//);
+  if (byUrlA) return `${byUrlA[1]}-${byUrlA[2]}-${byUrlA[3]}`;
+  const byUrlB = u.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if (byUrlB) return `${byUrlB[1]}-${byUrlB[2]}-${byUrlB[3]}`;
+  return '';
+}
+
+function buildCorpusIndex(docs) {
+  const rows = (docs || []).map(d => ({
+    title: cleanOneLine(d.title),
+    url: String(d.url || '').trim(),
+    date: inferDocDate(d),
+    cves: cleanOneLine(d.cves || ''),
+    tags: cleanOneLine(d.tags || ''),
+    snippet: cleanOneLine((d.body || '').slice(0, 220)),
+  })).filter(r => r.title || r.url);
+  rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.title.localeCompare(b.title));
+  const byDate = {};
+  for (const r of rows) {
+    const k = r.date || 'unknown';
+    if (!byDate[k]) byDate[k] = [];
+    if (byDate[k].length < 8) byDate[k].push({ title: r.title, url: r.url, cves: r.cves });
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    docCount: rows.length,
+    datedCount: rows.filter(r => !!r.date).length,
+    latestDate: rows.find(r => r.date)?.date || '',
+    recent: rows.slice(0, 40),
+    byDate,
+  };
+}
+
+async function getCorpusIndex(env) {
+  const cache = caches.default;
+  const key = new Request('https://corpus-cache/index-v1');
+  const cached = await cache.match(key);
+  if (cached) { try { return JSON.parse(await cached.text()); } catch {} }
+  const docs = parseCorpus(await fetchCorpusRaw(env));
+  const idx = buildCorpusIndex(docs);
+  await cache.put(key, new Response(JSON.stringify(idx), {
+    headers: { 'Cache-Control': `max-age=${CORPUS_TTL}`, 'Content-Type': 'application/json' },
+  }));
+  return idx;
+}
+
+function fmtIsoDay(d) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const da = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${da}`;
+}
+
+function corpusIntentDirectAnswer(query, idx, now = new Date()) {
+  const q = String(query || '').toLowerCase();
+  if (!isCorpusIntent(q)) return null;
+  const recent = Array.isArray(idx?.recent) ? idx.recent : [];
+  if (!recent.length) return 'I could not read corpus entries right now.';
+
+  const today = fmtIsoDay(now);
+  const asksMostRecent = /\b(most recent|latest|newest)\s+(post|article|entry)\b/.test(q);
+  const asksToday = /\b(today|june\s*2(nd)?|2026-06-02)\b/.test(q) && /\b(corpus|blog|post|inside|going on|happening|came out|published|released)\b/.test(q);
+  const asksWhen = /\b(what day|when)\b.*\b(come out|published|released|posted)\b/.test(q);
+
+  if (asksMostRecent) {
+    const p = recent[0];
+    return [
+      '## Most Recent Post',
+      `- Title: ${p.title || 'UNKNOWN'}`,
+      `- Date: ${p.date || 'UNKNOWN'}`,
+      `- URL: ${p.url || 'UNKNOWN'}`,
+      p.cves ? `- CVE: ${p.cves}` : '',
+    ].filter(Boolean).join('\n');
+  }
+
+  if (asksToday) {
+    const todays = recent.filter(r => r.date === today).slice(0, 8);
+    if (todays.length) {
+      return [
+        `## Corpus Activity For ${today}`,
+        ...todays.map((p, i) => `${i + 1}. ${p.title} (${p.url})`),
+      ].join('\n');
+    }
+    const latest = recent[0];
+    return [
+      `## Corpus Activity For ${today}`,
+      '- No post with a publish date matching today was found in the indexed corpus.',
+      `- Latest indexed post: ${latest.title} (${latest.date || 'UNKNOWN'})`,
+      `- URL: ${latest.url || 'UNKNOWN'}`,
+    ].join('\n');
+  }
+
+  if (asksWhen) {
+    const p = recent[0];
+    return `The latest indexed post is dated ${p.date || 'UNKNOWN'} (${p.title || 'UNKNOWN'}).`;
+  }
+
+  const head = recent.slice(0, 5).map((p, i) => `${i + 1}. ${p.date || 'UNKNOWN'} - ${p.title} (${p.url})`);
+  return [
+    '## Corpus Snapshot',
+    `- Indexed docs: ${idx.docCount || recent.length}`,
+    `- Dated docs: ${idx.datedCount || recent.filter(x => x.date).length}`,
+    `- Latest date in corpus: ${idx.latestDate || 'UNKNOWN'}`,
+    '### Recent Posts',
+    ...head,
+  ].join('\n');
+}
+
 // ── Session memory (KV) ─────────────────────────────────────────────────────────
 
 async function loadSession(env, id) {
@@ -262,7 +379,7 @@ async function summariseSession(env, sess) {
 const SEARCH_TRIGGERS = [
   'latest', 'recent', 'new ', 'current', 'today', 'this week',
   'in the wild', 'active exploit', 'patch', 'advisory', 'poc', 'proof of concept',
-  'github', 'shodan', 'search', 'find', 'look up', 'cve-',
+  'github', 'shodan', 'cve-',
 ];
 
 function analyseQuery(query) {
@@ -282,8 +399,147 @@ function analyseQuery(query) {
     .filter(d => !BAD.test(d))
     .filter(d => d !== 'garrettstimpson.ca' && !d.endsWith('.garrettstimpson.ca'))
     .slice(0, 2);
-  const wantSearch = SEARCH_TRIGGERS.some(t => q.includes(t)) || cveIds.length > 0 || domains.length > 0;
+  const wantSearch = SEARCH_TRIGGERS.some(t => q.includes(t));
   return { cveIds, ips, domains, wantSearch };
+}
+
+function isCorpusIntent(query) {
+  const q = String(query || '').toLowerCase();
+  if (!q.trim()) return false;
+  const corpusHint = /\b(corpus|llms\.txt|pre\s*loaded|preloaded|inside\s+the\s+blog|inside\s+garrettstimpson\.ca|what\s+is\s+happening\s+(today|now)|what'?s\s+going\s+on\s+(today|now)|summari[sz]e\s+(the\s+)?blog|latest\s+on\s+(the\s+)?blog|check\s+the\s+blog|check\s+the\s+corpus)\b/i.test(q);
+  const localScope = /\b(garrettstimpson\.ca|my\s+blog|the\s+blog|this\s+blog|site\s+posts?|research\s+posts?)\b/i.test(q);
+  return corpusHint || (localScope && /\b(check|summari[sz]e|what|show|latest|today|now|happening|going\s+on)\b/i.test(q));
+}
+
+function hasActionableArtifact(query) {
+  const q = String(query || '');
+  const re = [
+    /\bCVE-\d{4}-\d+\b/i,
+    /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
+    /\bhttps?:\/\/[^\s]+/i,
+    /\b[a-f0-9]{32}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{64}\b/i,
+    /\b[a-z2-7]{16}\.onion\b|\b[a-z2-7]{56}\.onion\b/i,
+    /\b(?:bc1[a-z0-9]{20,}|0x[a-fA-F0-9]{40}|[13][a-km-zA-HJ-NP-Z1-9]{25,39})\b/,
+    /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/,
+    /\b(?:[a-z0-9\-]+\.)+[a-z]{2,24}\b/i,
+    /(?:^|\s)@[A-Za-z0-9_]{2,30}\b/,
+  ];
+  return re.some(r => r.test(q));
+}
+
+function shouldUseWebSearch(query, opts = {}) {
+  const q = String(query || '').toLowerCase();
+  const corpusIntent = !!opts.corpusIntent;
+  if (!q.trim()) return { use: false, reason: 'empty-query' };
+  if (corpusIntent) return { use: false, reason: 'corpus-intent' };
+  if (/\b(do not|don'?t|without)\s+(search|google|web|internet)\b/.test(q)) return { use: false, reason: 'explicit-no-web' };
+
+  const explicitWeb = /\b(search (the )?web|web search|google (it|this|that)?|look (it )?up online|online sources?|news search|search online)\b/.test(q);
+  const freshness = /\b(latest|recent|today|this week|current|breaking|in the wild|newly disclosed)\b/.test(q);
+  const threatCtx = /\b(cve-|exploit|advisory|poc|patch|kev|epss|nvd|vendor bulletin|ioc|campaign)\b/.test(q);
+  const externalPlatform = /\b(github|shodan|reddit|x\.com|twitter|hackernews|news|blog post)\b/.test(q);
+
+  if (explicitWeb) return { use: true, reason: 'explicit-web-request' };
+  if (freshness && threatCtx) return { use: true, reason: 'fresh-threat-intel' };
+  if (externalPlatform && /\b(find|lookup|look up|search)\b/.test(q)) return { use: true, reason: 'external-platform-lookup' };
+  return { use: false, reason: 'local-corpus-first' };
+}
+
+function shouldEnableAiToolRouting(query, opts = {}) {
+  const q = String(query || '').toLowerCase();
+  const corpusIntent = !!opts.corpusIntent;
+  if (!q.trim()) return { use: false, reason: 'empty-query' };
+  if (corpusIntent) return { use: false, reason: 'corpus-intent' };
+
+  const explicitToolIntent = /\b(run|use|check|scan|lookup|look up|investigate|analyze|analyse|recon|osint|enumerate|crawl|fingerprint|pivot)\b/.test(q);
+  const artifact = hasActionableArtifact(q);
+  if (explicitToolIntent && artifact) return { use: true, reason: 'explicit-tool-intent+artifact' };
+  if (artifact && /\b(is|was|does|has|who|where|when|reputation|breach|exposed|phish|tor exit|cvss|kev|epss)\b/.test(q)) return { use: true, reason: 'artifact-question' };
+  return { use: false, reason: 'no-actionable-tool-route' };
+}
+
+function extractToolTargets(query) {
+  const text = String(query || '');
+  const uniq = a => [...new Set(a || [])];
+  const cveIds = uniq((text.match(/CVE-\d{4}-\d+/gi) || []).map(x => x.toUpperCase()));
+  const ips = uniq((text.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || []).filter(ip => ip.split('.').every(o => +o >= 0 && +o <= 255)));
+  const urls = uniq(text.match(/https?:\/\/[^\s)]+/gi) || []);
+  const emails = uniq(text.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || []);
+  const hashes = uniq((text.match(/\b[a-f0-9]{32}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{64}\b/ig) || []).map(x => x.toLowerCase()));
+  const onions = uniq((text.match(/\b[a-z2-7]{16}\.onion\b|\b[a-z2-7]{56}\.onion\b/ig) || []).map(x => x.toLowerCase()));
+  const crypto = uniq(text.match(/\b(?:bc1[a-z0-9]{20,62}|0x[a-fA-F0-9]{40}|[13][a-km-zA-HJ-NP-Z1-9]{25,39})\b/g) || []);
+  const handles = uniq((text.match(/(?:^|\s)@([A-Za-z0-9_]{2,30})/g) || []).map(s => s.trim().replace(/^@/, '')));
+  const domSet = new Set();
+  urls.forEach(u => { try { domSet.add(new URL(u).hostname.toLowerCase()); } catch (_) {} });
+  (text.match(/\b(?:[a-z0-9\-]+\.)+[a-z]{2,24}\b/gi) || []).forEach(d => domSet.add(d.toLowerCase()));
+  const BAD = /\.(md|txt|js|json|png|jpe?g|gif|svg|webp|exe|dll|so|sh|py|c|go|rs|html?|css|yml|yaml|toml|pdf|zip)$/i;
+  const domains = [...domSet]
+    .filter(d => !/^\d+\.\d+\.\d+\.\d+$/.test(d))
+    .filter(d => !BAD.test(d))
+    .filter(d => d !== 'garrettstimpson.ca' && !d.endsWith('.garrettstimpson.ca'));
+  return { cveIds, ips, domains, urls, emails, hashes, onions, crypto, handles };
+}
+
+function buildToolRoutePolicy(query, opts = {}) {
+  const q = String(query || '').toLowerCase();
+  const corpusIntent = !!opts.corpusIntent;
+  const darkwebEnabled = opts.darkwebEnabled !== false;
+  const targets = extractToolTargets(query);
+  const explicitToolIntent = /\b(run|use|check|scan|lookup|look up|investigate|analy[sz]e|recon|osint|enumerate|crawl|fingerprint|pivot)\b/.test(q);
+  const artifact = hasActionableArtifact(q);
+  const classes = [];
+  const allowed = new Set();
+  const allow = arr => arr.forEach(t => allowed.add(t));
+
+  if (targets.cveIds.length) {
+    classes.push('cve');
+    allow(['nvd_lookup', 'epss_lookup', 'kev_lookup', 'circl_cve', 'cve_poc', 'kev_recent', 'mitre']);
+  }
+  if (targets.ips.length) {
+    classes.push('ip');
+    allow(['rdap_ip', 'reverse_dns', 'ip_geo', 'asn_info', 'greynoise', 'tor_exit', 'shodan_internetdb']);
+  }
+  if (targets.domains.length || targets.urls.length) {
+    classes.push('domain_url');
+    allow(['rdap_domain', 'dns_lookup', 'dns_records', 'cert_ct', 'wayback', 'urlscan', 'wellknown', 'archive_urls', 'subdomains', 'email_security', 'typosquat', 'origin_ip', 'tech_fingerprint', 'phish_check', 'unshorten', 'fetch_url', 'crawl', 'vuln_scan', 'favicon_hash', 'post_malware_pipeline']);
+  }
+  if (targets.emails.length) {
+    classes.push('email');
+    allow(['email_recon', 'breach_check', 'gravatar', 'holehe', 'exposure_search', 'username_enum']);
+  }
+  if (targets.handles.length) {
+    classes.push('identity');
+    allow(['username_enum', 'github_user', 'keybase', 'devto_user', 'exposure_search', 'stealer_check']);
+  }
+  if (targets.hashes.length) {
+    classes.push('hash');
+    allow(['hash_lookup', 'hash_id']);
+  }
+  if (targets.crypto.length) {
+    classes.push('crypto');
+    allow(['crypto_addr']);
+  }
+  if (targets.onions.length && darkwebEnabled) {
+    classes.push('darkweb');
+    allow(['onion_fetch', 'onion_search']);
+  }
+  if (/\bcvss:[0-9.]+\//i.test(q)) {
+    classes.push('cvss');
+    allow(['cvss']);
+  }
+
+  if (corpusIntent) return { use: false, reason: 'corpus-intent', classes, allowedTools: [], targets };
+  if (!artifact && !explicitToolIntent) return { use: false, reason: 'no-actionable-tool-route', classes, allowedTools: [], targets };
+  if (!allowed.size && explicitToolIntent) {
+    return { use: true, reason: 'explicit-tool-intent', classes: ['generic'], allowedTools: toolCatalog(opts.env || {}).map(t => t.name), targets };
+  }
+  return {
+    use: !!allowed.size,
+    reason: allowed.size ? (explicitToolIntent ? 'typed-artifacts+explicit-intent' : 'typed-artifacts') : 'no-tool-class-match',
+    classes,
+    allowedTools: [...allowed],
+    targets,
+  };
 }
 
 // ── Tools ───────────────────────────────────────────────────────────────────────
@@ -679,6 +935,36 @@ function isPrivateHost(host) {
   return false;
 }
 
+function isLikelyFileOrPath(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (!v) return false;
+  if (/[\\/]/.test(v) || /[?#]/.test(v)) return true;
+  if (v.startsWith('.')) return true;
+  return /\.(txt|md|json|xml|js|css|png|jpe?g|gif|svg|webp|ico|pdf|zip|tar|gz|exe|dll|so|sh|py|go|rs|html?)$/.test(v);
+}
+
+function isPlaceholderIdentity(value) {
+  const v = String(value || '').trim().toLowerCase().replace(/^@/, '');
+  if (!v) return true;
+  if (isLikelyFileOrPath(v)) return true;
+  const placeholders = new Set([
+    'name', 'username', 'user', 'handle', 'account', 'alias', 'person', 'people',
+    'target', 'subject', 'somebody', 'someone', 'anyone', 'anybody', 'everyone',
+    'this', 'that', 'these', 'those', 'it', 'him', 'her', 'them', 'he', 'she',
+    'his', 'hers', 'their', 'theirs', 'me', 'you', 'us',
+    'assets', 'robots', 'robots.txt', 'favicon', 'favicon.ico',
+  ]);
+  return placeholders.has(v);
+}
+
+function formatAiError(err) {
+  const raw = String((err && err.message) || err || 'AI request failed').trim();
+  if (/\b4006\b|daily free allocation|used up .*neurons/i.test(raw)) {
+    return 'Cloudflare Workers AI quota reached (error 4006): the daily free neuron allocation is exhausted. Upgrade to a paid Workers plan or wait for the quota reset.';
+  }
+  return raw || 'AI request failed';
+}
+
 // fetch_url — CTF open mode: any public http(s) host; SSRF guard blocks internal targets.
 async function fetchUrl(url) {
   let u;
@@ -771,6 +1057,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'disclosure_draft', category: 'recon', passive: true, description: 'Find a domain security contact (security.txt/abuse) and DRAFT a responsible-disclosure email (does not send)' },
   { name: 'hash_lookup', category: 'malware', passive: true, description: 'File-hash reputation (Team Cymru MHR keyless; VirusTotal/MalwareBazaar if keys set)' },
   { name: 'file_analyze', category: 'malware', passive: true, description: 'Static triage of a sample URL: type, hashes, strings, IOCs, suspicious API flags' },
+  { name: 'post_malware_pipeline', category: 'malware', passive: true, description: 'Given a post URL: extract sample links/hashes, triage files, pivot hash reputation, and extract IOCs' },
   { name: 'decode', category: 'malware', passive: true, description: 'Recursive multi-layer decode (base64/hex/url/gzip) + refang + IOCs' },
   { name: 'ioc_extract', category: 'malware', passive: true, description: 'Extract + defang all IOCs (IP/domain/URL/email/hash/CVE/crypto) from pasted text' },
   { name: 'cvss', category: 'intel', passive: true, description: 'CVSS v3.1 base-score calculator from a vector string' },
@@ -1048,6 +1335,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'disclosure_draft') return disclosureDraft(env, String(args.target || args.domain || ''));
   if (name === 'hash_lookup')  return hashLookup(env, String(args.hash || args.target || ''));
   if (name === 'file_analyze') return fileAnalyze(String(args.url || args.target || ''));
+  if (name === 'post_malware_pipeline') return postMalwarePipeline(env, String(args.url || args.target || ''));
   if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
   if (name === 'ioc_extract')  return iocExtract(String(args.text || args.input || args.target || ''));
   if (name === 'cvss')         return cvssCalc(String(args.vector || args.target || ''));
@@ -1189,6 +1477,7 @@ async function wellKnown(target) {
 async function usernameEnum(username) {
   const u = String(username || '').trim().replace(/^@/, '');
   if (!u || /[^A-Za-z0-9_.\-]/.test(u)) return 'username_enum: a plain username (letters/digits/_-.) is required.';
+  if (isPlaceholderIdentity(u)) return `username_enum: "${u}" is a placeholder or file-like token, not a real username.`;
   if (/^(him|her|them|it|they|he|she|his|hers|their|theirs|this|that|someone|somebody|anyone|anybody|everyone|person|people|user|target|subject|guy|me|you|us)$/i.test(u)) return `username_enum: "${u}" is a pronoun/placeholder, not a real username — resolve it to the actual handle first.`;
   const sites = [
     { name: 'GitHub',     api: `https://api.github.com/users/${u}`,                           profile: `https://github.com/${u}`,                 test: r => r.ok },
@@ -1220,6 +1509,7 @@ async function usernameEnum(username) {
 async function githubUser(env, username) {
   const u = String(username || '').trim().replace(/^@/, '');
   if (!u) return 'github_user: a username is required.';
+  if (isPlaceholderIdentity(u)) return `github_user: "${u}" is a placeholder or file-like token, not a real username.`;
   const token = String((env && env.GITHUB_TOKEN) || '');
   const headers = { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/vnd.github+json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -1283,6 +1573,7 @@ async function gravatarLookup(email) {
 async function keybaseLookup(u) {
   const v = String(u || '').trim().replace(/^@/, '');
   if (!v || /[^A-Za-z0-9_.\-]/.test(v)) return 'keybase: a username/handle is required.';
+  if (isPlaceholderIdentity(v)) return `keybase: "${v}" is a placeholder or file-like token, not a real username.`;
   async function look(qs) {
     const r = await fetch(`https://keybase.io/_/api/1.0/user/lookup.json?${qs}&fields=proofs_summary,profile,basics,cryptocurrency_addresses,public_keys`,
       { headers: { 'User-Agent': 'garrettstimpson-agent/4.0' }, signal: AbortSignal.timeout(9000) });
@@ -1314,6 +1605,7 @@ async function keybaseLookup(u) {
 async function devtoUser(u) {
   const v = String(u || '').trim().replace(/^@/, '');
   if (!v || /[^A-Za-z0-9_.\-]/.test(v)) return 'devto_user: a username is required.';
+  if (isPlaceholderIdentity(v)) return `devto_user: "${v}" is a placeholder or file-like token, not a real username.`;
   try {
     const r = await fetch(`https://dev.to/api/users/by_username?url=${encodeURIComponent(v)}`,
       { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) });
@@ -2097,6 +2389,80 @@ async function fileAnalyze(url) {
   } catch (e) { return `file_analyze ${u.hostname}: failed (${e.message}).`; }
 }
 
+// MALWARE ANALYSIS: extract candidate sample links/hashes -> triage files -> hash reputation -> IOC extraction.
+async function postMalwarePipeline(env, postUrl) {
+  let u; try { u = new URL(/^https?:\/\//i.test(postUrl) ? postUrl : 'https://' + postUrl); } catch { return 'post_malware_pipeline: provide a valid post URL.'; }
+  if (isPrivateHost(u.hostname)) return `post_malware_pipeline: ${u.hostname} is private/internal — blocked.`;
+
+  const SHORT = /^(bit\.ly|t\.co|tinyurl\.com|rb\.gy|ow\.ly|buff\.ly|is\.gd|cutt\.ly)$/i;
+  const FILE_EXT = /\.(?:exe|dll|sys|msi|scr|js|jse|vbs|vbe|ps1|bat|cmd|jar|apk|iso|img|zip|rar|7z|bin|dat|elf|so|dylib|pdf)(?:$|[?#])/i;
+  const SAMPLE_HINT = /(sample|payload|download|malware|loader|dropper|stealer|ransom|backdoor|artifact|ioc|sha256|sha-256|md5|hash)/i;
+  const likelyFileHost = /(raw\.githubusercontent\.com|github\.com|gitlab\.com|anonfiles|filebin|transfer\.sh|gofile|mega\.nz|dropbox\.com|pastebin\.com)/i;
+
+  try {
+    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; garrettstimpson-agent/4.0)' }, redirect: 'follow', signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return `post_malware_pipeline ${u.hostname}: fetch failed (HTTP ${r.status}).`;
+    const html = await r.text();
+    const plain = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const links = new Set();
+    const re = /(?:href|src)\s*=\s*["']([^"'#]+)["']/gi;
+    let m;
+    while ((m = re.exec(html))) {
+      try { links.add(new URL(m[1], u).toString()); } catch {}
+    }
+    (plain.match(/https?:\/\/[^\s"'<>]{8,}/g) || []).forEach(x => { try { links.add(new URL(x).toString()); } catch {} });
+    const allLinks = [...links];
+
+    // Candidate samples from file extensions, host signals, and context hints.
+    let candidates = allLinks.filter(l => FILE_EXT.test(l) || likelyFileHost.test(new URL(l).hostname));
+    if (!candidates.length && SAMPLE_HINT.test(plain)) {
+      candidates = allLinks.filter(l => /download|raw|release|artifact|sample|payload|ioc|malware/i.test(l));
+    }
+    candidates = [...new Set(candidates)].slice(0, 8);
+
+    // Hashes mentioned directly in the post text.
+    const inlineHashes = [...new Set((plain.match(/\b[a-f0-9]{32}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{64}\b/ig) || []).map(x => x.toLowerCase()))].slice(0, 10);
+
+    const triage = [];
+    const discoveredHashes = new Set(inlineHashes);
+    for (const c of candidates.slice(0, 4)) {
+      let target = c;
+      try { const h = new URL(c).hostname; if (SHORT.test(h)) { const us = await unshorten(c); const lm = us.match(/final destination:\s*(https?:\/\/\S+)/i); if (lm) target = lm[1]; } } catch {}
+      const out = await fileAnalyze(target);
+      triage.push(`### file_analyze ${target}\n${out}`);
+      (String(out).match(/\b[a-f0-9]{32}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{64}\b/ig) || []).forEach(h => discoveredHashes.add(h.toLowerCase()));
+    }
+
+    const rep = [];
+    for (const h of [...discoveredHashes].slice(0, 4)) {
+      rep.push(`### hash_lookup ${h}\n${await hashLookup(env, h)}`);
+    }
+
+    const aggregate = [plain.slice(0, 6000), ...triage, ...rep].join('\n\n');
+    const iocs = iocExtract(aggregate);
+
+    const lines = [];
+    lines.push(`post_malware_pipeline ${u.toString()}`);
+    lines.push(`links discovered: ${allLinks.length}`);
+    lines.push(`candidate sample links: ${candidates.length}`);
+    lines.push(`inline hashes in post: ${inlineHashes.length}`);
+    if (candidates.length) lines.push('candidates:\n' + candidates.slice(0, 8).join('\n'));
+    if (triage.length) lines.push('\n' + triage.join('\n\n'));
+    if (rep.length) lines.push('\n' + rep.join('\n\n'));
+    lines.push('\n### ioc_extract\n' + iocs);
+    lines.push('\nNOTE: this is static, passive triage from public URLs. For deep reverse engineering (deobfuscation, emulation, capa/yara/r2/ghidra), route to a brokered sandbox backend.');
+    return lines.join('\n');
+  } catch (e) {
+    return `post_malware_pipeline ${u.hostname}: failed (${e.message}).`;
+  }
+}
+
 // Recursive multi-layer decoder (CyberChef-style): url / base64 / hex / gzip + refang.
 function gsPrintableRatio(s) {
   if (!s) return 0;
@@ -2233,6 +2599,7 @@ async function unshorten(url) {
 async function exposureSearch(env, selector) {
   const t = String(selector || '').trim();
   if (!t) return 'exposure_search: a selector (email, username, or domain) is required.';
+  if (!/@/.test(t) && isPlaceholderIdentity(t)) return `exposure_search: "${t}" is not a valid selector. Provide a real email, username, or domain.`;
   const isEmail = /@/.test(t);
   const jobs = [
     ['HudsonRock infostealer logs', stealerCheck(t)],
@@ -2270,6 +2637,7 @@ async function exposureSearch(env, selector) {
 async function stealerCheck(target) {
   const t = String(target || '').trim();
   if (!t) return 'stealer_check: an email, username, or domain is required.';
+  if (!/@/.test(t) && t.indexOf('.') < 0 && isPlaceholderIdentity(t)) return `stealer_check: "${t}" is a placeholder, not a concrete username/domain.`;
   let ep;
   if (/@/.test(t)) ep = 'search-by-email?email=';
   else if (t.indexOf('.') > 0 && !/\s/.test(t)) ep = 'search-by-domain?domain=';
@@ -2440,7 +2808,7 @@ async function faviconHash(url) {
 }
 
 // Agentic tool router — the model decides which ONE tool (if any) the request needs.
-async function toolRouter(env, userMsg, already, contextSoFar) {
+async function toolRouter(env, userMsg, already, contextSoFar, allowedTools) {
   // ── Deterministic gate (code, not few-shot examples) ──────────────────────
   // A tool only makes sense when the message contains a concrete ARTIFACT to act on.
   // Detecting that in code is reliable and example-free; it also kills the failure
@@ -2460,6 +2828,7 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
   ];
   const hasArtifact = ARTIFACT.some(re => re.test(msg)) || (contextSoFar ? false : false);
   const low = msg.toLowerCase();
+  if (isCorpusIntent(msg)) return null;
   // Explicit web-search intent is deterministic — no model needed.
   if (/\b(search (the )?web|google (it|this|that)|look (it )?up online|search (online|now)|find more (on|about)|web search)\b/.test(low)) {
     // arg = explicit query if given ('search the web for X'), else the topic in context.
@@ -2471,7 +2840,10 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
   // No artifact in the message and no chain context -> nothing concrete to route. Skip the model.
   if (!hasArtifact && !(contextSoFar && /(hash|sample|\.onion|http|@|CVE-)/i.test(contextSoFar))) return null;
 
-  const menu = toolCatalog(env).map(t => `${t.name}: ${t.description}`).join('\n');
+  const allowed = new Set((allowedTools || []).map(x => String(x).toLowerCase()));
+  const catalog = toolCatalog(env).filter(t => !allowed.size || allowed.has(String(t.name).toLowerCase()));
+  if (!catalog.length) return null;
+  const menu = catalog.map(t => `${t.name}: ${t.description}`).join('\n');
   const sys = [
     'You are the TOOL ROUTER for "Agent Garrett", a DEFENSIVE security / OSINT / malware-analysis agent.',
     'Decide whether ONE tool would materially help answer the user message. Reply with ONLY one line of minified JSON, nothing else:',
@@ -2515,6 +2887,9 @@ async function toolRouter(env, userMsg, already, contextSoFar) {
     const norm = arg.toLowerCase().replace(/[?.!,]+$/, '').replace(/^(the|a|an)\s+/, '');
     if (arg && PRON.has(norm)) return null;
     const tool = String(o.tool).toLowerCase().trim();
+    if (allowed.size && !allowed.has(tool)) return null;
+    const ID_TOOLS = new Set(['username_enum','github_user','keybase','devto_user','stealer_check','leakcheck','exposure_search']);
+    if (arg && ID_TOOLS.has(tool) && isPlaceholderIdentity(arg)) return null;
     // Grounding: for entity tools, the arg must literally appear in the message/context —
     // the model may not invent a target. Pure-compute tools (cvss/decode/encode/...) are exempt.
     const COMPUTE = new Set(['cvss','decode','encode','jwt','cidr','hash_id','timestamp','ioc_extract','cve_search','web_search','people_search','phone_osint']);
@@ -3834,8 +4209,9 @@ function detectOsint(q, prev){
     .filter(function(d){ return !emailDoms[d] && !imgHosts[d]; })
     .filter(function(d){ return !/^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(d); }));
   var handles=uniq((text.match(/(?:^|\\s)@([A-Za-z0-9_]{2,30})/g)||[]).map(function(s){ return s.trim().replace(/^@/,''); }));
-  var um=low.match(/\\b(?:username|handle|user|account|alias)\\s*[:=]?\\s*['"]?([a-z0-9_.\\-]{2,30})/);
-  if(um){ handles.push(um[1]); handles=uniq(handles); }
+  var um=low.match(/\b(?:username|handle|account|alias|user)\b\s*[:=]?\s*['"]?([a-z0-9_.\-]{2,30})\b/);
+  var BADHANDLE=/\.(?:txt|md|json|xml|js|css|png|jpe?g|gif|svg|webp|ico|pdf|zip|tar|gz|exe|dll|so|sh|py|go|rs|html?)$/;
+  if(um && !COMMON.test(um[1]) && !BADHANDLE.test(um[1])){ handles.push(um[1]); handles=uniq(handles); }
   // Generic vocabulary is NEVER an entity/target — stops 'show me malware examples' from
   // running username/stealer/keybase on the literal word 'malware'.
   var COMMON=/^(malware|samples?|virus(es)?|trojans?|ransomware|stealers?|payloads?|exploits?|code|snippets?|examples?|corpus|research|vulnerabilit(y|ies)|cve|hash(es)?|breach(es)?|leaks?|dumps?|dark|web|darkweb|onion|tor|phishing|scans?|recon|osint|targets?|demo|poc|attacks?|threats?|actors?|campaigns?|loaders?|injectors?|shellcode|exfil|techniques?|robots|txt|packs|assets|dist|static|login|about|home|search|malicious|security|info|data|something|anything|everything|nothing|stuff|things?|new|latest|update|recent)$/;
@@ -4229,7 +4605,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email', exposure_search:'selector' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', post_malware_pipeline:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email', exposure_search:'selector' };
 async function loadCatalog(){
   try{
     var broker=(el('s-broker-url')?el('s-broker-url').value.trim():'');
@@ -4495,7 +4871,7 @@ export default {
         }
         console.log(JSON.stringify({ event: 'disclosure_sent', to, provider }));
         return json({ ok: true, provider, id, to });
-      } catch (e) { return json({ ok: false, error: e.message }, 500); }
+      } catch (e) { return json({ ok: false, error: formatAiError(e) }, 500); }
     }
 
     // POST /api/reindex — rebuild the Vectorize index from llms.txt
@@ -4600,6 +4976,13 @@ export default {
           }
           return json({ ok: true, text: full.trim(), meta: { grounded: true, parts: parts } });
         }
+        if (isCorpusIntent(objective + ' ' + context)) {
+          const idx = await getCorpusIndex(runtimeEnv);
+          const direct = corpusIntentDirectAnswer(objective + ' ' + context, idx, new Date());
+          if (direct) return json({ ok: true, text: direct, meta: { corpusDirect: true, docCount: idx.docCount || 0, latestDate: idx.latestDate || '' } });
+        }
+        const corpusIntent = isCorpusIntent(objective + ' ' + context);
+        const searchPolicy = shouldUseWebSearch(objective + ' ' + context, { corpusIntent });
         const { cveIds, ips, domains, wantSearch } = analyseQuery(objective + ' ' + context);
         const evidence = [];
         const toolContext = [];
@@ -4622,7 +5005,7 @@ export default {
           await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'wayback', { domain: dom, target: dom }, 'builtin');
           await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'urlscan', { domain: dom, target: dom }, 'builtin');
         }
-        if (useSearch && wantSearch) {
+        if (useSearch && wantSearch && searchPolicy.use) {
           const s = await webSearch(cveIds.length ? `${cveIds[0]} exploit PoC advisory` : objective, braveKey, runtimeEnv);
           const result = s ? formatSearch(s) : 'Search unavailable across all providers.';
           const entry = makeEvidenceEntry({
@@ -4694,6 +5077,24 @@ export default {
       (async () => {
         const t0 = Date.now();
         try {
+          if (isCorpusIntent(lastUser)) {
+            const idx = await getCorpusIndex(runtimeEnv);
+            const direct = corpusIntentDirectAnswer(lastUser, idx, new Date());
+            if (direct) {
+              dbg('corpus_direct', `docCount=${idx.docCount || 0} latest=${idx.latestDate || 'unknown'}`);
+              send(JSON.stringify({ response: direct }));
+              if (sess && direct.trim()) {
+                sess.turns.push({ role: 'assistant', content: direct });
+                sess = await summariseSession(env, sess);
+                await saveSession(env, sess);
+              }
+              send('[DONE]');
+              return;
+            }
+          }
+          const corpusIntent = isCorpusIntent(lastUser);
+          const searchPolicy = shouldUseWebSearch(lastUser, { corpusIntent });
+            const routePolicy = buildToolRoutePolicy(lastUser, { corpusIntent, darkwebEnabled, env: runtimeEnv });
           const { cveIds, ips, domains, wantSearch } = analyseQuery(lastUser);
           const evidence = [];
           const toolContext = [];
@@ -4729,8 +5130,38 @@ export default {
             dbg('domain result', `evidence+5 (${dom})`);
           }
 
+          // Polymorphic fan-out: seed non-CVE artifacts with strongly typed tools. 
+          // routing layer plus intent on artifacts and allowed tool calss
+          for (const em of routePolicy.targets.emails.slice(0, 1)) {
+            if (/\b(breach|pwned|exposed|leak|account|email|comprom)/i.test(lastUser)) {
+              await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'email_recon', { email: em, target: em }, 'builtin');
+              await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'breach_check', { email: em, target: em }, 'builtin');
+            }
+          }
+          for (const h of routePolicy.targets.handles.slice(0, 1)) {
+            if (/\b(username|handle|account|identity|profile|who is|who's|person)\b/i.test(lastUser)) {
+              await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'username_enum', { username: h, target: h }, 'builtin');
+              await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'github_user', { username: h, target: h }, 'builtin');
+            }
+          }
+          for (const hx of routePolicy.targets.hashes.slice(0, 2)) {
+            if (/\b(hash|sample|malware|reputation|ioc|virus|trojan|stealer|ransomware)\b/i.test(lastUser)) {
+              await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'hash_lookup', { hash: hx, target: hx }, 'builtin');
+            }
+          }
+          for (const addr of routePolicy.targets.crypto.slice(0, 1)) {
+            if (/\b(wallet|crypto|btc|eth|address|transaction|balance)\b/i.test(lastUser)) {
+              await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'crypto_addr', { address: addr, target: addr }, 'builtin');
+            }
+          }
+          for (const on of routePolicy.targets.onions.slice(0, 1)) {
+            if (darkwebEnabled && /\b(onion|dark ?web|tor)\b/i.test(lastUser)) {
+              await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'onion_fetch', { onion: on, url: on, target: on }, 'builtin');
+            }
+          }
+
           // Web search
-          if (useSearch && wantSearch) {
+          if (useSearch && wantSearch && searchPolicy.use) {
             const q = cveIds.length ? `${cveIds[0]} exploit PoC advisory` : lastUser;
             dbg('search_web', q);
             const s = await webSearch(q, braveKey, runtimeEnv);
@@ -4741,11 +5172,13 @@ export default {
             dbg('search result', s ? (s.provider + ': ' + s.results.length + ' hits') : 'all providers unavailable');
           }
 
+          dbg('policy', `search=${searchPolicy.use} (${searchPolicy.reason}) | route=${routePolicy.use} (${routePolicy.reason}) | classes=${(routePolicy.classes || []).join(',') || 'none'} | tools=${(routePolicy.allowedTools || []).length}`);
+
           // ── Agentic tool loop — the AI chooses tools from the full catalog ──
-          if (opts.aiTools !== false) {
+          if (opts.aiTools !== false && routePolicy.use) {
             const ranTools = [];
             for (let step = 0; step < policy.routerMaxSteps; step++) {
-              const choice = await toolRouter(runtimeEnv, lastUser, ranTools, toolContext.join('\n'));
+              const choice = await toolRouter(runtimeEnv, lastUser, ranTools, toolContext.join('\n'), routePolicy.allowedTools);
               if (!choice || !choice.tool || !choice.arg) break;
               const tool = choice.tool, arg = choice.arg;
               if (ranTools.includes(tool)) break;
@@ -4828,7 +5261,7 @@ export default {
           }
           send('[DONE]');
         } catch (e) {
-          send(JSON.stringify({ response: `\n[Error: ${e.message}]` }));
+          send(JSON.stringify({ response: `\n[Error: ${formatAiError(e)}]` }));
           send('[DONE]');
         } finally {
           await writer.close();
