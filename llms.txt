@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-06-02T22:40:53Z
+GENERATED    : 2026-06-02T09:38:24Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 30
+TOTAL POSTS  : 29
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -81,173 +81,140 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 <DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
-TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
+TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
-URL        : https://garrettstimpson.ca/posts/2026/06/02/greenplasma-ctfmon-section-object-windows-lpe/
-CVE        : CVE-2026-33825, CVE-2026-45585
-CATEGORIES : exploits, windows
-TAGS       : greenplasma, ctfmon, lpe, windows, section-objects, nightmare-eclipse
-WORD_COUNT : 1240
-EXCERPT    : An unprivileged user plants a section object where CTFMON trusts it, and the SYSTEM text-input service walks itself into your payload. The PoC stops one step short on purpose.
+URL        : https://garrettstimpson.ca/posts/2026/06/02/go-mirai-cpufreqd-systemd-disguise/
+CVE        : none
+CATEGORIES : malware, analysis
+TAGS       : mirai, golang, linux, ddos, systemd-persistence, mitre-attack
+WORD_COUNT : 1392
+EXCERPT    : A fresh Go DDoS bot showed up on Bazaar masquerading as a Linux power daemon, floods with fasthttp, and forgot to strip its symbols.
 </FRONTMATTER>
 <BODY>
-Here's the part that gets me about GreenPlasma. There is no kernel bug. No heap groom, no use-after-free, no race against a one-shot window you have to win on the first try. The whole thing is a standard user politely asking the object manager for a section, putting it somewhere a SYSTEM process already looks, and waiting. Windows does the rest to itself.
+## What showed up
 
-GreenPlasma is one of two zero-days that Nightmare-Eclipse (the same person posting as Chaotic Eclipse) dropped on GitHub on May 13, 2026, alongside YellowKey, the BitLocker/WinRE bypass I wrote up the other day as CVE-2026-45585. GreenPlasma is the local privilege escalation half. As of June 2 there is still no CVE assigned and no patch from Microsoft. It affects Windows 10, Windows 11, and Windows Server wherever an interactive session is running ctfmon.exe, which in practice is almost everywhere a human logs in.
+On June 1st a reporter going by NullBlue67 dropped two ELF binaries onto MalwareBazaar, both first seen around 16:59 UTC. One is built for x86_64, the other for ARM aarch64. The arm64 file is named `c2c_agent_arm64.elf`, weighs in at about 9.1 MB, and carries the SHA256 `5bf67d64e94a8ed6b81a0855fee52626eb0f4caf1772518fc2404883030451c2`. Bazaar tags it Mirai, with six vendor detections and a `new-family` label. Sample page is here for reference: [https://bazaar.abuse.ch/sample/5bf67d64e94a8ed6b81a0855fee52626eb0f4caf1772518fc2404883030451c2/](https://bazaar.abuse.ch/sample/5bf67d64e94a8ed6b81a0855fee52626eb0f4caf1772518fc2404883030451c2/). To be clear, that hash is for identification only, not a download.
 
-## What CTFMON actually is, and why it's a problem
+What caught my eye is the rest of the tag set: `go`, `http-flood`, `cpufreqd-disguise`. This is not the usual C-compiled Mirai droplet that a thousand IoT cameras already host. It is a Go program, and the honeypot operator left a comment that fills in the gaps nicely. Captured over SSH, origin Spain, internal module name `c2c/cmd/agent`, HTTP flood implemented with the `fasthttp` library, and persistence through a systemd unit pretending to be `cpufreqd`. Go 1.26.3. Debug info not stripped. That last detail is going to matter.
 
-ctfmon.exe is the Collaborative Translation Framework monitor. It's the plumbing behind the Text Services Framework: alternate keyboard layouts, IMEs, handwriting, the on-screen keyboard, speech input. Boring, ancient, and on by default. The thing nobody thinks about is that in an interactive logon it runs as SYSTEM, and it brokers shared state through named kernel objects so that per-user input components and the privileged service can talk to each other.
+## What makes it work
 
-Shared state plus a privilege boundary is the oldest trap in Windows local exploitation. CTFMON reaches into the object manager namespace to find and map section objects (shared memory, created through NtCreateSection and friends) that the input stack uses to pass data around. The trust assumption baked in is that whatever lives at the expected name was placed there by something at least as privileged as CTFMON. That assumption is wrong, and GreenPlasma is the proof.
+Start with how it stays alive. The bot installs itself as a systemd service, and it picks the name `cpufreqd` on purpose. `cpufreqd` is a real, old Linux daemon that adjusts CPU frequency based on policy. Most admins have heard the name, few have it actually installed, and almost nobody audits it. So a unit file sitting at `/etc/systemd/system/cpufreqd.service` or under `/usr/lib/systemd/system/` reads as boring infrastructure. That is the whole trick. MITRE files this under T1543.002 (Create or Modify System Process: Systemd Service) combined with T1036.005 (Masquerading: Match Legitimate Name or Location). Systemd executes whatever `ExecStart` points at on every boot, runs it as root if the unit lives in the system directories, and restarts it for you if it dies. The attacker gets free reliability engineering from the OS.
 
-## The primitive
+Getting on the box in the first place was nothing clever. It landed on an SSH honeypot, which means credential brute forcing or a reused password, T1110. Commodity entry, commodity foothold. The interesting part is what runs after.
 
-What James Ballantyne's team at SpiderLabs documented, and what the public PoC demonstrates, is arbitrary section creation in a namespace location a standard user has no business writing to. The exploit, running as a plain unprivileged user, creates a named section object and gets it to land where CTFMON expects a trusted one. Then a chain of registry edits and ACL boundary abuse nudges CTFMON into opening and mapping the attacker's section instead of the legitimate one.
+The payload is a DDoS agent. It dials home to its C2 over a web protocol (T1071.001) and waits for flood commands. The honeypot operator named two of them, `directhttp` and `betterhttp`, and both ride on `fasthttp`. The choice of library is deliberate. Go's standard `net/http` is fine, but `fasthttp` is built to minimize allocations and reuse connection objects, so a single modest VPS can push request volumes that hurt. Layer 7 floods like this fall under T1498 (Network Denial of Service), and they are nasty precisely because each request looks like a real request. Cloudflare and others have been reporting that the bulk of HTTP-layer attacks in 2025 were short and intense, most finishing inside ten minutes, long enough to lock users out and fail transactions while staying under the radar of slow human response.
 
-Once SYSTEM maps your section, you own a region of memory that a SYSTEM process treats as its own. You write the bytes. CTFMON reads them back believing they came from the input subsystem. That's the whole ballgame: shellcode or a fake DLL mapping sitting in a region the OS fully trusts, executed in SYSTEM context, with no UAC prompt and no admin rights anywhere in the path.
+Why Go at all? Cross compilation. One `GOOS=linux GOARCH=arm64 go build` and you have an arm64 binary; flip the arch and you have x86_64. That is exactly why we got two architectures in the same upload. Mirai has always wanted to be everywhere, and Go makes "everywhere" a build flag instead of a toolchain headache. The Darkreading crowd noticed this shift a while back when Mirai-lineage actors started rewriting controllers and then bots in Go for reach.
 
-If you've done Windows privesc work, you know the shape of this. It's a planting-and-trust problem, cousin to the classic DLL search-order and named-pipe impersonation tricks, except the trusted resource here is a section object in the object manager namespace rather than a file on disk. File integrity monitoring will not see it. The on-disk ctfmon.exe never changes. AIDE, Tripwire, anything hashing binaries, all blind. The malicious artifact is a memory section that exists only at runtime.
+Now the part that made me laugh. The author did not strip the binary. In a Go ELF, the function metadata lives in the `gopclntab` section whether or not you strip the regular symbol table, so even a stripped Go binary leaks structure. This one did not even bother. The `c2c/cmd/agent` module path is right there. Tools like Radare2 or the go-re toolkit parse `gopclntab` automatically on Linux Go binaries and hand you function names, so an analyst opens this and gets a near-source-level map of the command handlers. For a botnet author that is a real OPSEC miss. It tells me this is either early development, a hobbyist, or someone who simply does not care because the bot is disposable. Given the `new-family` tag, my money is on early development.
 
-## The half a PoC
+## Local educational sample
 
-This is the genuinely annoying bit, and also the clever bit. Nightmare-Eclipse shipped the section-creation primitive and then stopped. The final stage, the part that converts "I control a section CTFMON maps" into "I have a SYSTEM shell," is missing. He left a note framing it as a capture-the-flag: if you're smart enough, you can turn this into a full privilege escalation because you can influence the newly created section to manipulate data.
+Here is the persistence idea, written in Go, stripped of anything harmful. It writes a unit named `cpufreqd-demo` whose `ExecStart` is `/bin/true`, so it does nothing. The point is to show the file layout and the systemd handoff, not to ship a payload.
 
-Do not let the word "partial" lull anyone. Releasing the hard, novel part (the boundary abuse that gets your section trusted) while withholding the mechanical last step is not a mitigation. It's a speed bump for skids and a free starting block for anyone competent. The conceptual gap between a controlled SYSTEM-mapped section and code execution is small. You're picking how CTFMON interprets data it already trusts. A skilled person closes that in an afternoon, and ransomware crews and APT operators have repeatedly folded public LPE code into live intrusions inside the same week a drop lands.
+```go
+// EDUCATIONAL SAMPLE - demonstrates systemd service masquerade (T1543.002 / T1036.005)
+// This does NOT contain any malicious payload
+// For research and defensive awareness only
+package main
 
-For context on how fast this turns operational: SpiderLabs and SecurityWeek both tie earlier Nightmare-Eclipse tools (BlueHammer, patched as CVE-2026-33825, plus the still-unpatched RedSun and UnDefend) to hands-on-keyboard intrusions within days of release, staged behind compromised FortiGate SSL VPN credentials from Russia-geolocated source IPs. GreenPlasma slots into that same kill chain as a third independent path to SYSTEM, used when Defender-targeting routes like BlueHammer and RedSun don't apply.
+import (
+	"os"
+	"os/exec"
+)
 
-## A rough sketch of the chain
+const unit = `[Unit]
+Description=CPU Frequency Daemon (demo, harmless)
 
-I'm not going to publish the missing weaponization, but the public shape looks like this:
+[Service]
+Type=simple
+ExecStart=/bin/true
+Restart=always
 
-```c
-// 1. Run as a standard, unprivileged user. No admin, no UAC.
-// 2. Create a named section in the object-manager namespace where
-//    CTFMON will resolve it as trusted input-framework shared memory.
-HANDLE hSection;
-NtCreateSection(&hSection,
-                SECTION_ALL_ACCESS,
-                &objAttr,        // OBJECT_ATTRIBUTES naming the planted path
-                &maxSize,
-                PAGE_READWRITE,
-                SEC_COMMIT,
-                NULL);
+[Install]
+WantedBy=multi-user.target
+`
 
-// 3. Registry + ACL manipulation steers ctfmon (SYSTEM) to open
-//    THIS section instead of the legitimate one.
-// 4. Map it, write attacker-controlled bytes.
-PVOID base = NULL;
-SIZE_T viewSize = 0;
-NtMapViewOfSection(hSection, GetCurrentProcess(), &base, 0, 0,
-                   NULL, &viewSize, ViewShare, 0, PAGE_READWRITE);
-
-// 5. CTFMON maps and trusts the same section in SYSTEM context.
-//    The CTF gap: shape the contents so CTFMON's use of them
-//    yields SYSTEM code execution.
+func main() {
+	// Real malware writes to /etc/systemd/system to blend with system services.
+	// We write a clearly named demo unit so nobody confuses this with the real thing.
+	path := "/etc/systemd/system/cpufreqd-demo.service"
+	if err := os.WriteFile(path, []byte(unit), 0644); err != nil {
+		panic(err)
+	}
+	// systemd reads the unit, enables boot persistence, and starts it.
+	exec.Command("systemctl", "daemon-reload").Run()
+	exec.Command("systemctl", "enable", "--now", "cpufreqd-demo.service").Run()
+	// Cleanup: systemctl disable --now cpufreqd-demo && rm the unit file.
+}
 ```
 
-The interesting research question is what exactly CTFMON does with that mapped data that becomes a control-flow primitive. That's the flag Nightmare-Eclipse is dangling, and I'd bet the answer is something dull like a function pointer or a length field that should never have been writable from a low box.
+And the flood primitive, reduced to a single honest request so you can see the `fasthttp` shape without the loop that turns it into an attack.
 
-## What to do before Microsoft ships a fix
+```go
+// EDUCATIONAL SAMPLE - demonstrates the fasthttp request primitive only
+// No flood loop, no concurrency, no target list. One request to one host.
+// For research and defensive awareness only
+package main
 
-There's no patch, so this is detection and hardening, not remediation. Baseline the SHA-256 of C:\Windows\System32\ctfmon.exe now and alert on any deviation, even though the realistic attack leaves the binary alone. The signal you actually want is behavioral: ctfmon.exe spawning unexpected child processes, ctfmon interacting with or creating section objects it doesn't normally touch, or ctfmon crashing, which is a classic tell of a botched section swap. Feed object-manager telemetry into your EDR and write a rule for arbitrary section creation in non-user namespaces by a standard-user token, because that is the load-bearing step here.
+import (
+	"fmt"
 
-Block execution from user-writable staging directories with ASR rules, since every confirmed Nightmare-Eclipse intrusion staged payloads out of Pictures and Downloads subfolders. Alert on a process literally named GreenPlasma.exe and its obvious renames. Audit your FortiGate and other SSL VPN logs for off-hours or geographically improbable logins, because that has been the front door for this crew every time. And set a calendar reminder to watch Microsoft's out-of-band channel ahead of June's Update Tuesday, plus the Nightmare-Eclipse GitHub account, since he has been explicit that more drops are coming on a Patch Tuesday cadence.
+	"github.com/valyala/fasthttp"
+)
 
-Treat GreenPlasma as live. The dangerous half is already public, and the other half is a weekend project for the wrong person.
+func main() {
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+
+	req.SetRequestURI("https://example.com/")
+	req.Header.SetMethod("GET")
+
+	if err := fasthttp.Do(req, resp); err != nil {
+		panic(err)
+	}
+	fmt.Println("status:", resp.StatusCode())
+}
+```
+
+The weaponized version wraps that primitive in a goroutine pool driven by C2 commands. The defensive lesson is that the request itself is indistinguishable from legitimate traffic. You defend against the volume and the source, not the packet.
+
+## Detection and defense
+
+The sample lit up twenty YARA rules on Bazaar, most of them generic Go detectors like `DetectGoMethodSignatures`, `Suspicious_Golang_Binary`, and CYFARE's `TH_Generic_MassHunt_Linux_Malware_2026`. Generic is fine here. A small rule keyed to the masquerade plus the module path catches this specific family:
+
+```yara
+rule Go_Mirai_cpufreqd_disguise
+{
+    meta:
+        author = "Garrett Stimpson"
+        description = "Go DDoS agent masquerading as cpufreqd systemd service"
+        reference = "MalwareBazaar 5bf67d64...30451c2"
+    strings:
+        $mod  = "c2c/cmd/agent"
+        $svc  = "cpufreqd"
+        $cmd1 = "directhttp"
+        $cmd2 = "betterhttp"
+        $go   = "go1.26"
+    condition:
+        uint32(0) == 0x464c457f and $mod and $svc and ($cmd1 or $cmd2) and $go
+}
+```
+
+On the host, Sysmon for Linux is your friend. Event ID 1 (process creation) catches the agent spawning and, just as useful, catches `systemctl enable` and `systemctl daemon-reload` running with a parent that is not a package manager or an admin shell. Event ID 3 (network connection) catches the outbound C2 dial and the flood traffic leaving the box. Pair those two and you have the full story from install to attack.
+
+Watch the systemd directories directly. An auditd watch on `/etc/systemd/system/` and `/usr/lib/systemd/system/` flags new `.service` files as they are written. Then verify ownership: a real distro daemon belongs to a package, so `dpkg -S /etc/systemd/system/cpufreqd.service` or `rpm -qf` returning "no package owns" on something claiming to be `cpufreqd` is your tell. There are public Sigma rules for systemd service creation under the auditd category that map cleanly onto this. For mitigation, the boring advice is the advice that works: kill password SSH and use keys, put fail2ban or equivalent in front of the daemon, and filter egress so a compromised host cannot reach arbitrary C2 or pour L7 floods outward. The bot needs the network to matter. Take the network away.
+
+This one is not sophisticated. It is a clean example of where commodity Linux malware is heading, though: Go for portability, a legitimate service name for cover, and a fast HTTP library doing the loud work. The unstripped symbols are a gift. Read them while they last.
 </BODY>
 </DOCUMENT>
 
 --------------------------------------------------------------------------------
 
 <DOCUMENT id="003" type="security-research-post">
-<FRONTMATTER>
-TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
-DATE       : 2026-06-02
-URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
-CATEGORIES : exploits, windows
-TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
-WORD_COUNT : 1122
-EXCERPT    : A byte-versus-WCHAR mixup in Netlogon lets one unauthenticated UDP packet overflow a 528-byte stack buffer in LSASS. Microsoft rated it less likely to be exploited. It is being exploited.
-</FRONTMATTER>
-<BODY>
-Here is what gets me about this one. Microsoft shipped the patch for CVE-2026-41089 on May 12 and tagged it "Exploitation Less Likely." Nineteen days later the Centre for Cybersecurity Belgium put out an alert saying it is being hit in the wild. A pre-auth, zero-credential, network-reachable bug on the one box that holds your entire Active Directory forest together. Less likely. Sure.
-
-I want to walk through why this bug is so clean, because the root cause is the kind of thing you learn about in week one and then spend a career watching ship anyway. It is a unit confusion. Bytes versus WCHARs. That is the whole crash.
-
-## The vulnerable path
-
-Netlogon answers DC locator pings. When a client wants to find a domain controller it sends a CLDAP request, which is just LDAP riding on top of UDP port 389. No TCP handshake, no bind, no authentication. You send a datagram, the DC builds a response describing itself, and it sends one back. This is by design. It has to work before a machine has any credentials, which is exactly why it makes such a good target.
-
-The response gets built here:
-
-```
-I_NetLogonLdapLookupEx
-  -> NlGetLocalPingResponse        // allocates Src[528], a 528-byte stack buffer
-    -> LogonRequestHandler
-      -> BuildSamLogonResponse
-        -> NetpLogonPutUnicodeString  // writes strings into the buffer
-```
-
-`NlGetLocalPingResponse` puts a 528-byte buffer on the stack. Then `BuildSamLogonResponse` packs the response into it: the server name, the domain name, a couple of GUIDs, DNS names, and the username the client asked about. Each of those goes through `NetpLogonPutUnicodeString`.
-
-The bug lives in that last function. It receives a maximum length that the caller computed in bytes. It then treats that number as a count of WCHARs. A WCHAR is two bytes. So every bounds check is off by a factor of two, in the attacker's favor. The function thinks it has twice the room it actually has.
-
-Most of the fields in the response are fixed or short. The server name and domain name are whatever the DC is actually called. But one field is attacker controlled and it is generous about length. The `User` attribute in the CLDAP filter. The DC locator protocol lets you ping for a specific user, and that string gets copied straight into the response buffer. You are allowed up to 130 WCHARs there, which is 260 bytes on the wire. Combine that with the server name, the domain name, and the GUIDs, and the total write sails past the 528-byte boundary. The return address on the stack goes with it.
-
-## The packet
-
-There is nothing exotic about triggering it. You build a normal CLDAP search request, the kind any domain-joined machine sends a hundred times a day, with a filter like:
-
-```
-(&(DnsDomain=corp.local)(User=AAAA...130 chars...)(NtVer=...))
-```
-
-The public PoC from 0xABCD01 is plain Python with no dependencies, just `socket` and `struct` hand-rolling the BER encoding. It runs in three phases. Send a benign ping with a short username to confirm the DC is up and answering on UDP 389. Send the same packet again with a 130-character username of `A`s. Then wait a few seconds and ping once more. If the second ping gets no answer, LSASS went down.
-
-```
-python3 poc.py 10.0.50.21 corp.local -l 130
-```
-
-When LSASS crashes on a domain controller, the box reboots itself in about sixty seconds. That is the behavior the public exploit demonstrates: a denial of service that takes a DC offline on demand, repeatedly, from an unauthenticated position. The author was clear that the current code stops at the crash and does not go for code execution.
-
-That last point is where I want to be careful, because the headlines all say RCE and the CVSS vector says RCE, but what is publicly weaponized right now is the reboot. The overflow corrupts the stack, and a stack overflow of this shape is the classic precursor to code execution. Whether the in-the-wild activity CCB is seeing is someone knocking DCs over or someone who has quietly closed the gap to a shell, nobody outside the affected orgs has said. I would not bet on it staying a DoS. Stack smashes inside LSASS have a long history of growing teeth.
-
-## Who is exposed
-
-Any Windows Server acting as a domain controller, from 2012 through 2025. The fixed builds from the May update:
-
-```
-Server 2016        10.0.14393.9140
-Server 2019        10.0.17763.8755
-Server 2022        10.0.20348.5074
-Server 2022 23H2   10.0.25398.2330
-Server 2025        10.0.26100.32772
-```
-
-2012 and 2012 R2 only get the fix through ESU. If you are running DCs that old and out of extended support, you have a different conversation to have with yourself.
-
-## What to actually do
-
-Patch the domain controllers. All of them, in the same maintenance window. There is no graceful half-measure here. A forest with some DCs patched and some not is still a forest you can reboot at will, and a pre-auth DC bug does not respect your rollout schedule. Automox's Jason Kikta put it well: half-patched forests are not a defensible state for this class of bug.
-
-If you genuinely cannot patch a box right now, restrict inbound UDP 389 so only your trusted management subnets can reach the Netlogon CLDAP listener. CLDAP from a random workstation VLAN to a DC is not normal traffic. For legacy servers past ESU, 0patch shipped a micropatch. Their fix is a single instruction, `mov edx, 0x40`, which halves the max username length back to what it should have been. It is a satisfying reminder of how small the actual defect is.
-
-For detection, two signals. On the network, watch for CLDAP search requests where the `User` filter attribute runs longer than 20 or 30 characters. Real DC locator pings carry short service account names, not 130 bytes of padding. On the host, watch for LSASS crashes tied to netlogon.dll, Event ID 1000, and treat any unexplained DC reboot as suspicious until proven otherwise. You can turn up Netlogon's own logging:
-
-```
-nltest /dbflag:0x2080ffff
-```
-
-The thing I keep coming back to is the severity call. A network-reachable, unauthenticated overflow on a domain controller got rated less likely to be exploited, and the patch was public, and patch diffing is a solved problem, and AI tooling has made root-cause reversing a same-week affair. Aretiq had a public reverse engineering writeup out almost immediately. The window between a DC patch shipping and someone shooting at the unpatched ones is now measured in days. Plan your patching like that is true, because for this one it was.
-</BODY>
-</DOCUMENT>
-
---------------------------------------------------------------------------------
-
-<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -343,7 +310,7 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
@@ -416,7 +383,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -498,7 +465,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -637,7 +604,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
@@ -727,7 +694,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
@@ -792,7 +759,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
@@ -902,7 +869,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -1014,7 +981,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -1084,7 +1051,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -1261,7 +1228,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -1355,7 +1322,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -1518,7 +1485,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -1676,7 +1643,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -1810,7 +1777,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -2032,7 +1999,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -2160,7 +2127,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -2367,7 +2334,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -2481,7 +2448,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -2665,7 +2632,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -2821,7 +2788,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -2974,7 +2941,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -3074,7 +3041,7 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
@@ -3225,7 +3192,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
@@ -3433,7 +3400,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -3548,7 +3515,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
@@ -3645,7 +3612,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -3792,5 +3759,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 30 documents — 2026-06-02T22:40:53Z
+END OF CORPUS — 29 documents — 2026-06-02T09:38:24Z
 ================================================================================
