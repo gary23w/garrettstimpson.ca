@@ -3169,7 +3169,53 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 #wm{position:fixed;left:16px;bottom:58px;width:160px;height:160px;z-index:0;pointer-events:none;
   background:url('https://garrettstimpson.ca/assets/img/agent-garrett-logo.png') no-repeat bottom left;
   background-size:contain;opacity:.5;mix-blend-mode:screen;}
-@media (max-width:640px){#wm{width:104px;height:104px;bottom:54px;opacity:.4;}}
+@media (max-width:640px){
+  #wm{width:72px;height:72px;bottom:52px;opacity:.25;}
+
+  /* App shell */
+  #app{padding:6px;}
+
+  /* Header — stack title+buttons vertically, buttons wrap */
+  .h-row{flex-direction:column;gap:6px;align-items:flex-start;}
+  .btns{flex-wrap:wrap;gap:4px;width:100%;}
+  .btn{font-size:9px;padding:2px 7px;}
+  .h-title{font-size:11px;}
+  .h-sub,.h-model,.h-meta{font-size:9px;}
+
+  /* Chat tabs */
+  #chatbar{gap:4px;}
+  .chat-tab{max-width:130px;padding:2px 5px;}
+  .chat-tab .ct-title{max-width:85px;}
+
+  /* Settings labels go column so inputs get full width */
+  #settings label{flex-wrap:wrap;gap:4px;}
+  #settings input[type=range]{width:100%;min-width:0;}
+  #settings input[type=text],#settings input[type=password]{width:100%;min-width:0;}
+  #settings select{width:100%;}
+
+  /* Main area — stack log above debug */
+  #main{flex-direction:column;}
+  #debug.show{
+    width:100% !important;
+    border-left:none;
+    border-top:1px solid var(--border);
+    padding-left:0;
+    padding-top:8px;
+    max-height:180px;
+  }
+
+  /* Input row */
+  #input-row{padding-top:8px;gap:6px;}
+  #inp{font-size:12px;}
+
+  /* Jobs/tools panels */
+  #jobs textarea#j-obj{min-height:52px;}
+  #j-chips{gap:4px;}
+  .jchip{font-size:9px;padding:2px 7px;}
+
+  /* Tools/disclose panels */
+  #disclose input,#tools input.t-arg{width:100%;flex:1 1 100%;}
+}
 #tools{display:none;border:1px solid var(--border);border-radius:3px;padding:10px;margin-bottom:10px;background:var(--panel);font-size:11px;}
 #tools.show{display:block;}
 #tools .trow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:5px 0;}
@@ -3202,6 +3248,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 @media (max-width:640px){
   #tools select,#jobs select,#tools input.t-arg,#jobs input[type=text]{width:100%;flex:1 1 100%;}
   #tools .trow,#jobs .row{gap:6px;}
+  #disclose select{width:100%;}
 }
 @keyframes gsspin{to{transform:rotate(360deg)}}
 .spinner{display:inline-block;width:11px;height:11px;border:2px solid var(--muted);border-top-color:var(--blue);border-radius:50%;animation:gsspin .7s linear infinite;vertical-align:-2px;margin-right:7px;}
@@ -3303,6 +3350,11 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
     <label>brave api key (optional, stored in your browser) <input type="password" id="s-brave" placeholder="leave blank to skip"></label>
     <label>runtime broker url (optional; overrides TOOL_BROKER_URL for this browser session) <input type="text" id="s-broker-url" placeholder="https://your-broker.example/api"></label>
     <div style="color:var(--muted);margin-top:6px;font-size:10px;">Settings &amp; chats are saved in this browser. Up to 3 conversations are kept.</div>
+    <div style="display:flex;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border);flex-wrap:wrap;">
+      <button class="btn" id="btn-export" title="Download all your chats, memory, jobs and settings as a JSON file">&#8675; export my data (JSON)</button>
+      <button class="btn" id="btn-import" title="Restore chats, memory, jobs and settings from an exported JSON file">&#8673; import</button>
+      <input type="file" id="imp-file" accept="application/json" style="display:none">
+    </div>
   </div>
 
   <div id="jobs">
@@ -3369,11 +3421,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
     <input id="inp" autocomplete="off" autocorrect="off" spellcheck="false"
            placeholder="ask Agent Garrett about a CVE, exploit, technique, IP…" autofocus>
   </div>
-  <div id="footer" style="text-align:center;padding:9px 0 4px;border-top:1px solid var(--border);margin-top:4px;">
-    <button class="btn" id="btn-export" title="Download all your chats, memory, jobs and settings as a JSON file">&#8675; export my data (JSON)</button>
-    <button class="btn" id="btn-import" title="Restore chats, memory, jobs and settings from an exported JSON file">&#8673; import</button>
-    <input type="file" id="imp-file" accept="application/json" style="display:none">
-  </div>
+
 </div>
 <script>
 var MAX_CHATS=3, MAX_HIST=6, busy=false;
