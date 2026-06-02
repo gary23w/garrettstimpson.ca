@@ -72,6 +72,7 @@ body {
    ============================================================ */
 .site-header {
   background: rgba(0,0,0,0.97) !important;
+  border-top: none !important;
   border-bottom: 1px solid var(--border) !important;
   box-shadow: 0 0 20px rgba(0, 255, 65, 0.06) !important;
   position: sticky !important;
