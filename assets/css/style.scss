@@ -929,8 +929,10 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   letter-spacing: .12em;
   text-transform: uppercase;
 }
-.banner-label .banner-text { color: #aaa; }
-.banner-label .banner-text strong { color: #e0e0e0; font-weight: 700; }
+.banner-label .banner-text-full { color: #aaa; }
+.banner-label .banner-text-full strong { color: #e0e0e0; font-weight: 700; }
+.banner-label .banner-text-short { display: none; color: #aaa; }
+.banner-label .banner-text-short strong { color: #e0e0e0; font-weight: 700; }
 
 .banner-badge {
   display: flex;
@@ -959,11 +961,13 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 }
 .banner-dismiss:hover { color: var(--green); }
 
-@media (max-width: 480px) {
+@media (max-width: 600px) {
   #deploy-banner {
-    padding: 8px 38px 8px 12px;
-    gap: 10px;
+    padding: 8px 36px 8px 10px;
+    gap: 8px;
     font-size: 10px;
   }
   .banner-label .banner-prefix { display: none; }
+  .banner-label .banner-text-full { display: none; }
+  .banner-label .banner-text-short { display: inline; }
 }
