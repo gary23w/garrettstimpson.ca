@@ -9,6 +9,7 @@ __pycache__/
 .venv/
 # Node (agent dev)
 agent/node_modules/
+agent/.wrangler/
 # OS
 .DS_Store
 Thumbs.db
