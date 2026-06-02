@@ -151,6 +151,16 @@ body {
 /* --- Nav: mobile (JS class-toggle) --- */
 @media screen and (max-width: 800px) {
   .site-header .wrapper { padding: 12px 16px !important; }
+
+  /* Pin nav flush-right — overrides Minima's absolute positioning */
+  .site-nav {
+    position: static !important;
+    display: flex !important;
+    align-items: center !important;
+    flex-shrink: 0 !important;
+    margin-left: auto !important;
+  }
+
   .nav-toggle {
     display: inline-flex !important; align-items: center !important; justify-content: center !important;
     width: 44px !important; height: 38px !important; cursor: pointer !important;
