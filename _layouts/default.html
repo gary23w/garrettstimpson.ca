@@ -27,6 +27,23 @@
 </head>
 
 <body>
+  <!-- ============ DEPLOY BANNER ============ -->
+  <div id="deploy-banner" role="complementary" aria-label="Deploy your own agent">
+    <span class="banner-label">
+      <span class="banner-prefix">// new</span>
+      <span class="banner-text-full">Deploy your own <strong>AI security research agent</strong> — free on Cloudflare Workers</span>
+      <span class="banner-text-short">Your own <strong>security agent</strong></span>
+    </span>
+    <a class="banner-badge"
+       href="https://deploy.workers.cloudflare.com/?url=https://github.com/gary23w/garrettstimpson-agent"
+       target="_blank" rel="noopener noreferrer"
+       title="Deploy to Cloudflare Workers — one click, your own account">
+      <img src="https://deploy.workers.cloudflare.com/button"
+           alt="Deploy to Cloudflare Workers">
+    </a>
+    <button class="banner-dismiss" id="banner-dismiss" aria-label="Dismiss banner" title="Dismiss">&#x2715;</button>
+  </div>
+
   <div id="read-progress" aria-hidden="true"></div>
   <!-- Matrix rain canvas background -->
   <canvas id="matrix-canvas" aria-hidden="true"></canvas>
@@ -56,14 +73,6 @@
           <a class="page-link agent-link" href="{{ site.agent_url }}" target="_blank" rel="noopener" title="Chat with Agent Garrett">&#9099; Agent</a>
           {%- endif -%}
 
-          <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/gary23w/garrettstimpson.ca/tree/main/agent"
-             target="_blank" rel="noopener noreferrer"
-             title="Deploy your own research agent — powered by Cloudflare Workers AI"
-             style="vertical-align:middle;margin-left:12px;display:inline-flex;align-items:center;">
-            <img src="https://deploy.workers.cloudflare.com/button"
-                 alt="Deploy to Cloudflare Workers"
-                 style="height:24px;display:block;">
-          </a>
         </div>
       </nav>
     </div>
@@ -202,6 +211,22 @@
   <!-- Share: copy link -->
   <script>
   (function(){ var sc=document.getElementById('share-copy'); if(!sc) return; sc.addEventListener('click',function(){ if(navigator.clipboard){ navigator.clipboard.writeText(location.href).then(function(){ sc.textContent='copied!'; setTimeout(function(){ sc.textContent='copy link'; },1200); }); } }); })();
+  </script>
+
+  <!-- Deploy banner dismiss (persisted per session) -->
+  <script>
+  (function(){
+    var banner = document.getElementById('deploy-banner');
+    var btn    = document.getElementById('banner-dismiss');
+    if (!banner || !btn) return;
+    if (sessionStorage.getItem('banner-dismissed') === '1') {
+      banner.classList.add('hidden');
+    }
+    btn.addEventListener('click', function() {
+      banner.classList.add('hidden');
+      sessionStorage.setItem('banner-dismissed', '1');
+    });
+  })();
   </script>
 
   <!-- Mobile nav toggle (JS class-based — reliable on iOS/Android) -->
