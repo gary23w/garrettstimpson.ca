@@ -4,7 +4,7 @@
 **/
 
 const MODEL        = '@cf/meta/llama-3.1-8b-instruct';
-const BUILD_VERSION = '2026-05-31-r1';  // bump per deploy; shown in header + /api/tools/catalog
+const BUILD_VERSION = '2026-06-02-r2';  // bump per deploy; shown in header + /api/tools/catalog
 const EMBED_MODEL   = '@cf/baai/bge-base-en-v1.5'; // 768-dim
 const EMBED_DIM     = 768;
 
@@ -3523,10 +3523,42 @@ const PERSONA = [
   'CRITICAL — never fabricate. Do not invent CVE IDs, CVSS/EPSS scores, affected versions, patch/registration dates, WHOIS or RDAP records, owner names, organizations, postal addresses, phone numbers, emails, ASNs, IP addresses, hostnames, file hashes, or URLs. If the CORPUS and LIVE TOOL RESULTS do not contain a fact, reply that you do not have it / it is UNKNOWN. Inventing any such detail is a critical failure.',
   'When a tool result says data is UNKNOWN, missing, or that a lookup returned nothing, report exactly that — never fill the gap with a plausible-looking guess.',
   'You CANNOT execute commands, shells, or live scans yourself (no dig, whois, nslookup, nmap, curl, ping, traceroute, host). If asked to run one, say plainly that you cannot run commands and instead rely on the LIVE TOOL RESULTS, or state UNKNOWN. NEVER write fake terminal/command output, invented dig/whois/nslookup results, or made-up IP addresses, nameservers, or registrars — fabricating tool or command output is a critical failure.',
+  'If asked what tools/capabilities you have, summarize only from the tool catalog and current runtime configuration. Never claim access to tools, sources, accounts, credentials, or external systems that are not explicitly listed or configured.',
+  'Avoid repetitive loops: never repeat the same sentence or paragraph. If a term is ambiguous (for example an acronym), give brief disambiguation and ask one short clarifying question when needed.',
   'Your purpose is defensive: help protect users and organizations, assess their exposure, and identify threats and malicious infrastructure. Frame findings for defenders.',
   'Use clear markdown: ## headings, **bold** for key terms, `code` for identifiers/commands, fenced ```code blocks```, and bullet lists where helpful.',
   'Answer with technical precision. Cite the post title/URL when you draw from the corpus.',
 ].join(' ');
+
+function isCapabilityQuestion(query) {
+  const q = String(query || '').toLowerCase();
+  return /\b(what can you do|what are you capable of|your capabilities|what tools do you have|which tools do you have|tool list|list tools|available tools|can you do|what do you do)\b/.test(q);
+}
+
+function buildCapabilitiesAnswer(env, opts = {}) {
+  const darkwebEnabled = opts.darkwebEnabled !== false;
+  const catalog = toolCatalog(env);
+  const byCat = {};
+  for (const t of catalog) {
+    if (!byCat[t.category]) byCat[t.category] = [];
+    byCat[t.category].push(t.name);
+  }
+  const categories = Object.keys(byCat).sort();
+  const lines = [
+    '## What I Can Do',
+    `- I can analyze CVEs/exploit context and run defensive OSINT/recon using the built-in tool catalog (${catalog.length} tools in this deployment).`,
+    '- I can summarize findings from this site\'s corpus and from live tool results.',
+    '- I can produce structured reports (CVE, malware triage, dark-web exposure, and entity/domain investigations) based on retrieved evidence.',
+    '- I cannot run arbitrary shell commands or fabricate external results. If a source/tool has no data, I report that as UNKNOWN.',
+    darkwebEnabled
+      ? '- Dark-web/onion-related tools are enabled by current settings.'
+      : '- Dark-web/onion-related tools are disabled by current settings.',
+    '',
+    '## Tool Categories',
+    ...categories.map(c => `- ${c}: ${byCat[c].slice(0, 10).join(', ')}${byCat[c].length > 10 ? `, +${byCat[c].length - 10} more` : ''}`),
+  ];
+  return lines.join('\n');
+}
 
 function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory, reasoning, evidenceLedger, policy }) {
   const persona = PERSONA.replace('{SITE}', env.SITE_NAME || 'Garrett Stimpson Security Research');
@@ -3563,7 +3595,8 @@ function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory, re
   const reasonDirective = (reasoning === 'normal' || reasoning === 'deep')
     ? 'REASONING: Work through the evidence step by step before answering — weigh the LIVE TOOL RESULTS against the CORPUS, surface any contradictions, and state your confidence. Reasoning must stay grounded; never let it turn into invented facts.'
     : '';
-  const capabilities = 'PLATFORM CAPABILITIES: This site runs 76 OSINT, identity-correlation, malware & recon tools (CVE/EPSS/KEV/PoC/ATT&CK intel, RDAP/DNS/cert-transparency, IP geo/ASN/Shodan/GreyNoise/Tor-exit, breach/stealer/leak/paste checks, dark-web/onion exposure, image EXIF+GPS, username enumeration across many sites, Keybase cryptographically-VERIFIED identity proofs, dev.to/gravatar profile correlation, GitHub harvesting + commit-email pivots, people-search/public-records/obituary/genealogy deep links, SEC EDGAR & OpenCorporates records, phone-number OSINT, holehe email->account mapping, SPF/DMARC email-security, typosquat & subdomain-takeover detection, cloud-bucket exposure, vuln_scan version->CVE matching, crypto-address intel, and more). Autonomous OSINT runs recurse into web-search RESULT PAGES (round 2-3) to pull deeper links/files/leads. For an OSINT request the user names an email, domain, @handle, person NAME, IP, CVE, image URL, file hash, or crypto address and an autonomous multi-round investigation runs automatically and produces a formal write-up with an exposure-risk score. This is a DEFENSIVE security-research OSINT platform: investigating PUBLIC identifiers (usernames, emails, domains, IPs, file hashes, crypto/onion addresses) via public sources is your core, legitimate purpose for exposure assessment and threat research. NEVER refuse such a request on privacy/ethics grounds and do not lecture — you only ever use publicly available information. If the user names a target, an automated OSINT run gathers the public data for you to summarize and analyze. IMPORTANT: you do NOT execute these tools yourself inside a chat reply — only the LIVE TOOL RESULTS shown above are real. If a full investigation would help, tell the user to name the target and the autonomous OSINT run will trigger. Never claim to have run a tool whose result is not present above.';
+  const toolCount = toolCatalog(env).length;
+  const capabilities = `PLATFORM CAPABILITIES: use only the configured tool catalog (${toolCount} tools in this deployment) plus the provided CORPUS and LIVE TOOL RESULTS. Never claim tools or access beyond that catalog. If a capability is unavailable, disabled, blocked, or unconfigured, state that explicitly as unavailable/UNKNOWN. If asked what tools you have, summarize from the catalog categories and avoid brand-name/tool claims that are not present in runtime configuration. IMPORTANT: you do NOT execute tools inside free-form prose; only the LIVE TOOL RESULTS shown above are real evidence.`;
   return [persona, capabilities, evidencePolicy, reasonDirective, memSection, ledgerSection, toolSection, corpusText].filter(Boolean).join('\n\n');
 }
 
@@ -4392,7 +4425,7 @@ function detectOsint(q, prev){
   if(um && !COMMON.test(um[1]) && !BADHANDLE.test(um[1])){ handles.push(um[1]); handles=uniq(handles); }
   // Generic vocabulary is NEVER an entity/target — stops 'show me malware examples' from
   // running username/stealer/keybase on the literal word 'malware'.
-  var COMMON=/^(malware|samples?|virus(es)?|trojans?|ransomware|stealers?|payloads?|exploits?|code|snippets?|examples?|corpus|research|vulnerabilit(y|ies)|cve|hash(es)?|breach(es)?|leaks?|dumps?|dark|web|darkweb|onion|tor|phishing|scans?|recon|osint|targets?|demo|poc|attacks?|threats?|actors?|campaigns?|loaders?|injectors?|shellcode|exfil|techniques?|robots|txt|packs|assets|dist|static|login|about|home|search|malicious|security|info|data|something|anything|everything|nothing|stuff|things?|new|latest|update|recent)$/;
+  var COMMON=/^(malware|samples?|virus(es)?|trojans?|ransomware|stealers?|payloads?|exploits?|code|snippets?|examples?|corpus|research|vulnerabilit(y|ies)|cve|hash(es)?|breach(es)?|leaks?|dumps?|dark|web|darkweb|onion|tor|phishing|scans?|recon|osint|targets?|target|user|users|account|accounts|handle|handles|demo|poc|attacks?|threats?|actors?|campaigns?|loaders?|injectors?|shellcode|exfil|techniques?|robots|txt|packs|assets|dist|static|login|about|home|search|malicious|security|info|data|something|anything|everything|nothing|stuff|things?|new|latest|update|recent)$/;
   var TRIG=['osint','investigate','recon','reconnaissance','footprint','look up','lookup','look at','take a look','find everything','find anything','dig up','enumerate','who is','whois','background on','attribution','intel on','gather intel','profile','trace','check','scan','analyze','analyse','fingerprint','reputation','breach','pwned','leaked','leak','exposed','behind','onion','dark web','darkweb','image','photo','picture','exif','geolocate','email security','spf','dmarc','spoof','typosquat','lookalike','phishing','wallet','bitcoin','ethereum','malware','sample','hash','virus','trojan','stealer','ransomware','reverse engineer','breakdown','osin','conduct','look into','dig into','look up','run osint','nmap','pcap','forensic','volatility','memory dump','wireshark','yara','ghidra','radare'];
   var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
   var persons=uniq(text.match(/\\b[A-Z][a-z'\\-]{1,}\\s+[A-Z][a-z'\\-]{1,}(?:\\s+[A-Z][a-z'\\-]{1,})?\\b/g)||[]);
@@ -4403,12 +4436,17 @@ function detectOsint(q, prev){
   // Handle only via an EXPLICIT command verb ('osint X', 'recon bob123', 'enumerate user42') —
   // never by grabbing the last word of any sentence that merely mentions a topic word.
   if(!handles.length && !emails.length){
-    var hcmd=low.match(/\\b(?:osint|investigate|recon|reconnaissance|enumerate|profile|footprint|stalk|trace|look (?:up|into)|dig (?:up|into)|run osint|background on|intel on)\\s+(?:on\\s+|the\\s+|user\\s+|account\\s+|handle\\s+)?@?([a-z0-9][a-z0-9_.\\-]{2,29})\\b/);
-    if(hcmd && hcmd[1].indexOf('.')<0 && !COMMON.test(hcmd[1])){ handles.push(hcmd[1]); handles=uniq(handles); }
+    var hcmd=low.match(/\\b(?:osint|investigate|recon|reconnaissance|enumerate|profile|footprint|stalk|trace|look (?:up|into)|dig (?:up|into)|run osint|background on|intel on)\\s+(?:(?:on|the|user|account|handle)\\s+)*@?([a-z0-9][a-z0-9_.\\-]{2,29})\\b/);
+    var HANDLE_STOP=/^(the|user|account|handle|target|subject|person|people|someone|anyone|this|that|it|him|her|them|me|you|us)$/;
+    if(hcmd){
+      var hc=hcmd[1].toLowerCase();
+      if(hc.indexOf('.')<0 && !COMMON.test(hc) && !HANDLE_STOP.test(hc)){ handles.push(hc); handles=uniq(handles); }
+    }
   }
   // Drop any generic-word handles/persons that slipped through.
   handles=handles.filter(function(h){ return !COMMON.test(h); });
   persons=persons.filter(function(p){ return !COMMON.test(p.toLowerCase()) && !COMMON.test(p.toLowerCase().split(' ')[0]); });
+  persons=persons.filter(function(p){ return !/^(user|account|handle|target|subject|person|people)\\b/i.test(p); });
   var personHint=/\\b(person|people|name|individual|someone|identity)\\b/.test(low);
   var metaAsk=/\\b(corpus|blog|posts?|articles?|knowledge base|dataset|your (data|info|knowledge|tools?|capabilit)|what (can|do) you|how (do|does) (you|this|it)|what is this|what else|tell me about (the|your)|inside)\\b/.test(low);
   var refPrev=/\\b(it|its|that|this|him|her|them|he|she|his|hers|their|theirs|this (guy|man|woman|person|individual|account|user)|that (guy|man|woman|person)|the (site|website|domain|host|server|forum|page|url|ip|target|company|org|organization|image|photo|person|individual|guy))\\b/i.test(low);
@@ -4530,6 +4568,7 @@ function harvestPivots(text, known){
 
 async function runOsintFlow(q, od, c){
   var FENCE=String.fromCharCode(96,96,96);
+  var low=String(q||'').toLowerCase();
   var opts=curOpts();
   var darkwebOn=(opts.darkweb!==false);
   var DARKWEB_TOOLS={ onion_search:1, onion_fetch:1, stealer_check:1, leakcheck:1, paste_search:1 };
@@ -5265,6 +5304,18 @@ export default {
       (async () => {
         const t0 = Date.now();
         try {
+          if (isCapabilityQuestion(lastUser)) {
+            const cap = buildCapabilitiesAnswer(runtimeEnv, { darkwebEnabled });
+            send(JSON.stringify({ response: cap }));
+            if (sess && cap.trim()) {
+              sess.turns.push({ role: 'assistant', content: cap });
+              sess = await summariseSession(env, sess);
+              await saveSession(env, sess);
+            }
+            send('[DONE]');
+            return;
+          }
+
           if (isCorpusIntent(lastUser)) {
             const idx = await getCorpusIndex(runtimeEnv);
             const direct = corpusIntentDirectAnswer(lastUser, idx, new Date());
