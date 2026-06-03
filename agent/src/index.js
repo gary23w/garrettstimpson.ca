@@ -3541,11 +3541,14 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 #j-saved .sjob{display:flex;gap:8px;align-items:center;margin:2px 0;}
 #j-saved .sj-del{color:var(--muted);cursor:pointer;font-weight:700;}
 #j-saved .sj-del:hover{color:var(--err);}
-#wm{position:fixed;left:16px;bottom:58px;width:160px;height:160px;z-index:0;pointer-events:none;
+#wm{position:absolute;left:8px;bottom:66px;width:156px;height:156px;z-index:0;pointer-events:none;
   background:url('https://garrettstimpson.ca/assets/img/agent-garrett-logo.png') no-repeat bottom left;
-  background-size:contain;opacity:.5;mix-blend-mode:screen;}
+  background-size:contain;opacity:.44;mix-blend-mode:screen;
+  filter:drop-shadow(0 0 10px rgba(0,255,127,.22)) drop-shadow(0 0 22px rgba(0,212,255,.16)) saturate(1.14) contrast(1.06);
+  display:none;
+}
 @media (max-width:640px){
-  #wm{width:72px;height:72px;bottom:52px;opacity:.25;}
+  #wm{width:88px;height:88px;left:4px;bottom:56px;opacity:.28;}
 
   /* App shell */
   #app{padding:6px;}
@@ -3661,7 +3664,6 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
-<div id="wm" aria-hidden="true"></div>
 <div id="legal-modal" role="dialog" aria-modal="true" aria-labelledby="legal-title">
   <div id="legal-card">
     <h3 id="legal-title">Privacy, Educational-Use, and Liability Terms</h3>
@@ -3686,6 +3688,7 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
   </div>
 </div>
 <div id="app">
+  <div id="wm" aria-hidden="true"></div>
   <header>
     <div class="h-row">
       <div>
