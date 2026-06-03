@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-06-02T09:38:24Z
+GENERATED    : 2026-06-03T01:17:19Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 29
+TOTAL POSTS  : 33
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -20,7 +20,7 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/yellowkey-cve-2026-45585-bitlocker-winre-txf-bypass/
-CVE        : CVE-2026-45585, cve-2026-45585
+CVE        : cve-2026-45585, CVE-2026-45585
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-45585, bitlocker, winre, transactional-ntfs, physical-access
 WORD_COUNT : 1166
@@ -80,6 +80,185 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 --------------------------------------------------------------------------------
 
 <DOCUMENT id="002" type="security-research-post">
+<FRONTMATTER>
+TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
+DATE       : 2026-06-02
+URL        : https://garrettstimpson.ca/posts/2026/06/02/voidstealer-debugger-abe-bypass/
+CVE        : none
+CATEGORIES : malware, analysis
+TAGS       : VoidStealer, ABE-bypass, infostealer, hardware-breakpoint, debugger, chrome, mitre-attack, windows
+WORD_COUNT : 1733
+EXCERPT    : VoidStealer v2.0 is the first infostealer caught in the wild ripping Chrome's App-Bound Encryption key out of memory with a debugger and a hardware breakpoint, no process injection and no SYSTEM privileges required.
+</FRONTMATTER>
+<BODY>
+Most stealers that beat Chrome's App-Bound Encryption do it the loud way. They inject into the browser, call the elevation service from inside its address space, and hope nothing is watching the write. VoidStealer v2.0 does something quieter, and that is what makes it worth a writeup. It attaches to Chrome as a debugger, drops a hardware breakpoint on the exact instruction where the master key sits in plaintext, and reads the key out with two `ReadProcessMemory` calls. No injection. No write into the browser at all. No SYSTEM token. I'll be honest, the first time I read the chain I muttered something unkind, because it is clever.
+
+## What showed up
+
+VoidStealer is a Malware-as-a-Service infostealer that started selling on HackForums and a few darkweb boards around December 12, 2025. It is mid-tier commodity in most respects, a subscription stealer any affiliate can buy and point at victims through fake software pages and bogus company portals. What pushed it onto my radar is the v2.0 release on March 13, 2026, which added a debugger-based App-Bound Encryption bypass. Gen Threat Labs published the dissection on March 19 and SOCRadar followed in April with the operational picture. The v2.0 sample they analyzed carries SHA256 `f783fde5cf7930e4b3054393efadd3675b505cbef8e9d7ae58aa35b435adeea4`. That hash is your reference point if you want to pull metadata, not a download link, and nothing here required touching the binary.
+
+For the data side, VoidStealer is the usual grab-and-go. Chromium credentials and session cookies, crypto wallets from Exodus, Atomic, Electrum, MetaMask, and Phantom, Telegram session files, Discord tokens, FTP creds, and a system fingerprint. Cookies are the prize. A live session cookie walks past MFA, which is exactly why Google built ABE to protect them, and exactly why the v2.0 bypass matters.
+
+## What makes it work
+
+Quick recap on what ABE actually defends, because the bypass only makes sense against it. Chrome encrypts cookies and passwords with a per-application key, the `v20_master_key`. That key is stored encrypted on disk in `Local State` under `os_crypt.app_bound_encrypted_key`, and it is wrapped by `CryptProtectData` running as `NT AUTHORITY\SYSTEM`. Chrome itself runs as you, not as SYSTEM, so it cannot unwrap the key directly. A separate Google Chrome Elevation Service runs as SYSTEM, validates that the caller is really Chrome over a COM interface, and hands back the decrypted key. That validation is the soft spot a lot of bypasses lean on, but VoidStealer's new trick does not even bother with the service.
+
+Here is the weakness it goes after instead. However briefly Chrome holds the key, there is a window where `v20_master_key` exists in the browser's memory in cleartext. Chrome tries to shrink that window, keeping the key wrapped with `CryptProtectMemory` under the `CRYPTPROTECTMEMORY_SAME_PROCESS` flag so that even a memory read returns ciphertext unless you call the matching unwrap from inside Chrome. But during startup, when the browser loads its ABE-protected cookies, the key has to be live and plaintext for a moment. VoidStealer engineers itself to be sitting on that moment.
+
+The chain runs like this. VoidStealer spawns the browser with `CreateProcessW` using `CREATE_SUSPENDED` and `SW_HIDE`, resumes the main thread, then attaches as a debugger with `DebugActiveProcess` and enters a `WaitForDebugEvent` loop. Because it attached before the DLLs finished loading, it waits for `LOAD_DLL_DEBUG_EVENT` and watches for `chrome.dll` or `msedge.dll`. Once the target module loads, it scans the `.rdata` section with `ReadProcessMemory` for the string `OSCrypt.AppBoundProvider.Decrypt.ResultCode`. That string is not random. In the Chromium source it sits immediately after the call to `os_crypt::DecryptAppBoundString`, which is precisely where the plaintext key lives, and it has exactly one cross-reference. Perfect landmark.
+
+Finding the string is only half of it. VoidStealer then sweeps the `.text` section for the byte pattern `48 8D 0D`, which is `LEA RCX, [rip+disp32]`, pulls the four-byte displacement, and computes the target with `RCX = (instruction_address + 7) + (signed int32) disp32`. When the resolved address matches the string's address, it has found the instruction that references the result code, and that instruction's address becomes the breakpoint target. Smart, because it survives recompiles and ASLR. No hardcoded offsets to break on the next Chrome update.
+
+Then it arms a hardware breakpoint. It resolves `NtGetNextThread` from `ntdll`, walks every browser thread, suspends each, writes the target into debug register `DR0`, enables it through `DR7`, and resumes. It handles `CREATE_THREAD_DEBUG_EVENT` too, so new threads get the breakpoint as well. Hardware breakpoints are the whole point of the stealth story. A software breakpoint means patching a `0xCC` into the browser, which is a memory write somebody can catch. Debug registers go in through `SetThreadContext` and never modify a byte of the browser's image. When the breakpoint fires during startup, in current builds `R15` for Chrome (or `R14` for Edge) holds a pointer to the key, and two `ReadProcessMemory` calls later the operator has the `v20_master_key`. With that one key, every ABE-protected value Chrome holds decrypts offline.
+
+Worth saying plainly, the VoidStealer crew did not invent any of this. They lifted it from Meckazin's open-source ElevationKatz, public for over half a year. That is the part that should bother defenders, because if a commodity MaaS shop can copy-paste a PoC into a shipping build, everyone else will too.
+
+The rest of the operation is commodity but tidy. The C2 address is not hardcoded. VoidStealer reads it from the display name of an operator-controlled Steam profile, a classic dead drop resolver, so blocking a domain does nothing because the next run pulls the rotated address. SOCRadar tied SteamID `76561199877608270` and the intermediate domain `citrusshop.icu` to live campaigns. Stolen data goes out as chunked JSON, and operators get both a panel and a real-time Telegram ping per victim. On the evasion side, VoidStealer resolves its syscalls dynamically from `ntdll` to dodge userland EDR hooks, keeps its imports out of the table to starve static scanners, XOR-encrypts its config, and bails if its sandbox mutex already exists. On MITRE that maps cleanly to T1555.003 and T1539 for the browser credential and cookie theft, T1027.007 for dynamic API resolution, T1497 for the mutex sandbox check, T1102.001 for the Steam dead drop resolver, and T1041 for the exfil.
+
+## Local educational sample
+
+Below is a safe demonstration of the two interesting primitives, the RIP-relative `LEA` address resolution and the debug-register mechanics. It does not touch a browser, read another process, or recover any key. It resolves a `LEA` displacement from a static byte buffer and arms a hardware breakpoint on the calling thread's own benign function pointer.
+
+```c
+// EDUCATIONAL SAMPLE - demonstrates RIP-relative LEA resolution and DR0/DR7 hardware breakpoints
+// This does NOT contain any malicious payload, reads no other process, and recovers no keys
+// For research and defensive awareness only
+#include <windows.h>
+#include <stdio.h>
+#include <stdint.h>
+
+// Resolve the target of a `LEA RCX, [rip+disp32]` instruction (opcode 48 8D 0D).
+// This is pure static math, the same trick VoidStealer uses to find a landmark
+// instruction without any hardcoded offset. CPU rule: RCX = (addr + 7) + disp32.
+uintptr_t resolve_lea_target(const uint8_t *code, uintptr_t instr_va) {
+    if (!(code[0] == 0x48 && code[1] == 0x8D && code[2] == 0x0D))
+        return 0; // not the LEA RCX form we are looking for
+    int32_t disp32;
+    memcpy(&disp32, code + 3, sizeof(disp32)); // next 4 bytes are the signed displacement
+    return instr_va + 7 + (intptr_t)disp32;    // 7 = length of this LEA encoding
+}
+
+// Arm a hardware breakpoint on the CALLING thread only. No other process is involved.
+// DR0 holds the address, DR7 bit 0 (L0) enables it as an execute breakpoint.
+void arm_local_hw_breakpoint(void *benign_target) {
+    CONTEXT ctx = { .ContextFlags = CONTEXT_DEBUG_REGISTERS };
+    HANDLE th = GetCurrentThread();
+    GetThreadContext(th, &ctx);
+    ctx.Dr0 = (DWORD_PTR)benign_target; // address to watch
+    ctx.Dr7 |= 0x1;                     // L0 = local enable for DR0
+    SetThreadContext(th, &ctx);         // note: no write into any image, registers only
+    printf("[edu] DR0 set to %p, DR7 L0 enabled (local thread only)\n", benign_target);
+}
+
+int main(void) {
+    // 48 8D 0D 10 00 00 00 => LEA RCX, [rip+0x10], at pretend VA 0x1000
+    uint8_t demo[] = { 0x48, 0x8D, 0x0D, 0x10, 0x00, 0x00, 0x00 };
+    printf("[edu] resolved LEA target = 0x%llx\n",
+           (unsigned long long)resolve_lea_target(demo, 0x1000)); // expect 0x1017
+    arm_local_hw_breakpoint((void *)&main);
+    return 0;
+}
+```
+
+The teaching point is that neither primitive is malicious on its own. A debugger, a `LEA` parse, and a debug register are ordinary tools. The malice is entirely in the target: a browser you spawned hidden, so you could read a key out of it during the one second it was exposed.
+
+## Detection and defense
+
+The good news, per Gen Threat Labs, is that the invariants are hard to hide. Something has to attach a debugger to a browser, set a hardware breakpoint, and read browser memory. Legitimate software does not autonomously debug Chrome. In Sysmon terms, watch Event ID 10 (ProcessAccess) for a non-developer process opening `chrome.exe` or `msedge.exe` with `GrantedAccess` masks that include debug or `PROCESS_VM_READ` rights, and watch Event ID 1 (ProcessCreate) for a browser spawned by an odd parent with `--no-sandbox`, `--disable-extensions`, or the giveaway off-screen `--window-position=-32000,-32000`. A browser launched suspended, headless, on a hidden desktop, or off-screen is the tell that someone wants it running where you cannot see it. On the network side, flag outbound connections to `steamcommunity.com` from endpoints that have no business gaming, and chunked JSON uploads to freshly registered low-reputation domains.
+
+For mitigations, EDR that monitors `SetThreadContext` and cross-process memory reads against browser targets catches this where signatures will not, since the binary changes per affiliate but the behavior does not. Keep the SOCRadar indicators handy, `citrusshop.icu` and SteamID `76561199877608270`, but treat them as perishable because the operators rotate Steam profiles constantly. And the unglamorous control still wins: a stolen cookie only matters until the session dies, so shorter session lifetimes and binding sessions to device posture blunt the whole point of stealing them.
+
+VoidStealer is commodity malware that borrowed an elegant idea. The idea is the threat, not the family, because ElevationKatz is public and the next ten stealers will ship the same chain. Hunt the behavior, not the build.
+
+*Sources: Gen Threat Labs, "VoidStealer: Debugging Chrome to Steal Its Secrets" (Mar 19, 2026); SOCRadar, "Void Stealer: The Infostealer Malware Quietly Targeting Organizations in 2026" (Apr 16, 2026).*
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="003" type="security-research-post">
+<FRONTMATTER>
+TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
+DATE       : 2026-06-02
+URL        : https://garrettstimpson.ca/posts/2026/06/02/greenplasma-ctfmon-section-object-windows-lpe/
+CVE        : CVE-2026-33825, CVE-2026-45585
+CATEGORIES : exploits, windows
+TAGS       : greenplasma, ctfmon, lpe, windows, section-objects, nightmare-eclipse
+WORD_COUNT : 1240
+EXCERPT    : An unprivileged user plants a section object where CTFMON trusts it, and the SYSTEM text-input service walks itself into your payload. The PoC stops one step short on purpose.
+</FRONTMATTER>
+<BODY>
+Here's the part that gets me about GreenPlasma. There is no kernel bug. No heap groom, no use-after-free, no race against a one-shot window you have to win on the first try. The whole thing is a standard user politely asking the object manager for a section, putting it somewhere a SYSTEM process already looks, and waiting. Windows does the rest to itself.
+
+GreenPlasma is one of two zero-days that Nightmare-Eclipse (the same person posting as Chaotic Eclipse) dropped on GitHub on May 13, 2026, alongside YellowKey, the BitLocker/WinRE bypass I wrote up the other day as CVE-2026-45585. GreenPlasma is the local privilege escalation half. As of June 2 there is still no CVE assigned and no patch from Microsoft. It affects Windows 10, Windows 11, and Windows Server wherever an interactive session is running ctfmon.exe, which in practice is almost everywhere a human logs in.
+
+## What CTFMON actually is, and why it's a problem
+
+ctfmon.exe is the Collaborative Translation Framework monitor. It's the plumbing behind the Text Services Framework: alternate keyboard layouts, IMEs, handwriting, the on-screen keyboard, speech input. Boring, ancient, and on by default. The thing nobody thinks about is that in an interactive logon it runs as SYSTEM, and it brokers shared state through named kernel objects so that per-user input components and the privileged service can talk to each other.
+
+Shared state plus a privilege boundary is the oldest trap in Windows local exploitation. CTFMON reaches into the object manager namespace to find and map section objects (shared memory, created through NtCreateSection and friends) that the input stack uses to pass data around. The trust assumption baked in is that whatever lives at the expected name was placed there by something at least as privileged as CTFMON. That assumption is wrong, and GreenPlasma is the proof.
+
+## The primitive
+
+What James Ballantyne's team at SpiderLabs documented, and what the public PoC demonstrates, is arbitrary section creation in a namespace location a standard user has no business writing to. The exploit, running as a plain unprivileged user, creates a named section object and gets it to land where CTFMON expects a trusted one. Then a chain of registry edits and ACL boundary abuse nudges CTFMON into opening and mapping the attacker's section instead of the legitimate one.
+
+Once SYSTEM maps your section, you own a region of memory that a SYSTEM process treats as its own. You write the bytes. CTFMON reads them back believing they came from the input subsystem. That's the whole ballgame: shellcode or a fake DLL mapping sitting in a region the OS fully trusts, executed in SYSTEM context, with no UAC prompt and no admin rights anywhere in the path.
+
+If you've done Windows privesc work, you know the shape of this. It's a planting-and-trust problem, cousin to the classic DLL search-order and named-pipe impersonation tricks, except the trusted resource here is a section object in the object manager namespace rather than a file on disk. File integrity monitoring will not see it. The on-disk ctfmon.exe never changes. AIDE, Tripwire, anything hashing binaries, all blind. The malicious artifact is a memory section that exists only at runtime.
+
+## The half a PoC
+
+This is the genuinely annoying bit, and also the clever bit. Nightmare-Eclipse shipped the section-creation primitive and then stopped. The final stage, the part that converts "I control a section CTFMON maps" into "I have a SYSTEM shell," is missing. He left a note framing it as a capture-the-flag: if you're smart enough, you can turn this into a full privilege escalation because you can influence the newly created section to manipulate data.
+
+Do not let the word "partial" lull anyone. Releasing the hard, novel part (the boundary abuse that gets your section trusted) while withholding the mechanical last step is not a mitigation. It's a speed bump for skids and a free starting block for anyone competent. The conceptual gap between a controlled SYSTEM-mapped section and code execution is small. You're picking how CTFMON interprets data it already trusts. A skilled person closes that in an afternoon, and ransomware crews and APT operators have repeatedly folded public LPE code into live intrusions inside the same week a drop lands.
+
+For context on how fast this turns operational: SpiderLabs and SecurityWeek both tie earlier Nightmare-Eclipse tools (BlueHammer, patched as CVE-2026-33825, plus the still-unpatched RedSun and UnDefend) to hands-on-keyboard intrusions within days of release, staged behind compromised FortiGate SSL VPN credentials from Russia-geolocated source IPs. GreenPlasma slots into that same kill chain as a third independent path to SYSTEM, used when Defender-targeting routes like BlueHammer and RedSun don't apply.
+
+## A rough sketch of the chain
+
+I'm not going to publish the missing weaponization, but the public shape looks like this:
+
+```c
+// 1. Run as a standard, unprivileged user. No admin, no UAC.
+// 2. Create a named section in the object-manager namespace where
+//    CTFMON will resolve it as trusted input-framework shared memory.
+HANDLE hSection;
+NtCreateSection(&hSection,
+                SECTION_ALL_ACCESS,
+                &objAttr,        // OBJECT_ATTRIBUTES naming the planted path
+                &maxSize,
+                PAGE_READWRITE,
+                SEC_COMMIT,
+                NULL);
+
+// 3. Registry + ACL manipulation steers ctfmon (SYSTEM) to open
+//    THIS section instead of the legitimate one.
+// 4. Map it, write attacker-controlled bytes.
+PVOID base = NULL;
+SIZE_T viewSize = 0;
+NtMapViewOfSection(hSection, GetCurrentProcess(), &base, 0, 0,
+                   NULL, &viewSize, ViewShare, 0, PAGE_READWRITE);
+
+// 5. CTFMON maps and trusts the same section in SYSTEM context.
+//    The CTF gap: shape the contents so CTFMON's use of them
+//    yields SYSTEM code execution.
+```
+
+The interesting research question is what exactly CTFMON does with that mapped data that becomes a control-flow primitive. That's the flag Nightmare-Eclipse is dangling, and I'd bet the answer is something dull like a function pointer or a length field that should never have been writable from a low box.
+
+## What to do before Microsoft ships a fix
+
+There's no patch, so this is detection and hardening, not remediation. Baseline the SHA-256 of C:\Windows\System32\ctfmon.exe now and alert on any deviation, even though the realistic attack leaves the binary alone. The signal you actually want is behavioral: ctfmon.exe spawning unexpected child processes, ctfmon interacting with or creating section objects it doesn't normally touch, or ctfmon crashing, which is a classic tell of a botched section swap. Feed object-manager telemetry into your EDR and write a rule for arbitrary section creation in non-user namespaces by a standard-user token, because that is the load-bearing step here.
+
+Block execution from user-writable staging directories with ASR rules, since every confirmed Nightmare-Eclipse intrusion staged payloads out of Pictures and Downloads subfolders. Alert on a process literally named GreenPlasma.exe and its obvious renames. Audit your FortiGate and other SSL VPN logs for off-hours or geographically improbable logins, because that has been the front door for this crew every time. And set a calendar reminder to watch Microsoft's out-of-band channel ahead of June's Update Tuesday, plus the Nightmare-Eclipse GitHub account, since he has been explicit that more drops are coming on a Patch Tuesday cadence.
+
+Treat GreenPlasma as live. The dangerous half is already public, and the other half is a weekend project for the wrong person.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -214,7 +393,170 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
+<FRONTMATTER>
+TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
+DATE       : 2026-06-02
+URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
+CVE        : CVE-2026-41089, cve-2026-41089
+CATEGORIES : exploits, windows
+TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
+WORD_COUNT : 1122
+EXCERPT    : A byte-versus-WCHAR mixup in Netlogon lets one unauthenticated UDP packet overflow a 528-byte stack buffer in LSASS. Microsoft rated it less likely to be exploited. It is being exploited.
+</FRONTMATTER>
+<BODY>
+Here is what gets me about this one. Microsoft shipped the patch for CVE-2026-41089 on May 12 and tagged it "Exploitation Less Likely." Nineteen days later the Centre for Cybersecurity Belgium put out an alert saying it is being hit in the wild. A pre-auth, zero-credential, network-reachable bug on the one box that holds your entire Active Directory forest together. Less likely. Sure.
+
+I want to walk through why this bug is so clean, because the root cause is the kind of thing you learn about in week one and then spend a career watching ship anyway. It is a unit confusion. Bytes versus WCHARs. That is the whole crash.
+
+## The vulnerable path
+
+Netlogon answers DC locator pings. When a client wants to find a domain controller it sends a CLDAP request, which is just LDAP riding on top of UDP port 389. No TCP handshake, no bind, no authentication. You send a datagram, the DC builds a response describing itself, and it sends one back. This is by design. It has to work before a machine has any credentials, which is exactly why it makes such a good target.
+
+The response gets built here:
+
+```
+I_NetLogonLdapLookupEx
+  -> NlGetLocalPingResponse        // allocates Src[528], a 528-byte stack buffer
+    -> LogonRequestHandler
+      -> BuildSamLogonResponse
+        -> NetpLogonPutUnicodeString  // writes strings into the buffer
+```
+
+`NlGetLocalPingResponse` puts a 528-byte buffer on the stack. Then `BuildSamLogonResponse` packs the response into it: the server name, the domain name, a couple of GUIDs, DNS names, and the username the client asked about. Each of those goes through `NetpLogonPutUnicodeString`.
+
+The bug lives in that last function. It receives a maximum length that the caller computed in bytes. It then treats that number as a count of WCHARs. A WCHAR is two bytes. So every bounds check is off by a factor of two, in the attacker's favor. The function thinks it has twice the room it actually has.
+
+Most of the fields in the response are fixed or short. The server name and domain name are whatever the DC is actually called. But one field is attacker controlled and it is generous about length. The `User` attribute in the CLDAP filter. The DC locator protocol lets you ping for a specific user, and that string gets copied straight into the response buffer. You are allowed up to 130 WCHARs there, which is 260 bytes on the wire. Combine that with the server name, the domain name, and the GUIDs, and the total write sails past the 528-byte boundary. The return address on the stack goes with it.
+
+## The packet
+
+There is nothing exotic about triggering it. You build a normal CLDAP search request, the kind any domain-joined machine sends a hundred times a day, with a filter like:
+
+```
+(&(DnsDomain=corp.local)(User=AAAA...130 chars...)(NtVer=...))
+```
+
+The public PoC from 0xABCD01 is plain Python with no dependencies, just `socket` and `struct` hand-rolling the BER encoding. It runs in three phases. Send a benign ping with a short username to confirm the DC is up and answering on UDP 389. Send the same packet again with a 130-character username of `A`s. Then wait a few seconds and ping once more. If the second ping gets no answer, LSASS went down.
+
+```
+python3 poc.py 10.0.50.21 corp.local -l 130
+```
+
+When LSASS crashes on a domain controller, the box reboots itself in about sixty seconds. That is the behavior the public exploit demonstrates: a denial of service that takes a DC offline on demand, repeatedly, from an unauthenticated position. The author was clear that the current code stops at the crash and does not go for code execution.
+
+That last point is where I want to be careful, because the headlines all say RCE and the CVSS vector says RCE, but what is publicly weaponized right now is the reboot. The overflow corrupts the stack, and a stack overflow of this shape is the classic precursor to code execution. Whether the in-the-wild activity CCB is seeing is someone knocking DCs over or someone who has quietly closed the gap to a shell, nobody outside the affected orgs has said. I would not bet on it staying a DoS. Stack smashes inside LSASS have a long history of growing teeth.
+
+## Who is exposed
+
+Any Windows Server acting as a domain controller, from 2012 through 2025. The fixed builds from the May update:
+
+```
+Server 2016        10.0.14393.9140
+Server 2019        10.0.17763.8755
+Server 2022        10.0.20348.5074
+Server 2022 23H2   10.0.25398.2330
+Server 2025        10.0.26100.32772
+```
+
+2012 and 2012 R2 only get the fix through ESU. If you are running DCs that old and out of extended support, you have a different conversation to have with yourself.
+
+## What to actually do
+
+Patch the domain controllers. All of them, in the same maintenance window. There is no graceful half-measure here. A forest with some DCs patched and some not is still a forest you can reboot at will, and a pre-auth DC bug does not respect your rollout schedule. Automox's Jason Kikta put it well: half-patched forests are not a defensible state for this class of bug.
+
+If you genuinely cannot patch a box right now, restrict inbound UDP 389 so only your trusted management subnets can reach the Netlogon CLDAP listener. CLDAP from a random workstation VLAN to a DC is not normal traffic. For legacy servers past ESU, 0patch shipped a micropatch. Their fix is a single instruction, `mov edx, 0x40`, which halves the max username length back to what it should have been. It is a satisfying reminder of how small the actual defect is.
+
+For detection, two signals. On the network, watch for CLDAP search requests where the `User` filter attribute runs longer than 20 or 30 characters. Real DC locator pings carry short service account names, not 130 bytes of padding. On the host, watch for LSASS crashes tied to netlogon.dll, Event ID 1000, and treat any unexplained DC reboot as suspicious until proven otherwise. You can turn up Netlogon's own logging:
+
+```
+nltest /dbflag:0x2080ffff
+```
+
+The thing I keep coming back to is the severity call. A network-reachable, unauthenticated overflow on a domain controller got rated less likely to be exploited, and the patch was public, and patch diffing is a solved problem, and AI tooling has made root-cause reversing a same-week affair. Aretiq had a public reverse engineering writeup out almost immediately. The window between a DC patch shipping and someone shooting at the unpatched ones is now measured in days. Plan your patching like that is true, because for this one it was.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="006" type="security-research-post">
+<FRONTMATTER>
+TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
+DATE       : 2026-06-02
+URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
+CVE        : cve-2026-35616, CVE-2026-35616
+CATEGORIES : exploits, malware, analysis
+TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
+WORD_COUNT : 1182
+EXCERPT    : An auth bypass in FortiClient EMS let attackers turn the endpoint management server into a delivery truck, pushing a credential stealer disguised as a Fortinet patch to every managed device at once.
+</FRONTMATTER>
+<BODY>
+The thing I keep coming back to with this campaign is the lure. The payload was named FortiEndpoint_Patch.exe. The attackers got in through an unpatched FortiClient EMS, then handed every managed endpoint a fake patch. A patch problem, exploited, used to deliver a fake patch. Whoever ran this had a sense of humor about it.
+
+Arctic Wolf published the details on May 27, and it deserves more attention than it got, because the tradecraft here is the kind that quietly wrecks a whole fleet. The bug is CVE-2026-35616, an improper access control flaw in FortiClient Endpoint Management Server. CVSS 9.1, unauthenticated, remote. Fortinet shipped out-of-band hotfixes back in early April after confirming zero-day exploitation, CISA put it on the KEV list the same month, and the permanent fix landed in EMS 7.4.7. None of that stopped operators from finding the boxes that were still behind.
+
+## The bug is boring. The blast radius is not.
+
+Let me be honest about the vulnerability itself. It is not clever. It is an API authentication bypass, tracked under CWE-284. You send specially crafted HTTP requests to certain EMS endpoints without valid credentials, and the server processes them as if a legitimate administrator made them. That is the whole bug. No memory corruption, no exotic primitive. The flaw was reported to Fortinet on March 31, 2026 after it was already being abused in the wild.
+
+What makes it matter is what EMS is. FortiClient EMS is the central brain for managing FortiClient endpoints: policies, VPN profiles, configuration, the lot. Get admin on EMS and you do not need a separate intrusion path to each device. You have one already, built in, trusted, and humming. Every managed endpoint becomes a target the moment you can edit the management config. That is the difference between a single compromised server and a fleet-wide incident.
+
+If you want to know whether someone tried this against your EMS, the exploitation leaves a tell in the logs. Arctic Wolf saw this line on every attempt:
+
+```
+Certificate not found in request header.
+```
+
+In real intrusions, within seconds, it was followed by:
+
+```
+Certificate user: fortinet-ca2 FortiGate: Fabric device (SN=fortinet-ca2) successfully updated
+```
+
+There is a public nuclei template for CVE-2026-35616 that produces the first line regardless of patch status, so the certificate error alone is not proof of compromise. The pair, error then a fabric-device update seconds later, is the high-signal combination. Early logins in this campaign came from Tor exit nodes, including 185.220.101.15 and 192.42.116.14.
+
+## Living off the management plane
+
+Here is the part worth studying. After gaining privileged access to EMS, the operators did not drop a web shell or scramble for persistence. They edited the Remote Access Profile and the endpoint policy. FortiClient EMS lets administrators define scripts that run automatically on an endpoint when a VPN tunnel comes up, using the `on_connect` and `script` directives in the XML profile. This is a documented, legitimate feature meant for things like mapping drives after a tunnel establishes. The attackers just used it as designed, pointed at their own code.
+
+Within seconds of a managed endpoint bringing up its IPsec tunnel, fortitray.exe launched a .cmd file through cmd.exe. The script sat where almost nobody looks, inside the VPN troubleshooting log directory:
+
+```
+C:\Program Files\Fortinet\FortiClient\logs\Trace\scripts\{GUID}.cmd
+```
+
+That .cmd decoded a base64 PowerShell blob. The PowerShell pulled a payload from the attacker VPS using a few fallback download methods, ran it, slept 90 seconds, then POSTed the output back to 83.138.53.110. The process tree is clean and worth memorizing, because it is the detection:
+
+```
+fortitray.exe or ipsec.exe
+  └── cmd.exe
+        └── powershell.exe (downloader)
+              └── FortiEndpoint_Patch.exe (credential stealer)
+```
+
+PowerShell spawned by fortitray or the IPsec helper, reaching out to a raw IP over HTTP right after a tunnel comes up, is not something a healthy endpoint does. If you have any EDR telemetry at all, that lineage is your hunt.
+
+## EKZ, the stealer nobody had seen
+
+The payload is a previously unreported browser credential stealer that Arctic Wolf named EKZ, after symbol strings left in the decrypted code. It is delivered as p.exe and lands as FortiEndpoint_Patch.exe. It is a MinGW-w64 build, GCC with DWARF debug info still attached, PE32+ console binary, 4,019,070 bytes, with a zeroed PE timestamp for anti-attribution. SHA-256 0da123adf9251957a4b850a3f6bd6a753dd4892be176a84a18450e899534cc5e. It even ships a CLI with verbs like action_list, view, label, and export, plus a SQLite results store, which tells you it was built for repeated hands-on-keyboard use across many hosts, not a fire-and-forget dropper.
+
+The Chromium credential theft is the technically interesting bit, because it bothers to defeat app-bound encryption. EKZ reads the `os_crypt.app_bound_encrypted_key` out of the browser's Local State file, copies itself into the browser's own Application directory, and relaunches from that path so it passes the Chromium Elevation Service path validation. From there it calls IElevator::DecryptData to recover the Chromium v20 AES-256 master key and decrypts every profile's SQLite stores. For Firefox and other Gecko browsers it loads nss3.dll directly and reads key4.db, logins.json, and cookies.sqlite, the last of which sits in plaintext anyway.
+
+It takes passwords, autofill data like cards and addresses, and, the dangerous one, cookies. Stolen session cookies let an attacker resume an already-authenticated session, which can sidestep MFA entirely. The harvest goes to a log file in ProgramData, then PowerShell ships it to hxxp://83.138.53.110/service/save.php on a timer and cleans up the local artifacts.
+
+## What to actually do
+
+Patch EMS. If you are on 7.4.5 or 7.4.6, the hotfixes have been out since April and 7.4.7 carries the permanent fix. There is no reason to still be exposed in June. While you are at it, lock down the EMS management port, 8013, to trusted IP ranges only. An internet-reachable EMS is a fleet waiting to be reconfigured, and Shadowserver counted around 2,000 exposed instances when this started.
+
+For hunting, do not trust file integrity checks. The action is in configuration and in memory. Look for the certificate-error-then-fabric-update log pair on EMS, any `on_connect` script additions to Remote Access Profiles you did not make, and that scripts subdirectory under the FortiClient Trace logs. On endpoints, alert on PowerShell parented by fortitray.exe or ipsec.exe, anything executing out of ProgramData right after a VPN connect, and HTTP traffic to 83.138.53.110. Arctic Wolf published the full IOC set on their GitHub.
+
+The lesson is not really about Fortinet. It is that your management tooling is your most valuable target, because it is trusted by everything it touches. When the thing that pushes your patches gets popped, it can push anything. Treat the consoles that control your fleet like the crown jewels they are, because the people breaking in already do.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -310,7 +652,7 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
@@ -383,12 +725,12 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
-CVE        : cve-2026-0257, CVE-2026-0257
+CVE        : CVE-2026-0257, cve-2026-0257
 CATEGORIES : exploits, network-security
 TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
 WORD_COUNT : 1255
@@ -465,7 +807,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -604,7 +946,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
@@ -694,7 +1036,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
@@ -759,7 +1101,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
@@ -869,7 +1211,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -981,7 +1323,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -1051,7 +1393,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -1228,7 +1570,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -1322,7 +1664,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -1485,7 +1827,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -1643,7 +1985,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -1777,7 +2119,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -1999,7 +2341,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -2127,7 +2469,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -2334,7 +2676,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -2448,7 +2790,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -2632,7 +2974,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -2788,7 +3130,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -2941,7 +3283,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -3041,12 +3383,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : cve-2026-42945, CVE-2026-42945
+CVE        : CVE-2026-42945, cve-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -3192,12 +3534,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -3400,7 +3742,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -3515,12 +3857,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -3612,7 +3954,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -3759,5 +4101,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 29 documents — 2026-06-02T09:38:24Z
+END OF CORPUS — 33 documents — 2026-06-03T01:17:19Z
 ================================================================================
