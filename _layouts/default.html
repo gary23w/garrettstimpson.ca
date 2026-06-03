@@ -20,26 +20,13 @@
   {% if site.plugins contains 'jekyll-seo-tag' %}{% else %}<title>{{ page.title | default: site.title }}</title>{% endif %}
 
   <!-- Custom head (favicons, extra meta) -->
-  {%- include custom-head.html -%}</head>
+  {%- include custom-head.html -%}
+
+
+
+</head>
 
 <body>
-  <!-- ============ DEPLOY BANNER ============ -->
-  <div id="deploy-banner" role="complementary" aria-label="Deploy your own agent">
-    <span class="banner-label">
-      <span class="banner-prefix">// new</span>
-      <span class="banner-text-full">Deploy your own <strong>AI security research agent</strong> — free on Cloudflare Workers</span>
-      <span class="banner-text-short">Your own <strong>security agent</strong></span>
-    </span>
-    <a class="banner-badge"
-       href="https://deploy.workers.cloudflare.com/?url=https://github.com/gary23w/garrettstimpson-agent"
-       target="_blank" rel="noopener noreferrer"
-       title="Deploy to Cloudflare Workers — one click, your own account">
-      <img src="https://deploy.workers.cloudflare.com/button"
-           alt="Deploy to Cloudflare Workers">
-    </a>
-    <button class="banner-dismiss" id="banner-dismiss" aria-label="Dismiss banner" title="Dismiss">&#x2715;</button>
-  </div>
-
   <div id="read-progress" aria-hidden="true"></div>
   <!-- Matrix rain canvas background -->
   <canvas id="matrix-canvas" aria-hidden="true"></canvas>
@@ -68,6 +55,15 @@
           {%- if site.agent_url and site.agent_url != "" -%}
           <a class="page-link agent-link" href="{{ site.agent_url }}" target="_blank" rel="noopener" title="Chat with Agent Garrett">&#9099; Agent</a>
           {%- endif -%}
+
+          <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/gary23w/garrettstimpson.ca/tree/main/agent"
+             target="_blank" rel="noopener noreferrer"
+             title="Deploy your own research agent — powered by Cloudflare Workers AI"
+             style="vertical-align:middle;margin-left:12px;display:inline-flex;align-items:center;">
+            <img src="https://deploy.workers.cloudflare.com/button"
+                 alt="Deploy to Cloudflare Workers"
+                 style="height:24px;display:block;">
+          </a>
         </div>
       </nav>
     </div>
@@ -220,16 +216,5 @@
     nav.querySelectorAll('.trigger a').forEach(function(a){ a.addEventListener('click',close); });
   })();
   </script>
-
-  <!-- Deploy banner dismiss (persisted per session) -->
-  <script>
-  (function(){
-    var banner = document.getElementById('deploy-banner');
-    var btn    = document.getElementById('banner-dismiss');
-    if (!banner || !btn) return;
-    if (sessionStorage.getItem('banner-dismissed') === '1') {
-      banner.classList.add('hidden');
-    }
-    btn.addEventListener('click', function() {
-      banner.classList.add('hidden');
-      se
+</body>
+</html>
