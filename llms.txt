@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-06-06T14:04:52Z
+GENERATED    : 2026-06-07T07:33:51Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
@@ -20,7 +20,7 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : cve-2026-45247, CVE-2026-45247
+CVE        : CVE-2026-45247, cve-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1214
@@ -731,7 +731,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : CVE-2026-35616, cve-2026-35616
+CVE        : cve-2026-35616, CVE-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1182
@@ -977,7 +977,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
-CVE        : CVE-2026-0257, cve-2026-0257
+CVE        : cve-2026-0257, CVE-2026-0257
 CATEGORIES : exploits, network-security
 TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
 WORD_COUNT : 1255
@@ -1198,7 +1198,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : CVE-2026-43121, cve-2026-43121
+CVE        : cve-2026-43121, CVE-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -3635,7 +3635,7 @@ Check your kernel version. Patch if you haven't.
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : CVE-2026-42945, cve-2026-42945
+CVE        : cve-2026-42945, CVE-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -3786,7 +3786,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -3994,7 +3994,7 @@ rmmod algif_aead 2>/dev/null
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -4109,7 +4109,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, CVE-2026-43500, cve-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -4348,5 +4348,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 36 documents — 2026-06-06T14:04:52Z
+END OF CORPUS — 36 documents — 2026-06-07T07:33:51Z
 ================================================================================
