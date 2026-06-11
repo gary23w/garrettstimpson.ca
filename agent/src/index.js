@@ -493,7 +493,7 @@ function buildToolRoutePolicy(query, opts = {}) {
   const corpusIntent = !!opts.corpusIntent;
   const darkwebEnabled = opts.darkwebEnabled !== false;
   const targets = extractToolTargets(query);
-  const explicitToolIntent = /\b(run|use|check|scan|lookup|look up|investigate|analy[sz]e|recon|osint|enumerate|crawl|fingerprint|pivot)\b/.test(q);
+  const explicitToolIntent = /\b(run|use|check|scan|lookup|look up|investigate|analy[sz]e|recon|osint|enumerate|crawl|fingerprint|pivot|decode|encode|parse|extract|identify|score|draft|profile|dig)\b/.test(q);
   const artifact = hasActionableArtifact(q);
   const classes = [];
   const allowed = new Set();
@@ -501,27 +501,27 @@ function buildToolRoutePolicy(query, opts = {}) {
 
   if (targets.cveIds.length) {
     classes.push('cve');
-    allow(['nvd_lookup', 'epss_lookup', 'kev_lookup', 'circl_cve', 'cve_poc', 'kev_recent', 'mitre']);
+    allow(['nvd_lookup', 'epss_lookup', 'kev_lookup', 'circl_cve', 'cve_poc', 'kev_recent', 'mitre', 'cve_search']);
   }
   if (targets.ips.length) {
     classes.push('ip');
-    allow(['rdap_ip', 'reverse_dns', 'ip_geo', 'asn_info', 'greynoise', 'tor_exit', 'shodan_internetdb', 'nmap_scan']);
+    allow(['rdap_ip', 'reverse_dns', 'ip_geo', 'asn_info', 'greynoise', 'tor_exit', 'shodan_internetdb', 'urlhaus', 'nmap_scan']);
   }
   if (targets.domains.length || targets.urls.length) {
     classes.push('domain_url');
-    allow(['rdap_domain', 'dns_lookup', 'dns_records', 'cert_ct', 'wayback', 'urlscan', 'wellknown', 'archive_urls', 'subdomains', 'email_security', 'typosquat', 'origin_ip', 'tech_fingerprint', 'phish_check', 'unshorten', 'fetch_url', 'crawl', 'vuln_scan', 'favicon_hash', 'post_malware_pipeline', 'nmap_scan', 'pcap_analyze', 'forensics_triage']);
+    allow(['rdap_domain', 'dns_lookup', 'dns_records', 'cert_ct', 'crtsh_subs', 'subdomains', 'subdomain_takeover', 'wayback', 'archive_urls', 'urlscan', 'urlhaus', 'wellknown', 'email_security', 'typosquat', 'origin_ip', 'tech_fingerprint', 'phish_check', 'cors_check', 'http_headers', 'bucket_finder', 'favicon_hash', 'unshorten', 'fetch_url', 'crawl', 'file_analyze', 'vuln_scan', 'dork', 'github_osint', 'disclosure_draft', 'image_osint', 'post_malware_pipeline', 'nmap_scan', 'pcap_analyze', 'forensics_triage']);
   }
   if (targets.emails.length) {
     classes.push('email');
-    allow(['email_recon', 'breach_check', 'gravatar', 'holehe', 'exposure_search', 'username_enum']);
+    allow(['email_recon', 'breach_check', 'gravatar', 'holehe', 'exposure_search', 'leakcheck', 'paste_search', 'email_permutations', 'username_enum', 'dork']);
   }
   if (targets.handles.length) {
     classes.push('identity');
-    allow(['username_enum', 'github_user', 'keybase', 'devto_user', 'exposure_search', 'stealer_check']);
+    allow(['username_enum', 'github_user', 'keybase', 'devto_user', 'exposure_search', 'stealer_check', 'leakcheck', 'paste_search', 'dork']);
   }
   if (targets.hashes.length) {
     classes.push('hash');
-    allow(['hash_lookup', 'hash_id', 'reverse_analyze', 'forensics_triage']);
+    allow(['hash_lookup', 'hash_id', 'file_analyze', 'reverse_analyze', 'forensics_triage']);
   }
   if (targets.crypto.length) {
     classes.push('crypto');
@@ -535,12 +535,36 @@ function buildToolRoutePolicy(query, opts = {}) {
     classes.push('cvss');
     allow(['cvss']);
   }
+  // Encoded / text-utility artifacts (base64/hex blobs, JWTs, CIDR ranges, epoch timestamps,
+  // IOC text). extractToolTargets does not type these, so gate on verbs or shape.
+  const jwtRe = /\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]*/;
+  const cidrRe = /\b\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}\b/;
+  const textVerb = /\b(decode|encode|base64|base32|hex|rot13|de-?obfuscate|jwt|cidr|subnet|netmask|timestamp|epoch|unix\s*time|iocs?|indicators?)\b/.test(q);
+  if (jwtRe.test(query) || cidrRe.test(q) || textVerb) {
+    classes.push('text_util');
+    allow(['decode', 'encode', 'jwt', 'cidr', 'timestamp', 'ioc_extract', 'hash_id', 'crypto_ctf', 'cvss', 'unshorten']);
+  }
+  // People / corporate records — name/phone based; no reliable target typing, gate on intent.
+  if (/\b(background|public records?|relatives?|people search|who is behind|sec filings?|edgar|incorporat|registered (agent|business)|corporate registr|phone (number|lookup)|reverse phone|do?xx?)\b/.test(q)) {
+    classes.push('people');
+    allow(['people_search', 'edgar', 'opencorporates', 'phone_osint', 'username_enum', 'exposure_search']);
+  }
+  // Forensics / RE / memory / pcap workflows (broker-delegated, heavy).
+  if (/\b(memory (dump|image|forensics)|volatility|reverse[\s-]?engineer|disassemble|malware analysis|pcap|packet capture|triage|forensic)\b/.test(q)) {
+    classes.push('forensics');
+    allow(['reverse_analyze', 'memory_forensics', 'pcap_analyze', 'forensics_triage', 'file_analyze', 'ioc_extract', 'hash_lookup']);
+  }
+  // Password exposure check.
+  if (/\bpassword\b/.test(q) && /\b(pwned|breach|leaked|exposed|compromis|safe|hibp)\b/.test(q)) {
+    classes.push('pwd');
+    allow(['pwned_password']);
+  }
 
   if (corpusIntent) return { use: false, reason: 'corpus-intent', classes, allowedTools: [], targets };
-  if (!artifact && !explicitToolIntent) return { use: false, reason: 'no-actionable-tool-route', classes, allowedTools: [], targets };
   if (!allowed.size && explicitToolIntent) {
     return { use: true, reason: 'explicit-tool-intent', classes: ['generic'], allowedTools: toolCatalog(opts.env || {}).map(t => t.name), targets };
   }
+  if (!allowed.size && !artifact) return { use: false, reason: 'no-actionable-tool-route', classes, allowedTools: [], targets };
   return {
     use: !!allowed.size,
     reason: allowed.size ? (explicitToolIntent ? 'typed-artifacts+explicit-intent' : 'typed-artifacts') : 'no-tool-class-match',
@@ -2993,7 +3017,12 @@ async function toolRouter(env, userMsg, already, contextSoFar, allowedTools) {
     /\b(?:[a-z0-9\-]+\.)+(?:com|net|org|io|dev|ca|co|gov|edu|info|xyz|me|app|cloud|ai|sh|onion)\b/i, // domain
     /@[A-Za-z0-9_]{2,}/,                                                  // @handle
   ];
-  const hasArtifact = ARTIFACT.some(re => re.test(msg)) || (contextSoFar ? false : false);
+  const TEXT_ARTIFACT = [
+    /\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]*/,        // JWT
+    /\b\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}\b/,                                 // CIDR
+  ];
+  const TEXT_VERB = /\b(decode|encode|base64|base32|hex|rot13|de-?obfuscate|jwt|cidr|subnet|netmask|timestamp|epoch|unix\s*time|iocs?|indicators?|cvss)\b/i.test(msg);
+  const hasArtifact = ARTIFACT.some(re => re.test(msg)) || TEXT_ARTIFACT.some(re => re.test(msg)) || TEXT_VERB;
   const low = msg.toLowerCase();
   if (isCorpusIntent(msg)) return null;
   // Explicit web-search intent is deterministic — no model needed.
