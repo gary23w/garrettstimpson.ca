@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-06-11T21:06:07Z
+GENERATED    : 2026-06-18T07:53:37Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 38
+TOTAL POSTS  : 39
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,132 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
+DATE       : 2026-06-14
+URL        : https://garrettstimpson.ca/posts/2026/06/14/itscape-kvm-arm64-guest-host-escape-cve-2026-46316/
+CVE        : CVE-2026-46316
+CATEGORIES : exploits, linux-kernel
+TAGS       : CVE-2026-46316, KVM, arm64, UAF, guest-escape, cloud-security
+WORD_COUNT : 1545
+EXCERPT    : A race condition in KVM's vGIC-ITS cache invalidation produces a double-put UAF that researcher Hyunwoo Kim turned into full host kernel code execution from inside a guest VM.
+</FRONTMATTER>
+<BODY>
+Here's what gets me about this one: it's not a QEMU bug. Every KVM escape write-up you read is almost always about QEMU's device emulation layer, something in virtio or the e1000 model. This one is in-kernel KVM itself, specifically the GICv3 Interrupt Translation Service emulation on arm64, and it gets you to host kernel code execution with root privilege.
+
+Hyunwoo Kim ([@v4bel](https://x.com/v4bel)) dropped CVE-2026-46316, named ITScape, to the oss-security mailing list on June 10, 2026. The patch had already landed in mainline on June 5 (commit [13031fb6b835](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=13031fb6b8357fbbcded2a7f4cba73e4781ee594)), five days after he submitted it. The PoC is live at [github.com/V4bel/ITScape](https://github.com/V4bel/ITScape). This affects every arm64 KVM host running kernel versions from commit [8201d1028caa](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=8201d1028caa) (April 25, 2024) up through the day before the fix.
+
+## The Vulnerable Code
+
+KVM on arm64 maintains a per-ITS translation cache, an xarray, that caches the result of mapping a (DeviceID, EventID) pair to a `vgic_irq` struct. When the guest clears the `GICR_CTLR.EnableLPIs` bit on a redistributor, KVM calls `vgic_its_invalidate_all_caches()`, which walks every ITS attached to the VM and drains each cache with `vgic_its_invalidate_cache()`:
+
+```c
+static void vgic_its_invalidate_cache(struct vgic_its *its)
+{
+    struct kvm *kvm = its->dev->kvm;
+    struct vgic_irq *irq;
+    unsigned long idx;
+
+    xa_for_each(&its->translation_cache, idx, irq) {
+        xa_erase(&its->translation_cache, idx);
+        vgic_put_irq(kvm, irq);
+    }
+}
+```
+
+There are two problems sitting right next to each other. First, this drain holds only `rcu_read_lock`. It does not hold `its_lock` or `cmd_lock`, so nothing prevents two concurrent contexts from walking the same xarray at the same time. Second, `vgic_put_irq()` is called on `irq`, the `xa_for_each` iteration variable, rather than on the value `xa_erase()` returns. `xa_erase` is atomic. When two contexts race to erase the same index, only one gets the object back. The other gets NULL. But both call `vgic_put_irq()` on the iterator, meaning the reference on that `vgic_irq` drops twice. That's a use-after-free on a `kmalloc-cg-96` slab object, freed via `kfree_rcu`.
+
+The trigger condition is two or more vCPUs clearing their own `GICR_CTLR.EnableLPIs` simultaneously. The `cmpxchg(ENABLE_LPIS -> RWP)` is per-vCPU state, so each vCPU enters the drain once per cycle. But the ITS cache itself is VM-global. Four vCPUs racing into the same xarray gives six concurrent drain pairs. With 128 devices times 1024 events pre-loaded into the cache (about 130,000 entries), the walk is long enough that the overlap window is reliable.
+
+## The Exploit Chain
+
+Kim's PoC is not a straightforward crash dump. It's a six-stage chain that goes from a race condition to arbitrary code execution in the host kernel, confirmed by creating `/ITScape` on the host filesystem owned by uid 0. Here's how each stage connects to the next.
+
+**Stage 1: Fill the cache.** The guest programs MAPD, MAPTI, and INT commands into the ITS command queue for 128 devices with 1024 event IDs each. This populates the translation cache with ~130k entries, all pointing to their respective `vgic_irq` objects. The LPI property table is set to all-disabled to prevent actual interrupt delivery while the cache fills normally.
+
+**Stage 2: Race and free.** Four vCPUs synchronize at a barrier, then simultaneously clear `EnableLPIs`. Multiple vCPUs enter `vgic_its_invalidate_cache` and walk the same xarray concurrently. The double-put fires. The freed `vgic_irq` is a 96-byte `kmalloc-cg-96` object handed to `kfree_rcu`. To actually return it to the free list (not just queue it), the guest performs repeated vCPU exits (`GUEST_SYNC`), which advance host RCU and flush the `KVFREE_RCU_BATCHED` sheaf without any host-side sleep.
+
+**Stage 3: Guest-side cross-cache reclaim.** This is the most novel part. A 64MB `guest_memfd` region was set up at VM creation with `GUEST_MEMFD_FLAG_MMAP | GUEST_MEMFD_FLAG_INIT_SHARED`. When the guest faults in the entire region, the host allocates backing pages for it. One of those backing pages is the cg-96 slab page just freed by the double-put. The guest maps it directly via mmap and writes to every 96-byte slot, crafting a fake `vgic_irq` with controlled field values:
+
+```c
+*(volatile u32 *)(obj + 0)  = 0;          // irq_lock = unlocked
+*(volatile u32 *)(obj + 4)  = 0x2000;     // intid = LPI (not SPI, avoids broadcast)
+*(volatile u64 *)(obj + 32) = sentinel;   // ap_list.prev (leak lands here)
+*(volatile u64 *)(obj + 40) = 0;          // vcpu = NULL
+*(volatile u64 *)(obj + 48) = target_vcpu;// target_vcpu (controlled)
+*(volatile u8  *)(obj + 56) = 0x20;       // active = true
+*(volatile u32 *)(obj + 60) = 2;          // refcount >= 1
+*(volatile u64 *)(obj + 80) = 0;          // ops = NULL (native path)
+```
+
+**Stage 4: KASLR bypass (two-stage).** With `ops = NULL`, `vgic_queue_irq_unlock` skips the function pointer path and falls into `list_add_tail(&irq->ap_list, &vcpu->arch.vgic_cpu.ap_list_head)`. The `list_add` implementation writes `head->prev` into `new->prev`, which is the fake irq's `ap_list.prev` field sitting in guest-writable gmem. Setting `target_vcpu` to a calculated offset gives an arbitrary-read primitive.
+
+Stage 4a: Send MOVI to move the LPI to collection 0, which causes the kernel to write the real vCPU0 kernel address into the fake irq's `target_vcpu`. Read it back from gmem+48.
+
+Stage 4b: Set `target_vcpu` such that `*(target_vcpu + 6656)` resolves to `vCPU0.pmu.overflow_work.func`, which holds `kvm_pmu_perf_overflow_notify_vcpu`, a kernel image address. The `list_add` deposits that value into gmem+32. One `GUEST_SYNC` later, a surviving vCPU reads it and computes `kimage_voffset`. Note: vCPU0 crashes on the subsequent `.text` store in the same `list_add`, but by then the leak has already landed in gmem.
+
+**Stage 5: Write-what-where.** Now `ops` is set to a guest-controlled gmem address (obtained by chaining fake irqs through the real `ap_list`). The `irq_ops.queue_irq_unlock` field sits at offset 16. When the kernel calls `irq->ops->queue_irq_unlock(kvm, irq, flags)`, it lands on a gadget at `ed_deschedule+0xd4` (runtime address computed with the leaked slide). That gadget stores `*(irq + 0x28)` to the address at `*(irq + 0x20)`. Over four sweeps through ITS#1's command queue (ITS#1 has an independent `cmd_lock` since vCPU0 died holding ITS#0's), this overwrites:
+
+- `poweroff_cmd` (`.data`, default `"/sbin/poweroff"`) with `"/bin/touch /ITScape"`
+- `arp_tbl.gc_work.work.func` (originally `neigh_periodic_work`) with `orderly_poweroff`
+
+**Stage 6: Delayed host code execution.** vCPU1 exits via `GUEST_DONE`, healing the preempt leak from the gadget path. vCPUs 2 and 3 loop on `GUEST_SYNC` to keep the VM alive. Within about 15 seconds, the neighbor garbage collector workqueue re-arms and calls the overwritten func. The call chain is:
+
+```
+overwritten arp_tbl.gc_work.work.func -> orderly_poweroff()
+  -> schedule_work(&poweroff_work)
+    -> poweroff_work_func()
+      -> __orderly_poweroff()
+        -> run_cmd("/bin/touch /ITScape")
+          -> call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC)
+```
+
+`call_usermodehelper` runs as root in the host kernel context. The escape is confirmed when `ls -la /ITScape` shows a zero-byte file owned by uid 0.
+
+## The Fix
+
+Three lines:
+
+```diff
+ xa_for_each(&its->translation_cache, idx, irq) {
+-    xa_erase(&its->translation_cache, idx);
+-    vgic_put_irq(kvm, irq);
++    irq = xa_erase(&its->translation_cache, idx);
++    if (irq)
++        vgic_put_irq(kvm, irq);
+ }
+```
+
+`xa_erase()` is atomic. Only the context that successfully removes the entry gets the pointer back. By dropping the put only when `xa_erase()` returns non-NULL, the reference is released exactly once regardless of how many concurrent drains race on the same index. Introduced by commit 8201d1028caa on April 25, 2024, fixed by commit 13031fb6b835 on June 5, 2026. Two years of exposure on every arm64 KVM host.
+
+## Who's Affected
+
+This is arm64-only. `arch/arm64/kvm/vgic/` is not compiled for x86. The exploit requires guest root (EL1) to drive GIC/ITS MMIO. On a public cloud arm64 instance, that's exactly what you have. The multi-tenant threat model is direct: a guest escapes, acquires host kernel root, and can access other tenants' memory or workloads on the same physical machine.
+
+AWS Graviton, Alibaba Yitian 710, Ampere Altra, anything running arm64 KVM with untrusted guests should treat this as urgent.
+
+## What to Do
+
+Check your host kernel. If you're on a distro kernel, you need the backport of commit `13031fb6b835` from upstream. For checking directly:
+
+```bash
+# Check if patch is present in kernel source
+grep -n "irq = xa_erase" arch/arm64/kvm/vgic/vgic-its.c
+```
+
+If that grep returns empty, the host is vulnerable. On Ubuntu, this is tracked under USN. On RHEL/Rocky, check errata for the arm64 KVM security advisory.
+
+If you run QEMU with KVM and accept untrusted guests, temporarily limit vCPU count where you can (fewer concurrent drains, tighter race window), though this does not eliminate the vulnerability. The only real fix is the patched kernel. Build from mainline at any commit after June 5, 2026, or wait for your distro's backport.
+
+If you want to watch for exploitation attempts, monitor for unexpected files created at filesystem root on KVM hosts, or for `call_usermodehelper` invocations spawning unexpected processes. Both are noisy indicators. The cleaner approach is to confirm patch status before any of that is relevant.
+
+Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4bel/ITScape). The full technical analysis is in `assets/write-up.md` in that repo. Worth reading the whole thing. The two-stage KASLR bypass and the guest-driven cross-cache via `guest_memfd` are genuinely clever solutions to hard constraints.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -80,7 +206,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -143,7 +269,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
@@ -223,7 +349,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
@@ -296,7 +422,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
@@ -390,7 +516,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
@@ -454,7 +580,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -551,7 +677,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -633,7 +759,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -768,12 +894,12 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -854,12 +980,12 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : CVE-2026-35616, cve-2026-35616
+CVE        : cve-2026-35616, CVE-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1182
@@ -931,7 +1057,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -1027,12 +1153,12 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : cve-2026-20817, CVE-2026-20817
+CVE        : CVE-2026-20817, cve-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1052
@@ -1100,7 +1226,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -1182,7 +1308,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -1321,12 +1447,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : CVE-2026-43121, cve-2026-43121
+CVE        : cve-2026-43121, CVE-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -1411,12 +1537,12 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : CVE-2026-34926, cve-2026-34926
+CVE        : cve-2026-34926, CVE-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -1476,12 +1602,12 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : cve-2026-46300, CVE-2026-46300
+CVE        : CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -1586,7 +1712,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -1698,7 +1824,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -1768,7 +1894,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -1945,7 +2071,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -2039,7 +2165,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -2202,7 +2328,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -2360,7 +2486,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -2494,7 +2620,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -2716,7 +2842,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -2844,7 +2970,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -3051,12 +3177,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -3165,7 +3291,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -3349,7 +3475,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -3505,7 +3631,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -3658,12 +3784,12 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : cve-2026-46333, CVE-2026-46333
+CVE        : CVE-2026-46333, cve-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -3758,12 +3884,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : CVE-2026-42945, cve-2026-42945
+CVE        : cve-2026-42945, CVE-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -3909,7 +4035,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
@@ -4117,7 +4243,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -4232,12 +4358,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -4329,7 +4455,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -4476,5 +4602,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 38 documents — 2026-06-11T21:06:07Z
+END OF CORPUS — 39 documents — 2026-06-18T07:53:37Z
 ================================================================================
