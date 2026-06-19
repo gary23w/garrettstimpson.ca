@@ -14,6 +14,7 @@
 **/
 
 import NDB_WASM from './neuron_core.wasm';   // CompiledWasm module (see wrangler.toml [[rules]])
+import { NeuronDB } from './neuron-db.mjs';  // the official typed binding over the wasm mem() FFI
 
 const MODEL        = '@cf/meta/llama-3.1-8b-instruct';   // default / fallback chat model
 const BUILD_VERSION = '2026-06-19-ndb1';  // bump per deploy; shown in header + /api/tools/catalog
@@ -67,53 +68,22 @@ function safeEmitLen(s) {
   return s.length;
 }
 
-// ── neuron-db (Rust core → WASM), the in-Worker memory engine ────────────────────
-// One instance per isolate, reused across requests. `mem(ptr,len)` takes a tab-joined
-// "op\tscope\t…args" request and writes the result to answer_ptr()/answer_len(). Ops used:
-//   obsmany  — bulk-ingest \n-joined facts into a scope
-//   recall   — top-k lexical recall (the RAG + memory retrieval)
-//   assess   — the recall engine's own confidence (coverage/overlap) = knowledge-gap signal
-//   dump/load — serialize/restore a scope (how a session survives across stateless requests)
-//   forget   — clear a scope
+// ── neuron-db, the in-Worker memory engine — via the official binding ─────────────
+// All of the alloc/mem/answer_ptr FFI, the tab protocol, the per-op parsing, and the robust-recall
+// default (recall_many, not the abstaining single-hit op) now live in ./neuron-db.mjs. One instance
+// per isolate. These thin wrappers keep the existing call sites; the binding is the engine, and it
+// always mounts the cortex (a v5 cortex build), so route()/dispatch() are available below.
 let _ndb = null;
-function ndb() {
-  if (!_ndb) { _ndb = new WebAssembly.Instance(NDB_WASM, {}).exports; _ndb.mem_reset(); }
-  return _ndb;
-}
-const _ndbTd = new TextDecoder(), _ndbTe = new TextEncoder();
-// Tab/newline are the protocol delimiters — strip them from any field we pass in.
+const ndb = () => (_ndb ||= NeuronDB.fromModule(NDB_WASM));
 const ndbClean = s => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-function ndbCall(...parts) {
-  const e = ndb();
-  const bytes = _ndbTe.encode(parts.join('\t'));
-  const ptr = e.alloc(bytes.length);
-  new Uint8Array(e.memory.buffer, ptr, bytes.length).set(bytes);
-  const n = e.mem(ptr, bytes.length);
-  const out = _ndbTd.decode(new Uint8Array(e.memory.buffer, e.answer_ptr(), n));
-  if (e.dealloc) e.dealloc(ptr, bytes.length);
-  return out;
-}
-const ndbObserveMany = (scope, lines) => (parseInt(ndbCall('obsmany', scope, lines.join('\n')), 10) || 0);
-// recallscored is the robust retrieval primitive: it returns recall_many() — the broad set
-// (the same hits `assess` counts) — as "fact\tcoverage\toverlap" lines, best-first. (The plain
-// `recall` op gates on a single best hit and abstains on many multi-keyword queries.)
-function ndbRecallScored(scope, q, k = 8) {
-  const s = ndbCall('recallscored', scope, ndbClean(q), String(k));
-  if (!s) return [];
-  return s.split('\n').filter(Boolean).map(l => {
-    const i = l.lastIndexOf('\t'), j = l.lastIndexOf('\t', i - 1);
-    return (j < 0 || i < 0) ? { fact: l, coverage: 0, overlap: 0 }
-      : { fact: l.slice(0, j), coverage: +l.slice(j + 1, i) || 0, overlap: +l.slice(i + 1) || 0 };
-  });
-}
-const ndbRecall = (scope, q, k = 6) => ndbRecallScored(scope, q, k).map(r => r.fact);
-const ndbDump = (scope) => ndbCall('dump', scope);
-const ndbLoad = (scope, blob) => (parseInt(ndbCall('load', scope, blob), 10) || 0);
-const ndbForget = (scope) => ndbCall('forget', scope);   // empty needle (no arg) clears the scope
-function ndbAssess(scope, q) {
-  const p = ndbCall('assess', scope, ndbClean(q)).split('\t');
-  return { coverage: +p[0] || 0, overlap: +p[1] || 0, exact: +p[2] || 0, nHits: +p[3] || 0, hasValue: p[4] === '1', best: p[5] || '' };
-}
+const ndbObserveMany  = (scope, lines) => ndb().observeMany(scope, lines);
+const ndbRecallScored = (scope, q, k = 8) => ndb().recallScored(scope, q, k);   // [{fact,coverage,overlap}]
+const ndbRecall       = (scope, q, k = 6) => ndb().recall(scope, q, k);
+const ndbDump         = (scope) => ndb().dump(scope);
+const ndbLoad         = (scope, blob) => ndb().load(scope, blob);
+const ndbForget       = (scope) => ndb().forget(scope);
+const ndbAssess       = (scope, q) => { const a = ndb().assess(scope, q);
+  return { coverage: a.coverage, overlap: a.overlap, exact: a.exact, nHits: a.hits, hasValue: a.hasValue, best: a.topFact }; };
 
 // Retrieval
 const TOP_K         = 5;     // chunks injected per query
@@ -5674,6 +5644,34 @@ export default {
           const smallTalk = isSmallTalk(lastUser) && !cveIds.length && !ips.length && !domains.length;
           const evidence = [];
           const toolContext = [];
+
+          // neuron-db CORTEX PRE-GATE — gary-neuron routes EVERY turn over session memory, so the
+          // cortex (the key feature) is never bypassed. A clear STORE (the user stating a durable fact,
+          // with no CVE/IP/domain research target) is handled cheaply right here: written to memory and
+          // acked, skipping the big model entirely. Research turns route to ESCALATE/FETCH/ANSWER and
+          // fall through to the full retrieval + model path below — those stay on the robust flow on
+          // purpose (an extractive cortex answer shouldn't pre-empt a security analysis). A cortex
+          // hiccup is caught and ignored, never breaking the turn.
+          if (body.sessionId && !cveIds.length && !ips.length && !domains.length && ndb().hasCortex) {
+            try {
+              await ndbSessionLoad(env, body.sessionId);
+              const route = ndb().route(ndbSessionScope(body.sessionId), lastUser);
+              dbg('cortex', 'route → ' + route.type + (route.value ? ' · ' + route.value.slice(0, 60) : ''));
+              // double-gate the short-circuit: the cortex's STORE classification is imperfect on
+              // no-context elaboration ("tell me more about X" can mis-route to store), so only act on
+              // STORE when the phrasing also reads like a declarative — else fall through to a real answer.
+              const looksLikeStore = /^\s*(remember\b|note that\b|note:|don'?t forget\b|keep in mind\b|save that\b|fyi\b|my [\w '-]+ is\b|i (?:prefer|use|like)\b)/i.test(lastUser);
+              if (route.type === 'store' && looksLikeStore) {
+                ndbSessionObserve(body.sessionId, 'user', lastUser);
+                await ndbSessionSave(env, body.sessionId);
+                const ack = "Noted — I'll remember that.";
+                send(JSON.stringify({ response: ack }));
+                if (sess) { sess.turns.push({ role: 'assistant', content: ack }); sess = await summariseSession(env, sess); await saveSession(env, sess); }
+                send('[DONE]');
+                return;
+              }
+            } catch (e) { dbg('cortex err', e.message); }
+          }
 
           // CVE intel — NVD + EPSS + CISA KEV
           for (const cveId of cveIds.slice(0, 3)) {
