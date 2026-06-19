@@ -1,8 +1,8 @@
 {
   "name": "garrettstimpson-agent",
-  "version": "4.0.0",
+  "version": "4.3.0",
   "private": true,
-  "description": "Security research agent \u2014 semantic RAG (Vectorize + bge embeddings) with BM25 fallback, KV-backed conversation memory, NVD + web search. Deploy to your own Cloudflare account in one click.",
+  "description": "Security research agent \u2014 neuron-db (Rust core compiled to in-Worker WASM) powers corpus RAG + conversation memory, with a runtime model picker over the Cloudflare Workers AI catalog (mirroring the neuron-db lab), plus NVD/EPSS/KEV, passive OSINT and web search. Deploy to your own Cloudflare account in one click.",
   "cloudflare": {
     "bindings": [
       {

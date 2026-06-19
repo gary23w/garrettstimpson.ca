@@ -2,8 +2,18 @@ name = "garrettstimpson-agent"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
 
-# Workers AI — free tier, no API key required. Used for both the chat model
-# (llama-3.1-8b) and the embedding model (bge-base-en-v1.5).
+# Bundle neuron-db's Rust core (compiled to wasm32-unknown-unknown) as a CompiledWasm
+# module so `import NDB_WASM from "./neuron_core.wasm"` resolves to a WebAssembly.Module.
+# This is the in-Worker memory engine: corpus recall (RAG) + per-session memory, all
+# driven through the wasm `mem()` op surface. No external service, no network at recall time.
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
+
+# Workers AI — free tier, no API key required. Drives the chat model (picked at runtime
+# from a Workers-AI catalog mirroring neuron-db's lab model picker; defaults to llama-3.1-8b)
+# and the embedding model (bge-base-en-v1.5, retained only for the optional Vectorize path).
 [ai]
 binding = "AI"
 

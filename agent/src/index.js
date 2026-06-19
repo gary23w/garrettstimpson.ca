@@ -1,12 +1,119 @@
 /**
- * Agent Garrett - Security Research Agent  v4.2
+ * Agent Garrett - Security Research Agent  v4.3
  *
+ * Memory engine: neuron-db (the Rust core compiled to WebAssembly, bundled in-Worker).
+ *   - Corpus RAG  — the llms.txt corpus is ingested into a neuron scope and recalled
+ *     lexically per query (replaces the bge/Vectorize/BM25 path; BM25 stays as a fallback).
+ *   - Conversation memory — each session is a neuron scope, dump()'d to KV between turns
+ *     and load()'d back, so the model is grounded by what the user actually discussed.
+ *   The wasm `mem(op\tscope\t…)` surface is the SAME one the in-browser lab drives; here it
+ *   runs server-side. See ../../neuron-db/worker for the reference Worker.
+ *
+ * Chat model: picked at runtime from MODELS (a Cloudflare Workers-AI catalog mirroring the
+ *   families/tags of neuron-db's WebLLM lab picker). Falls back to the default on any error.
 **/
 
-const MODEL        = '@cf/meta/llama-3.1-8b-instruct';
-const BUILD_VERSION = '2026-06-02-r2';  // bump per deploy; shown in header + /api/tools/catalog
-const EMBED_MODEL   = '@cf/baai/bge-base-en-v1.5'; // 768-dim
+import NDB_WASM from './neuron_core.wasm';   // CompiledWasm module (see wrangler.toml [[rules]])
+
+const MODEL        = '@cf/meta/llama-3.1-8b-instruct';   // default / fallback chat model
+const BUILD_VERSION = '2026-06-19-ndb1';  // bump per deploy; shown in header + /api/tools/catalog
+const EMBED_MODEL   = '@cf/baai/bge-base-en-v1.5'; // 768-dim (only used by the optional Vectorize path)
 const EMBED_DIM     = 768;
+
+// ── Chat model catalog (Cloudflare Workers AI) ──────────────────────────────────
+// Mirrors the model families + tag taxonomy of neuron-db's in-browser lab picker
+// (fast / balanced / tools / reasoning / big), mapped to the closest models Cloudflare
+// Workers AI actually serves. The picker in the UI is populated from this list and the
+// server only runs an id that appears here (resolveModel), so it doubles as an allowlist.
+// Edit freely — if Cloudflare retires/adds a model, change one row here.
+const MODELS = [
+  { id: '@cf/meta/llama-3.2-1b-instruct',                 label: 'Llama 3.2 · 1B',        tag: 'fast'      },
+  { id: '@cf/qwen/qwen1.5-1.8b-chat',                     label: 'Qwen 1.5 · 1.8B',       tag: 'fast'      },
+  { id: '@cf/microsoft/phi-2',                            label: 'Phi-2 · 2.7B',          tag: 'fast'      },
+  { id: '@cf/meta/llama-3.2-3b-instruct',                 label: 'Llama 3.2 · 3B',        tag: 'balanced'  },
+  { id: '@hf/google/gemma-7b-it',                         label: 'Gemma · 7B',            tag: 'balanced'  },
+  { id: '@cf/mistral/mistral-7b-instruct-v0.1',           label: 'Mistral · 7B',          tag: 'tools'     },
+  { id: '@hf/nousresearch/hermes-2-pro-mistral-7b',       label: 'Hermes 2 Pro · 7B',     tag: 'tools'     },
+  { id: '@cf/qwen/qwen1.5-7b-chat-awq',                   label: 'Qwen 1.5 · 7B',         tag: 'tools'     },
+  { id: '@cf/qwen/qwen1.5-14b-chat-awq',                  label: 'Qwen 1.5 · 14B',        tag: 'tools'     },
+  { id: '@cf/meta/llama-3.1-8b-instruct',                 label: 'Llama 3.1 · 8B',        tag: 'big'       },
+  { id: '@cf/meta/llama-3.1-8b-instruct-fast',            label: 'Llama 3.1 · 8B (fast)', tag: 'big'       },
+  { id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',       label: 'Llama 3.3 · 70B',       tag: 'big'       },
+  { id: '@cf/qwen/qwq-32b',                               label: 'QwQ · 32B',             tag: 'reasoning' },
+  { id: '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',   label: 'DeepSeek-R1 · 32B',     tag: 'reasoning' },
+];
+// Resolve the client's requested model to an allowlisted id (defends env.AI.run from
+// arbitrary strings). Anything not in MODELS falls back to the default MODEL.
+function resolveModel(opts) {
+  const id = opts && typeof opts.model === 'string' ? opts.model.trim() : '';
+  return MODELS.some(m => m.id === id) ? id : MODEL;
+}
+// Reasoning models (DeepSeek-R1, QwQ, Qwen3…) wrap their chain-of-thought in <think>…</think>.
+// Strip complete blocks; also drop an unclosed trailing block so a still-thinking tail never shows.
+function stripThink(s) {
+  return String(s == null ? '' : s)
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/i, '')
+    .replace(/^\s+/, '');
+}
+// For incremental streaming: don't emit a trailing partial that could be the start of a
+// <think>/</think> tag split across chunks (otherwise "<thi" leaks before the tag completes).
+// Returns the length that is safe to emit now; the held tail flows once the tag resolves.
+function safeEmitLen(s) {
+  for (let hold = Math.min(8, s.length); hold > 0; hold--) {
+    const tail = s.slice(s.length - hold);
+    if ('<think>'.startsWith(tail) || '</think>'.startsWith(tail)) return s.length - hold;
+  }
+  return s.length;
+}
+
+// ── neuron-db (Rust core → WASM), the in-Worker memory engine ────────────────────
+// One instance per isolate, reused across requests. `mem(ptr,len)` takes a tab-joined
+// "op\tscope\t…args" request and writes the result to answer_ptr()/answer_len(). Ops used:
+//   obsmany  — bulk-ingest \n-joined facts into a scope
+//   recall   — top-k lexical recall (the RAG + memory retrieval)
+//   assess   — the recall engine's own confidence (coverage/overlap) = knowledge-gap signal
+//   dump/load — serialize/restore a scope (how a session survives across stateless requests)
+//   forget   — clear a scope
+let _ndb = null;
+function ndb() {
+  if (!_ndb) { _ndb = new WebAssembly.Instance(NDB_WASM, {}).exports; _ndb.mem_reset(); }
+  return _ndb;
+}
+const _ndbTd = new TextDecoder(), _ndbTe = new TextEncoder();
+// Tab/newline are the protocol delimiters — strip them from any field we pass in.
+const ndbClean = s => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+function ndbCall(...parts) {
+  const e = ndb();
+  const bytes = _ndbTe.encode(parts.join('\t'));
+  const ptr = e.alloc(bytes.length);
+  new Uint8Array(e.memory.buffer, ptr, bytes.length).set(bytes);
+  const n = e.mem(ptr, bytes.length);
+  const out = _ndbTd.decode(new Uint8Array(e.memory.buffer, e.answer_ptr(), n));
+  if (e.dealloc) e.dealloc(ptr, bytes.length);
+  return out;
+}
+const ndbObserveMany = (scope, lines) => (parseInt(ndbCall('obsmany', scope, lines.join('\n')), 10) || 0);
+// recallscored is the robust retrieval primitive: it returns recall_many() — the broad set
+// (the same hits `assess` counts) — as "fact\tcoverage\toverlap" lines, best-first. (The plain
+// `recall` op gates on a single best hit and abstains on many multi-keyword queries.)
+function ndbRecallScored(scope, q, k = 8) {
+  const s = ndbCall('recallscored', scope, ndbClean(q), String(k));
+  if (!s) return [];
+  return s.split('\n').filter(Boolean).map(l => {
+    const i = l.lastIndexOf('\t'), j = l.lastIndexOf('\t', i - 1);
+    return (j < 0 || i < 0) ? { fact: l, coverage: 0, overlap: 0 }
+      : { fact: l.slice(0, j), coverage: +l.slice(j + 1, i) || 0, overlap: +l.slice(i + 1) || 0 };
+  });
+}
+const ndbRecall = (scope, q, k = 6) => ndbRecallScored(scope, q, k).map(r => r.fact);
+const ndbDump = (scope) => ndbCall('dump', scope);
+const ndbLoad = (scope, blob) => (parseInt(ndbCall('load', scope, blob), 10) || 0);
+const ndbForget = (scope) => ndbCall('forget', scope);   // empty needle (no arg) clears the scope
+function ndbAssess(scope, q) {
+  const p = ndbCall('assess', scope, ndbClean(q)).split('\t');
+  return { coverage: +p[0] || 0, overlap: +p[1] || 0, exact: +p[2] || 0, nHits: +p[3] || 0, hasValue: p[4] === '1', best: p[5] || '' };
+}
 
 // Retrieval
 const TOP_K         = 5;     // chunks injected per query
@@ -120,6 +227,86 @@ function bm25Chunks(chunks, query, k) {
 
 function formatChunk(c) {
   return `### ${c.title}${c.cves && c.cves !== 'none' ? ` (${c.cves})` : ''}\n${c.url}\n${c.text}`;
+}
+
+// ── neuron-db corpus recall (the primary RAG path) ──────────────────────────────
+// We ingest each chunk's CLEAN BODY text into a corpus scope. neuron-db splits a body into
+// sentence-level episodes, so recall returns sentences; we reconstruct the owning chunk (with
+// title/url for citation) by substring-matching the sentence back into the chunk it came from.
+// Ingest happens once per (isolate, corpus version) — guarded synchronously so concurrent
+// requests can't double-ingest (wasm calls never yield). bm25 stays as the fallback.
+let _corpus = null;   // cached { scope, chunks, cleaned:[{c, t}] } for the active corpus version
+async function ensureCorpus(env) {
+  const chunks = await getChunks(env);   // cached (caches.default)
+  const sig = `${chunks.length}:${chunks[0]?.id || ''}:${chunks[chunks.length - 1]?.id || ''}:${chunks.reduce((s, c) => s + (c.text ? c.text.length : 0), 0)}`;
+  const scope = 'corpus@' + (await sha256hex(sig)).slice(0, 12);
+  if (!_corpus || _corpus.scope !== scope) {   // synchronous block — no await between check and set
+    ndbForget(scope);
+    ndbObserveMany(scope, chunks.map(c => ndbClean(c.text)));
+    _corpus = { scope, chunks, cleaned: chunks.map(c => ({ c, t: ndbClean(c.text) })) };
+  }
+  return _corpus;
+}
+// Map a recalled sentence back to the chunk whose body contains it (verbatim, then 40-char prefix).
+function chunkForFact(h, cleaned) {
+  const x = ndbClean(h);
+  if (x.length < 6) return null;
+  for (const e of cleaned) { if (e.t.includes(x)) return e.c; }
+  if (x.length > 40) { const pre = x.slice(0, 40); for (const e of cleaned) { if (e.t.includes(pre)) return e.c; } }
+  return null;
+}
+
+// Primary retrieval: neuron-db recall, bm25 fallback. Returns chunk objects so the rest of
+// the prompt builder (formatChunk etc.) is unchanged.
+async function retrieve(env, query, k) {
+  try {
+    const { scope, chunks, cleaned } = await ensureCorpus(env);
+    const scored = ndbRecallScored(scope, query, Math.max(k * 3, 12));   // over-fetch sentences, dedupe to chunks
+    // Relevance gate: keep only facts that matched the query meaningfully — at least half the
+    // query's content words (coverage ≥ 0.5) OR two+ overlapping terms. This drops "matched a
+    // single common word" noise (e.g. a query mentioning "user" pulling in unrelated CVE chunks).
+    const strong = scored.filter(r => r.coverage >= 0.5 || r.overlap >= 2);
+    const seen = new Set(), out = [];
+    for (const r of strong) {
+      const c = chunkForFact(r.fact, cleaned);
+      if (c && !seen.has(c.id)) { seen.add(c.id); out.push(c); if (out.length >= k) break; }
+    }
+    if (out.length) return out;
+    // strong signal but reconstruction missed → lexical fallback; genuinely nothing relevant →
+    // return NO chunks (injecting irrelevant corpus text just invites the model to go off-topic).
+    return strong.length ? bm25Chunks(chunks, query, k) : [];
+  } catch {
+    return bm25Chunks(await getChunks(env), query, k);
+  }
+}
+
+// ── neuron-db conversation memory (one scope per session, persisted to KV) ───────
+// A session's memory is a neuron scope dump()'d to KV under `ndb:<id>` and load()'d back at
+// the start of each turn (the Worker is stateless per request). The model never sees the raw
+// scope — it sees what recall surfaces for the current question, exactly like the lab.
+function ndbSessionScope(id) { return 's:' + String(id || '').replace(/[\t\r\n]/g, '_').slice(0, 80); }
+async function ndbSessionLoad(env, id) {
+  if (!env.SESSIONS || !id) return false;
+  try {
+    const blob = await env.SESSIONS.get('ndb:' + id);
+    if (blob) { ndbLoad(ndbSessionScope(id), blob); return true; }
+  } catch {}
+  return false;
+}
+async function ndbSessionSave(env, id) {
+  if (!env.SESSIONS || !id) return;
+  try { const blob = ndbDump(ndbSessionScope(id)); if (blob) await env.SESSIONS.put('ndb:' + id, blob, { expirationTtl: SESSION_TTL }); } catch {}
+}
+// Break a turn into sentence-ish facts so recall is granular; cap to keep memory bounded.
+function ndbSessionObserve(id, role, content) {
+  const flat = ndbClean(content);
+  if (!flat) return 0;
+  const facts = flat.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 8).slice(0, 12)
+    .map(s => role === 'user' ? 'the user asked: ' + s : s);
+  return facts.length ? ndbObserveMany(ndbSessionScope(id), facts) : 0;
+}
+function ndbSessionRecall(id, query, k = 4) {
+  try { return ndbRecall(ndbSessionScope(id), query, k); } catch { return []; }
 }
 
 // ── Embeddings + Vectorize ──────────────────────────────────────────────────────
@@ -3564,6 +3751,30 @@ function isCapabilityQuestion(query) {
   return /\b(what can you do|what are you capable of|your capabilities|what tools do you have|which tools do you have|tool list|list tools|available tools|can you do|what do you do)\b/.test(q);
 }
 
+// Greetings / pleasantries / sign-offs — short, non-substantive messages that must NOT trigger
+// corpus RAG or tool routing (otherwise a stray word like "hello" lexically matches a doc that
+// happens to contain "Hello message" and the model dumps a whole CVE essay).
+function isSmallTalk(query) {
+  const q = String(query || '').trim().toLowerCase().replace(/[!.?…,]+$/, '').replace(/\s+/g, ' ');
+  if (!q || q.split(' ').length > 6) return false;
+  if (/\bcve-\d/.test(q)) return false;
+  // Patterns are anchored to the WHOLE (short) message — a greeting word followed by a real
+  // question ("hey what's the nginx bug") must NOT match, or we'd skip retrieval for a real query.
+  const GREET = [
+    /^(hi|hello|hey+|yo+|sup|hiya|howdy|greetings|heya)( there| agent garrett| agent| garrett| bot| again| all| folks)?$/,
+    /^good (morning|afternoon|evening|day)( agent| garrett| there)?$/,
+    /^(g'?day|gm|gn|good ?night|night)$/,
+    /^how('?s| is| are| ya)? (you|it going|things|things going|your day|everything|u)( today| doing| going)?$/,
+    /^(how are you|how's it going|how do you do|how goes it|hows things)$/,
+    /^(what'?s up|whats up|wass?up|what is up)$/,
+    /^(thanks?|thank you|thanks a lot|thank you so much|thx|ty|tysm|cheers|much appreciated|appreciate it)( agent| garrett)?$/,
+    /^(nice|cool|sweet|ok|okay|kk|k|got it|gotcha|great|awesome|perfect|excellent|lovely|lol|lmao|haha+|hehe|nvm|never ?mind|i see|makes sense|fair enough)$/,
+    /^(who are ?you|what are ?you|what'?s your name|whats your name|introduce yourself|tell me about yourself|are you (a )?(bot|ai|human|real|chatbot))$/,
+    /^(bye+|goodbye|see ?ya|see you( later)?|later|cya|take care|farewell|peace|gtg)$/,
+  ];
+  return GREET.some(re => re.test(q));
+}
+
 function buildCapabilitiesAnswer(env, opts = {}) {
   const darkwebEnabled = opts.darkwebEnabled !== false;
   const catalog = toolCatalog(env);
@@ -3631,20 +3842,20 @@ function buildSystemPrompt(env, { summary, chunks, toolContext, clientMemory, re
 
 // Preliminary reasoning pass (deep effort): the model drafts terse analysis notes
 // from the evidence only, which are fed back into the final answer.
-async function reasonPass(env, query, toolContext, chunks, temp) {
+async function reasonPass(env, query, toolContext, chunks, temp, model) {
   const ctx = [
     toolContext.length ? 'TOOLS:\n' + toolContext.join('\n\n').slice(0, 1800) : '',
     chunks.length ? 'CORPUS:\n' + chunks.map(formatChunk).join('\n\n').slice(0, 1800) : '',
   ].filter(Boolean).join('\n\n');
   try {
-    const r = await env.AI.run(MODEL, {
+    const r = await env.AI.run(model || MODEL, {
       messages: [
         { role: 'system', content: 'You are a meticulous security analyst. Think step by step using ONLY the evidence provided. Output 3-6 terse bullet points of reasoning and what the evidence does and does not support. Do NOT write a final answer. Do NOT invent any fact.' },
         { role: 'user', content: query + '\n\n' + ctx },
       ],
       stream: false, max_tokens: 380, temperature: Math.min((temp || 0.3) + 0.1, 0.7),
     });
-    return (r.response || '').trim();
+    return stripThink(r.response || '').trim();
   } catch { return ''; }
 }
 
@@ -3958,6 +4169,9 @@ header{border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10
     <label><input type="checkbox" id="s-darkweb" checked> enable dark-web/onion tools in AI + OSINT flows</label>
     <label>temperature <input type="range" id="s-temp" min="0" max="1" step="0.1" value="0.3"><span class="set-val" id="s-temp-v">0.3</span></label>
     <label>top-K chunks <input type="range" id="s-topk" min="1" max="10" step="1" value="5"><span class="set-val" id="s-topk-v">5</span></label>
+    <label>language model (Cloudflare Workers AI — same model families as the neuron-db lab picker)
+      <select id="s-model"><option value="">loading…</option></select>
+    </label>
     <label>reasoning effort
       <select id="s-reason">
         <option value="off">off (fastest)</option>
@@ -4149,6 +4363,7 @@ function saveSettings(){
     debug:el('s-debug').checked, brave:el('s-brave').value, reason:el('s-reason').value,
     darkweb:(el('s-darkweb')?el('s-darkweb').checked:true),
     brokerUrl:(el('s-broker-url')?el('s-broker-url').value:''),
+    model:(el('s-model')?el('s-model').value:''),
     aitools:(el('s-aitools')?el('s-aitools').checked:true) })); }catch(e){}
 }
 
@@ -4231,14 +4446,26 @@ function dbg(head,body){
   if(body){ var e=document.createElement('div'); e.className='de'; e.textContent=body; dbgPane.appendChild(e); }
   dbgPane.scrollTop=dbgPane.scrollHeight;
 }
+// Fetch JSON defensively: a non-OK status or non-JSON body (e.g. a Cloudflare HTML error page on a
+// cold start) becomes a clean "HTTP <code> — <snippet>" error instead of "Unexpected token '<'".
+async function getJSON(u, opts){
+  var r=await fetch(u, opts||{});
+  var ct=(r.headers.get('content-type')||'');
+  if(!r.ok || ct.indexOf('json')<0){
+    var tx=(await r.text().catch(function(){return '';})).replace(/<[^>]+>/g,' ').replace(/\\s+/g,' ').trim().slice(0,160);
+    throw new Error('HTTP '+r.status+(tx?(' — '+tx):''));
+  }
+  return r.json();
+}
 
 // ---------- controls ----------
 el('btn-set').onclick=function(){ settings.classList.toggle('show'); };
 el('btn-dbg').onclick=function(){ var on=dbgPane.classList.toggle('show'); el('btn-dbg').classList.toggle('on',on); };
 el('btn-new').onclick=newChat;
-['s-search','s-darkweb','s-temp','s-topk','s-debug','s-brave','s-broker-url','s-reason','s-aitools'].forEach(function(id){
-  var n=el(id); n.addEventListener('change',saveSettings); n.addEventListener('input',saveSettings);
+['s-search','s-darkweb','s-temp','s-topk','s-debug','s-brave','s-broker-url','s-reason','s-aitools','s-model'].forEach(function(id){
+  var n=el(id); if(!n) return; n.addEventListener('change',saveSettings); n.addEventListener('input',saveSettings);
 });
+el('s-model').addEventListener('change',function(){ if(typeof updateModeline==='function') updateModeline(); });
 el('s-temp').addEventListener('input',function(){ el('s-temp-v').textContent=el('s-temp').value; });
 el('s-topk').addEventListener('input',function(){ el('s-topk-v').textContent=el('s-topk').value; });
 
@@ -4256,11 +4483,42 @@ el('s-topk').addEventListener('input',function(){ el('s-topk-v').textContent=el(
   if(s.debug){ dbgPane.classList.add('show'); el('btn-dbg').classList.add('on'); }
 })();
 
+// the model catalog (from /api/models) + the currently-selected label, for the header line
+var MODEL_CATALOG=[], MODEL_DEFAULT='';
+function selectedModelLabel(){
+  var v=el('s-model')?el('s-model').value:'';
+  var m=MODEL_CATALOG.filter(function(x){return x.id===v;})[0];
+  return m?m.label:(v?v.replace(/^@(cf|hf)\\//,''):'default');
+}
+function updateModeline(){
+  if(!modeline) return;
+  modeline.textContent=selectedModelLabel()+' · workers ai · neuron-db RAG + memory · NVD/EPSS/KEV · RDAP/DNS/CT/Shodan · web';
+}
+var TAGTXT={fast:'⚡ fast',balanced:'balanced',tools:'🔧 tools',reasoning:'🧠 reasoning',big:'big'};
+async function loadModels(){
+  var sel=el('s-model'); if(!sel) return;
+  try{
+    var d=await getJSON('/api/models');
+    MODEL_CATALOG=d.models||[]; MODEL_DEFAULT=d.default||'';
+    var saved=''; try{ saved=(JSON.parse(localStorage.getItem('gsa_settings')||'{}').model)||''; }catch(e){}
+    sel.innerHTML='';
+    MODEL_CATALOG.forEach(function(m){
+      var o=document.createElement('option'); o.value=m.id;
+      o.textContent=m.label+'  ('+(TAGTXT[m.tag]||m.tag)+')'+(m.id===MODEL_DEFAULT?' · default':'');
+      sel.appendChild(o);
+    });
+    if(!sel.options.length){ var o=document.createElement('option'); o.value=''; o.textContent=MODEL_DEFAULT||'default'; sel.appendChild(o); }
+    var want=saved&&MODEL_CATALOG.some(function(m){return m.id===saved;})?saved:MODEL_DEFAULT;
+    if(want) sel.value=want;
+  }catch(e){ sel.innerHTML='<option value="">'+(MODEL_DEFAULT||'default model')+'</option>'; }
+  updateModeline();
+}
 async function init(){
   renderChats(); renderLog(active());
+  await loadModels();
   try{
-    var d=await (await fetch('/api/status')).json();
-    modeline.textContent='llama-3.1-8b · '+(d.retrieval||'?')+' RAG · memory on · NVD/EPSS/KEV · RDAP/DNS/CT/Shodan · web'+(d.ctfSafeMode?' · CTF safe':'');
+    var d=await getJSON('/api/status');
+    updateModeline();
     stat.textContent=ts()+' · corpus: '+d.docCount+' posts / '+(d.chunkCount||0)+' chunks · '+(d.totalChars||0).toLocaleString()+' chars'+(d.memory?' · KV sync':'')+(d.ctfSafeMode?' · CTF safe-mode':'')+(d.version?' · build '+d.version:'');
     if(d.docCount===0) stat.textContent+=' · WARNING corpus empty';
   }catch(e){ stat.textContent='status unavailable — '+e.message; }
@@ -4281,6 +4539,7 @@ inp.addEventListener('keydown', async function(e){
              topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'',
              brokerUrl:(el('s-broker-url')?el('s-broker-url').value.trim():''),
              darkweb:(el('s-darkweb')?el('s-darkweb').checked:true),
+             model:(el('s-model')?el('s-model').value:''),
              reasoning:el('s-reason').value, aiTools:(el('s-aitools')?el('s-aitools').checked:true) };
   dbg('query', q+'  [search='+opts.webSearch+' temp='+opts.temperature+' topK='+opts.topK+']');
   try{
@@ -4391,6 +4650,7 @@ function curOpts(){
            topK:parseInt(el('s-topk').value,10), brave:el('s-brave').value||'',
            brokerUrl:(el('s-broker-url')?el('s-broker-url').value.trim():''),
            darkweb:(el('s-darkweb')?el('s-darkweb').checked:true),
+           model:(el('s-model')?el('s-model').value:''),
            reasoning:el('s-reason').value, aiTools:(el('s-aitools')?el('s-aitools').checked:true) };
 }
 async function callTask(objective, context, grounded){
@@ -4484,7 +4744,17 @@ function detectOsint(q, prev){
   var hasTrigger=TRIG.some(function(t){ return low.indexOf(t)>=0; });
   var persons=uniq(text.match(/\\b[A-Z][a-z'\\-]{1,}\\s+[A-Z][a-z'\\-]{1,}(?:\\s+[A-Z][a-z'\\-]{1,})?\\b/g)||[]);
   var pnm=low.match(/(?:look into|look up|investigate|osint(?: on)?|profile(?: of)?|recon|stalk|dig into|background on|person(?: named| called)?|named|called|info on|intel on|dossier on|about|who is|who's|search for)\\s+(?:the\\s+person\\s+|the\\s+|a\\s+|an\\s+)?([a-z][a-z'\\-]+(?:\\s+[a-z][a-z'\\-]+){1,2})/);
-  if(pnm){ var cnm=pnm[1].trim(); if(!/\\b(the|this|that|dark|web|domain|website|site|email|address|ip|hash|sample|malware|exploit|onion|tor|breach|leak|leaked|exposure|company|server|forum|page|guy|persons?|people|profile|account|target|username|handle|everything|anything|info|information|details|more|whatever)\\b/.test(cnm)) persons.push(cnm.replace(/\\b[a-z]/g,function(ch){ return ch.toUpperCase(); })); }
+  if(pnm){
+    var cnm=pnm[1].trim();
+    // Only treat the captured phrase as a NAME if the user actually wrote it Capitalized (a proper
+    // noun). This stops verb phrases like "...osint tools to learn more" from being read as a person
+    // named "Tools To Learn" — the words there are lowercase, so they are not a name.
+    var at=low.indexOf(pnm[1], pnm.index);
+    var orig=at>=0?text.slice(at, at+pnm[1].length):cnm;
+    var titled=orig.split(/\\s+/).every(function(w){ return /^[A-Z]/.test(w); });
+    if(titled && !/\\b(the|this|that|dark|web|domain|website|site|email|address|ip|hash|sample|malware|exploit|onion|tor|breach|leak|leaked|exposure|company|server|forum|page|guy|persons?|people|profile|account|target|username|handle|everything|anything|info|information|details|more|whatever|tools?|learn(ing)?|stuff|things?)\\b/.test(cnm))
+      persons.push(cnm.replace(/\\b[a-z]/g,function(ch){ return ch.toUpperCase(); }));
+  }
   persons=uniq(persons.filter(function(p){ return !/^(the|a|an|on|of|for|about|to|in|at|by|do|run|agent|osint|recon|investigate|enumerate|scan|check|hello|hi|hey|dear|mr|ms|dr|new|good)\\b/i.test(p); }));
   persons=persons.filter(function(p){ return !/^(on|of|for|about|to|in|at|by|the|a|an|do|run|get|my|your)\s/i.test(p.toLowerCase()); });
   // Handle only via an EXPLICIT command verb ('osint X', 'recon bob123', 'enumerate user42') —
@@ -4890,7 +5160,10 @@ var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', r
 async function loadCatalog(){
   try{
     var broker=(el('s-broker-url')?el('s-broker-url').value.trim():'');
-    var u='/api/tools/catalog'+(broker?('?brokerUrl='+encodeURIComponent(broker)):''), d=await (await fetch(u)).json();
+    var u='/api/tools/catalog'+(broker?('?brokerUrl='+encodeURIComponent(broker)):'');
+    var d;
+    try{ d=await getJSON(u); }
+    catch(e1){ await new Promise(function(r){ setTimeout(r,700); }); d=await getJSON(u); }  // retry once — rides out a cold-start edge blip
     var runtimeBroker=broker?(' · runtime broker '+broker):'';
     el('t-mode').textContent=(d.safeMode?'SAFE MODE on':'safe mode OFF')+(d.requireConfirm?' · confirm unlocks all tools':'')+(d.brokerConfigured?' · broker wired':' · no broker')+runtimeBroker;
     el('t-mode').className='t-badge'+(d.safeMode?' safe':'');
@@ -5034,8 +5307,11 @@ export default {
           docCount:   docIds.size,
           chunkCount: chunks.length,
           totalChars: chunks.reduce((s, c) => s + c.text.length, 0),
-          retrieval:  env.VECTORIZE ? 'vectorize-semantic' : 'bm25-chunk',
+          retrieval:  'neuron-db',
           memory:     !!env.SESSIONS,
+          memoryEngine: 'neuron-db',
+          modelCount: MODELS.length,
+          defaultModel: MODEL,
           ctfSafeMode: policy.safeMode,
           toolAllowlistCount: policy.toolAllowlist.size,
           targetAllowlistCount: policy.targetAllowlist.size,
@@ -5045,23 +5321,30 @@ export default {
       } catch (e) { return json({ ok: false, error: e.message }, 500); }
     }
 
+    // GET /api/models — the chat-model catalog the picker is built from (Workers AI).
+    if (url.pathname === '/api/models' && request.method === 'GET') {
+      return json({ ok: true, default: MODEL, models: MODELS });
+    }
+
     // GET /api/tools/catalog — advertise wired tools and current policy state
     if (url.pathname === '/api/tools/catalog' && request.method === 'GET') {
-      const runtimeEnv = withRuntimeSettings(env, { brokerUrl: url.searchParams.get('brokerUrl') || '' });
-      const policy = getAgentPolicy(runtimeEnv);
-      return json({
-        ok: true,
-        safeMode: policy.safeMode,
-        requireConfirm: policy.requireConfirm,
-        citationsRequired: policy.citationsRequired,
-        uncertaintyRequired: policy.uncertaintyRequired,
-        enforceRouterPolicy: policy.enforceRouterPolicy,
-        routerMaxSteps: policy.routerMaxSteps,
-        allowlistedTools: [...policy.toolAllowlist],
-        targetAllowlist: [...policy.targetAllowlist],
-        tools: toolCatalog(runtimeEnv),
-        brokerConfigured: !!runtimeEnv.TOOL_BROKER_URL,
-      });
+      try {
+        const runtimeEnv = withRuntimeSettings(env, { brokerUrl: url.searchParams.get('brokerUrl') || '' });
+        const policy = getAgentPolicy(runtimeEnv);
+        return json({
+          ok: true,
+          safeMode: policy.safeMode,
+          requireConfirm: policy.requireConfirm,
+          citationsRequired: policy.citationsRequired,
+          uncertaintyRequired: policy.uncertaintyRequired,
+          enforceRouterPolicy: policy.enforceRouterPolicy,
+          routerMaxSteps: policy.routerMaxSteps,
+          allowlistedTools: [...policy.toolAllowlist],
+          targetAllowlist: [...policy.targetAllowlist],
+          tools: toolCatalog(runtimeEnv),
+          brokerConfigured: !!runtimeEnv.TOOL_BROKER_URL,
+        });
+      } catch (e) { return json({ ok: false, error: 'catalog: ' + (e && e.message ? e.message : String(e)) }, 500); }
     }
 
     // POST /api/tools/run — guarded tool execution entrypoint for CTF workflows
@@ -5199,20 +5482,19 @@ export default {
         await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'dns_lookup', { domain: dom, target: dom }, 'builtin');
         await runToolWithEvidence(runtimeEnv, evidence, toolContext, 'cert_ct', { domain: dom, target: dom }, 'builtin');
       }
-      let chunks = await vectorRetrieve(runtimeEnv, q, body.topK || TOP_K);
-      const usedVectorize = chunks !== null;
-      if (!chunks) chunks = bm25Chunks(await getChunks(runtimeEnv), q, body.topK || TOP_K);
+      const chunks = await retrieve(runtimeEnv, q, body.topK || TOP_K);
+      let gap = null; try { gap = ndbAssess((_corpus && _corpus.scope) || 'corpus', q); } catch {}
       const sys = buildSystemPrompt(runtimeEnv, {
         summary: '', chunks, toolContext,
         evidenceLedger: buildEvidenceLedger(evidence),
         policy,
       });
       return json({
-        cveIds, ips, domains, wantSearch, usedVectorize,
+        cveIds, ips, domains, wantSearch, retrieval: 'neuron-db', gap,
         evidenceCount: evidence.length,
         evidenceLedger: buildEvidenceLedger(evidence),
         chunkCount: chunks.length,
-        chunks: chunks.map(c => ({ title: c.title, score: c.score, chars: c.text.length })),
+        chunks: chunks.map(c => ({ title: c.title, chars: c.text.length })),
         systemChars: sys.length,
         systemPreview: sys.slice(0, 600),
       });
@@ -5229,6 +5511,7 @@ export default {
       const useSearch = opts.webSearch !== false;
       const reasoning = String(opts.reasoning || 'normal').toLowerCase();
       const braveKey  = opts.brave || runtimeEnv.BRAVE_API_KEY || '';
+      const model     = resolveModel(opts);
       const objective = (body.objective || body.message || '').toString();
       const context   = (body.context || '').toString();
       const clientMemory = typeof body.memory === 'string' ? body.memory : '';
@@ -5247,8 +5530,8 @@ export default {
               msgsG.push({ role: 'assistant', content: full });
               msgsG.push({ role: 'user', content: 'Continue the report from EXACTLY where you stopped. Do not repeat any text already written, do not restart sections, do not add a preamble. If the report is already complete, reply with only: <<END>>' });
             }
-            let rG; try { rG = await runtimeEnv.AI.run(MODEL, { messages: msgsG, stream: false, max_tokens: MAX_TOK, temperature: 0.2 }); } catch (e) { break; }
-            let chunk = (rG.response || '').trim();
+            let rG; try { rG = await runtimeEnv.AI.run(model, { messages: msgsG, stream: false, max_tokens: MAX_TOK, temperature: 0.2 }); } catch (e) { if (model !== MODEL) { try { rG = await runtimeEnv.AI.run(MODEL, { messages: msgsG, stream: false, max_tokens: MAX_TOK, temperature: 0.2 }); } catch { break; } } else break; }
+            let chunk = stripThink(rG.response || '').trim();
             if (/<<END>>/.test(chunk)) { full += chunk.replace(/<<END>>/g, '').trim(); finished = true; break; }
             if (!chunk) { finished = true; break; }
             full += (full ? ' ' : '') + chunk;
@@ -5300,24 +5583,21 @@ export default {
           evidence.push(entry);
           toolContext.push(formatEvidenceForPrompt(entry));
         }
-        let chunks = await vectorRetrieve(runtimeEnv, objective, topK);
-        const usedVectorize = chunks !== null;
-        if (!chunks) chunks = bm25Chunks(await getChunks(runtimeEnv), objective, topK);
+        const chunks = await retrieve(runtimeEnv, objective, topK);
         let sysPrompt = buildSystemPrompt(runtimeEnv, {
           summary: '', chunks, toolContext, clientMemory, reasoning,
           evidenceLedger: buildEvidenceLedger(evidence),
           policy,
         });
         if (reasoning === 'deep') {
-          const notes = await reasonPass(runtimeEnv, objective, toolContext, chunks, temp);
+          const notes = await reasonPass(runtimeEnv, objective, toolContext, chunks, temp, model);
           if (notes) sysPrompt += `\n\nPRELIMINARY ANALYSIS (your private notes — verify, do not treat as fact):\n${notes}`;
         }
         const userContent = context ? `${objective}\n\nContext from earlier steps:\n${context.slice(0, 14000)}` : objective;
-        const r = await runtimeEnv.AI.run(MODEL, {
-          messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userContent }],
-          stream: false, max_tokens: 2048, temperature: temp,
-        });
-        return json({ ok: true, text: (r.response || '').trim(), meta: { cveIds, ips, usedVectorize, chunkCount: chunks.length, evidenceCount: evidence.length } });
+        let r;
+        try { r = await runtimeEnv.AI.run(model, { messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userContent }], stream: false, max_tokens: 2048, temperature: temp }); }
+        catch (e) { if (model !== MODEL) { r = await runtimeEnv.AI.run(MODEL, { messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userContent }], stream: false, max_tokens: 2048, temperature: temp }); } else throw e; }
+        return json({ ok: true, text: stripThink(r.response || '').trim(), meta: { cveIds, ips, retrieval: 'neuron-db', chunkCount: chunks.length, evidenceCount: evidence.length } });
       } catch (e) { return json({ ok: false, error: e.message }, 500); }
     }
 
@@ -5329,6 +5609,7 @@ export default {
       const runtimeEnv = withRuntimeSettings(env, opts);
       const policy    = getAgentPolicy(runtimeEnv);
       const darkwebEnabled = opts.darkweb !== false;
+      const model     = resolveModel(opts);
       const topK      = Math.max(1, Math.min(10, opts.topK || TOP_K));
       const temp      = typeof opts.temperature === 'number' ? opts.temperature : 0.3;
       const useSearch = opts.webSearch !== false;
@@ -5389,6 +5670,8 @@ export default {
           const searchPolicy = shouldUseWebSearch(lastUser, { corpusIntent });
             const routePolicy = buildToolRoutePolicy(lastUser, { corpusIntent, darkwebEnabled, env: runtimeEnv });
           const { cveIds, ips, domains, wantSearch } = analyseQuery(lastUser);
+          // Small talk (greetings, thanks, "how are you") with no real target → chat, don't research.
+          const smallTalk = isSmallTalk(lastUser) && !cveIds.length && !ips.length && !domains.length;
           const evidence = [];
           const toolContext = [];
 
@@ -5499,35 +5782,52 @@ export default {
             }
           }
 
-          // Retrieval — Vectorize semantic, BM25 fallback
-          let chunks = await vectorRetrieve(runtimeEnv, lastUser, topK);
-          const usedVectorize = chunks !== null;
-          if (!chunks) chunks = bm25Chunks(await getChunks(runtimeEnv), lastUser, topK);
-          dbg('retrieval', (usedVectorize ? 'vectorize' : 'bm25') + ' · ' + chunks.length + ' chunks · ' +
-              chunks.map(c => (c.title || '?').slice(0, 24) + '(' + (c.score ?? '') + ')').join(', '));
+          // Retrieval — neuron-db recall over the corpus (skipped entirely for small talk)
+          const chunks = smallTalk ? [] : await retrieve(runtimeEnv, lastUser, topK);
+          let gap = null; if (!smallTalk) { try { gap = ndbAssess((_corpus && _corpus.scope) || 'corpus', lastUser); } catch {} }
+          dbg('retrieval', (smallTalk ? 'small-talk · skipped' : 'neuron-db · ' + chunks.length + ' chunks' + (gap ? ` · coverage=${gap.coverage.toFixed(2)} hits=${gap.nHits}` : '')) + ' · ' +
+              chunks.map(c => (c.title || '?').slice(0, 24)).join(', '));
+
+          // neuron-db session memory: recall what this conversation already established and
+          // fold it into the prompt's MEMORY block (alongside the browser-supplied notes).
+          let ndbMemory = '';
+          if (sess && body.sessionId) {
+            await ndbSessionLoad(env, body.sessionId);
+            const memHits = ndbSessionRecall(body.sessionId, lastUser, 4);
+            if (memHits.length) ndbMemory = memHits.join('\n');
+            dbg('ndb_memory', memHits.length + ' recalled');
+          }
+          const mergedMemory = [clientMemory, ndbMemory].filter(s => s && s.trim()).join('\n');
 
           // Build prompt
           let sysPrompt = buildSystemPrompt(runtimeEnv, {
-            summary: sess?.summary || '', chunks, toolContext, clientMemory, reasoning,
+            summary: sess?.summary || '', chunks, toolContext, clientMemory: mergedMemory, reasoning,
             evidenceLedger: buildEvidenceLedger(evidence),
             policy,
           });
-          if (reasoning === 'deep') {
+          if (smallTalk) {
+            sysPrompt += '\n\nThe user is making small talk, not asking a research question. Reply warmly and briefly (1–2 sentences) and invite a security/CVE question. Do NOT output CVE analysis, corpus content, evidence blocks, citations, or headings.';
+          } else if (reasoning === 'deep') {
             dbg('reasoning', 'deep analysis pass');
-            const notes = await reasonPass(runtimeEnv, lastUser, toolContext, chunks, temp);
+            const notes = await reasonPass(runtimeEnv, lastUser, toolContext, chunks, temp, model);
             if (notes) sysPrompt += `\n\nPRELIMINARY ANALYSIS (your private notes — verify against tools/corpus, do not treat as fact):\n${notes}`;
           }
           const messages = [
             { role: 'system', content: sysPrompt },
             ...priorTurns.filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim()),
           ];
-          dbg('prompt', 'sys=' + sysPrompt.length + 'ch · msgs=' + messages.length + ' · ' + (Date.now() - t0) + 'ms prep');
+          dbg('prompt', 'sys=' + sysPrompt.length + 'ch · msgs=' + messages.length + ' · model=' + model + ' · ' + (Date.now() - t0) + 'ms prep');
 
-          // Stream
-          const stream = await runtimeEnv.AI.run(MODEL, { messages, stream: true, max_tokens: 1024, temperature: temp });
+          // Stream — selected model, falling back to the default on any model error.
+          let stream;
+          try { stream = await runtimeEnv.AI.run(model, { messages, stream: true, max_tokens: 1024, temperature: temp }); }
+          catch (e) {
+            if (model !== MODEL) { dbg('model fallback', model + ' → ' + MODEL + ' (' + String(e.message || e).slice(0, 80) + ')'); stream = await runtimeEnv.AI.run(MODEL, { messages, stream: true, max_tokens: 1024, temperature: temp }); }
+            else throw e;
+          }
           const reader = stream.getReader();
           const dec = new TextDecoder();
-          let buf = '', full = '';
+          let buf = '', raw = '', full = '';   // raw = model output incl <think>; full = what the user sees
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -5540,17 +5840,35 @@ export default {
               try {
                 const obj = JSON.parse(line.slice(6));
                 const t = obj.response || obj.choices?.[0]?.delta?.content || '';
-                if (t) { full += t; send(JSON.stringify({ response: t })); }
+                if (!t) continue;
+                raw += t;
+                const cleaned = stripThink(raw);     // hide reasoning <think>…</think> from the stream
+                const safe = cleaned.slice(0, safeEmitLen(cleaned));   // hold a trailing partial tag
+                if (safe.length > full.length) {
+                  const delta = safe.slice(full.length);
+                  full = safe;
+                  send(JSON.stringify({ response: delta }));
+                }
               } catch {}
             }
           }
-          dbg('done', (Date.now() - t0) + 'ms · ' + full.length + ' chars');
+          // flush any safely-held tail now the stream is done
+          const finalClean = stripThink(raw).replace(/<\/?think>?\s*$/i, '');
+          if (finalClean.length > full.length) { send(JSON.stringify({ response: finalClean.slice(full.length) })); full = finalClean; }
+          // reasoning model emitted only an (unclosed) think block → surface a de-tagged fallback
+          if (!full.trim() && raw.trim()) { full = raw.replace(/<\/?think>/gi, '').trim(); if (full) send(JSON.stringify({ response: full })); }
+          dbg('done', (Date.now() - t0) + 'ms · ' + full.length + ' chars' + (raw.length !== full.length ? ' (think stripped)' : ''));
 
-          // Persist + summarise
+          // Persist + summarise (KV session) + write this turn into neuron-db memory.
           if (sess && full.trim()) {
             sess.turns.push({ role: 'assistant', content: full });
             sess = await summariseSession(env, sess);
             await saveSession(env, sess);
+          }
+          if (body.sessionId && full.trim()) {
+            ndbSessionObserve(body.sessionId, 'user', lastUser);
+            ndbSessionObserve(body.sessionId, 'assistant', full);
+            await ndbSessionSave(env, body.sessionId);
           }
           send('[DONE]');
         } catch (e) {
