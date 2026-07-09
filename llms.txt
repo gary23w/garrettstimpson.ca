@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-07-08T06:57:25Z
+GENERATED    : 2026-07-09T07:25:14Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
@@ -215,7 +215,7 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : cve-2026-23111, CVE-2026-23111
+CVE        : CVE-2026-23111, cve-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -621,7 +621,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : cve-2026-45247, CVE-2026-45247
+CVE        : CVE-2026-45247, cve-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1214
@@ -774,7 +774,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
 URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
-CVE        : cve-2022-0492, CVE-2022-0492
+CVE        : CVE-2022-0492, cve-2022-0492
 CATEGORIES : exploits, linux
 TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
 WORD_COUNT : 1248
@@ -1246,7 +1246,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -1889,7 +1889,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : cve-2026-34926, CVE-2026-34926
+CVE        : CVE-2026-34926, cve-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -1954,7 +1954,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : CVE-2026-46300, cve-2026-46300
+CVE        : cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -4136,7 +4136,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : cve-2026-46333, CVE-2026-46333
+CVE        : CVE-2026-46333, cve-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -4236,7 +4236,7 @@ Check your kernel version. Patch if you haven't.
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : CVE-2026-42945, cve-2026-42945
+CVE        : cve-2026-42945, CVE-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -4387,7 +4387,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431
+CVE        : cve-2026-31431, CVE-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -4595,7 +4595,7 @@ rmmod algif_aead 2>/dev/null
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -4710,7 +4710,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -4949,5 +4949,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 43 documents — 2026-07-08T06:57:25Z
+END OF CORPUS — 43 documents — 2026-07-09T07:25:14Z
 ================================================================================
