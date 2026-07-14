@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-07-14T16:46:08Z
+GENERATED    : 2026-07-14T16:50:20Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 43
+TOTAL POSTS  : 44
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -17,10 +17,211 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 
 <DOCUMENT id="001" type="security-research-post">
 <FRONTMATTER>
+TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
+DATE       : 2026-07-15
+URL        : https://garrettstimpson.ca/posts/2026/07/15/coldfusion-apsb26-68-cvss10-bonanza/
+CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, cve-2026-48282, CVE-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
+CATEGORIES : exploits, web, vuln-research
+TAGS       : CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286, adobe, coldfusion, RCE, path-traversal, unrestricted-upload, CISA-KEV, watchtowr
+WORD_COUNT : 1843
+EXCERPT    : Adobe dropped patches for 11 critical ColdFusion flaws — six of them CVSS 10.0 — on June 30. Attackers had working exploits against CVE-2026-48282 within two hours of disclosure. This is the anatomy of the RDS FILEIO path traversal and the unrestricted upload bugs that made it possible, why ColdFusion keeps getting hammered, and what to do if you're still running a vulnerable instance.
+</FRONTMATTER>
+<BODY>
+**CVE:** CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286  
+**CVSS:** 10.0 (Critical) — seven of them  
+**Disclosed:** June 30, 2026  
+**Affected:** ColdFusion 2025 Update 9 and earlier, ColdFusion 2023 Update 20 and earlier, Campaign Classic v7.4.3 build 9396 and earlier  
+**Fixed in:** ColdFusion 2025 Update 10, ColdFusion 2023 Update 21, Campaign Classic v7.4.3 build 9397  
+**CISA KEV:** CVE-2026-48282 added July 7, 2026  
+**Public analysis:** [watchTowr Labs](https://labs.watchtowr.com/its-37oc-and-all-we-can-think-about-is-coldfusion-adobe-coldfusion-security-bulletin-apsb26-68-cve-bonanza/)
+
+---
+
+On June 30, 2026, Adobe published APSB26-68, a security bulletin covering 11 critical vulnerabilities in ColdFusion 2023 and 2025. Six of them carry CVSS 10.0 — the maximum possible score. A seventh, in Adobe Campaign Classic, also scores 10.0. That is not a typo. Seven distinct vulnerabilities that each earn a perfect severity rating, all fixed in the same patch release.
+
+What happened next is a case study in how fast modern exploitation moves. Two days after the bulletin, watchTowr researchers published a technical analysis breaking down the RDS FILEIO path traversal (CVE-2026-48282) and the unrestricted file upload bugs. Within two hours of that publication, KEVIntel's global honeypot network recorded active exploit traffic. An actor operating from Indian infrastructure was already probing every internet-facing ColdFusion server they could find.
+
+CISA added CVE-2026-48282 to its Known Exploited Vulnerabilities catalog on July 7. As of this week, Shadowserver tracks roughly 750 publicly exposed ColdFusion instances. How many are patched is anyone's guess.
+
+This post walks through the two most interesting bugs — the RDS FILEIO path traversal and the unrestricted file upload — then discusses why ColdFusion keeps generating these clusters of maximum-severity vulnerabilities and what defenders can actually do about it.
+
+---
+
+## The Bug That Blew Up First: CVE-2026-48282 (RDS FILEIO Path Traversal)
+
+ColdFusion's Remote Development Services (RDS) is a legacy feature dating back to the Dreamweaver era. It lets an IDE — historically ColdFusion Builder, Dreamweaver, or the Eclipse plugin — communicate with a running ColdFusion server over HTTP-based RPC. Through RDS a developer can browse the filesystem, execute database queries, deploy files, and debug applications.
+
+One of the RDS services is **FILEIO**, a servlet that handles remote file operations: read, write, copy, delete, list directory contents. It was designed for developer convenience, not for exposure to the open internet. But ColdFusion servers often sit behind a web server that passes requests through, and RDS is enabled by default in many configurations.
+
+The vulnerability is a path traversal in the FILEIO handler. The servlet constructs file paths from user-supplied parameters without adequate validation, and the ColdFusion server runs with high integrity (often `NT AUTHORITY\SYSTEM` on Windows or root-equivalent on Linux). An unauthenticated attacker sends a crafted POST request to:
+
+```
+POST /CFIDE/main/ide.cfm?ACTION=FILEIO
+Content-Type: application/octet-stream
+
+<length-prefixed RDS body with path=../../../../../../inetpub/wwwroot/shell.cfm>
+```
+
+The server resolves the path, writes the file to the web root, and the attacker accesses it directly via the web server to execute arbitrary CFML code. No login. No interaction. One request.
+
+The request flow looks like this:
+
+```
+Attacker                  ColdFusion Server
+   │                            │
+   │  POST /CFIDE/main/ide.cfm  │
+   │  ?ACTION=FILEIO            │
+   │  path=../../../www/shell.cfm │
+   │───────────────────────────►│
+   │                            │
+   │                    RdsFrontEndServlet
+   │                            │
+   │                    ┌───────┴────────┐
+   │                    │  FILEIOServlet  │
+   │                    │  processCmd()   │
+   │                    │  writeFile()    │
+   │                    └───────┬────────┘
+   │                            │
+   │  <length-prefixed RDS      │
+   │   response: OK>            │
+   │◄───────────────────────────│
+   │                            │
+   │  GET /shell.cfm            │
+   │───────────────────────────►│
+   │                            │
+   │  HTTP 200 (RCE achieved)   │
+   │◄───────────────────────────│
+```
+
+watchTowr's analysis confirmed that the FILEIO handler uses a `processCmd()` dispatch that maps the `ACTION` parameter directly to command implementations. The `writeFile` command takes a `path` parameter and writes the request body to that location. Path traversal sequences like `../` are not stripped or validated.
+
+The researchers described it in characteristically blunt terms during their July 2 write-up:
+
+> *"We can write a file anywhere on the filesystem. Since ColdFusion serves CFM templates from its web root, we can simply write a .cfm shell and execute it."*
+
+## The Unrestricted Upload: CVE-2026-48276
+
+While CVE-2026-48282 is the headline grabber due to confirmed active exploitation, CVE-2026-48276 is arguably worse in coverage. It is an unrestricted file upload vulnerability (CWE-434) in a different code path that also allows an unauthenticated attacker to upload a file with a dangerous type.
+
+The key difference: CVE-2026-48276 does not require RDS to be enabled. It targets a separate file upload handler that accepts multipart form data and writes uploaded files to disk without validating the file extension or content type. A `.cfm`, `.jsp`, or `.exe` file can be uploaded and subsequently executed.
+
+Where CVE-2026-48282 requires the RDS feature to be accessible (a condition that varies by deployment), CVE-2026-48276 is reachable on any ColdFusion server that exposes a file upload endpoint — and ColdFusion's default configuration includes several of those.
+
+Both bugs achieve the same end state: unauthenticated remote code execution with a single HTTP request.
+
+## Why Seven CVSS 10.0s in One Bulletin?
+
+This is not an isolated incident. ColdFusion has a long track record of critical vulnerabilities. Sixteen ColdFusion CVEs already sit in the CISA KEV catalog. A 2023 patch batch included multiple CVSS 9.8 RCE flaws. In 2024, attackers exploited ColdFusion vulnerabilities to deploy webshells on government servers.
+
+The pattern is structural, not accidental. Several factors converge:
+
+**Legacy surface area.** RDS, the admin console (`/CFIDE/administrator/`), and various built-in file upload handlers date back 15-20 years. They were designed for a different threat model — internal networks, trusted developers, no internet exposure. They have not been meaningfully refactored.
+
+**Java stack complexity.** ColdFusion runs on a Java server engine that layers CFML on top of the JVM. The attack surface includes the Java servlets that implement RDS, the CFML interpreter itself, the tag libraries, and the connector layer to the web server. Each layer introduces its own parsing and validation logic, and the interactions between them are where path traversals and file type confusion bugs live.
+
+**Slow patching cadence in the installed base.** ColdFusion is disproportionately deployed in enterprise and government environments where patching cycles are measured in weeks or months. Attackers know this. The economics of developing an exploit for ColdFusion are favorable because the window between disclosure and mass patching is reliably long.
+
+**Credentialed vs. unauthenticated confusion.** Several of the CVSS 10.0 bugs in this batch were initially flagged as requiring authentication. Subsequent analysis showed they are reachable without it. The distinction between "requires admin console access" and "requires authentication" gets blurry when the admin console itself is reachable without authentication in default configurations.
+
+## The Two-Hour Window
+
+The timeline of CVE-2026-48282 exploitation is worth restating because it sets a new baseline for how fast the window can close:
+
+- **June 30** — Adobe releases APSB26-68 with patches. The bulletin includes minimal technical detail.
+- **July 2** — watchTowr publishes technical analysis of the RDS FILEIO path traversal, including request structures and exploitation mechanics.
+- **July 2 (2 hours later)** — KEVIntel's honeypot network detects active exploitation attempts. The attacker infrastructure routes through Indian IP space.
+- **July 7** — CISA adds CVE-2026-48282 to the KEV catalog. BOD 26-04 requires federal agencies to patch within 21 days.
+
+The takeaway: the window between "technical details published" and "active scanning at internet scale" is now measured in hours, not days. If you do not have a mechanism to patch critical-severity vulnerabilities within 24 hours of public disclosure, you are racing the attackers and losing.
+
+## Detection
+
+For CVE-2026-48282 (RDS path traversal):
+
+**Network-level:**
+```
+POST /CFIDE/main/ide.cfm
+ACTION=FILEIO
+Content-Type: application/octet-stream
+```
+
+Monitor for POST requests to `/CFIDE/main/ide.cfm` with `ACTION=FILEIO` originating from IPs not in your trusted development range. In most production environments, there should be zero traffic to this endpoint.
+
+**File-system level:**
+```
+find /opt/coldfusion/wwwroot -name "*.cfm" -newer /opt/coldfusion/lib/patches.txt
+```
+
+Unexpected `.cfm` files appearing in the web root after June 30, 2026, are indicators of compromise. Check file creation timestamps against your patch deployment date.
+
+For CVE-2026-48276 (unrestricted upload):
+
+Monitor for multipart file uploads that result in `.cfm`, `.jsp`, or `.exe` files being written to the web root. Legitimate ColdFusion upload functionality typically restricts uploads to non-executable directories or validates file extensions.
+
+## Mitigation (If You Cannot Patch Immediately)
+
+1. **Disable RDS** if you are not actively using remote development:
+
+   In `ColdFusion Administrator → Server Settings → Settings`, uncheck "Enable RDS". Alternatively, block `/CFIDE/main/ide.cfm` at the web server level:
+
+   ```apache
+   # Apache
+   <LocationMatch "^/CFIDE/main/ide\.cfm">
+       Require ip 10.0.0.0/8
+   </LocationMatch>
+
+   # IIS
+   <location path="CFIDE/main/ide.cfm">
+       <system.webServer>
+           <security>
+               <ipSecurity allowUnlisted="false">
+                   <add ipAddress="10.0.0.0" subnetMask="255.0.0.0" allowed="true"/>
+               </ipSecurity>
+           </security>
+       </system.webServer>
+   </location>
+
+   # Nginx
+   location ~ ^/CFIDE/main/ide\.cfm {
+       allow 10.0.0.0/8;
+       deny all;
+   }
+   ```
+
+2. **Do not expose the ColdFusion admin console to the internet.** The `/CFIDE/administrator/` path should be restricted to internal networks or VPN only. This is not a complete mitigation for CVE-2026-48276 (which does not require RDS), but it reduces the overall attack surface.
+
+3. **Remove sample applications** and the default cfdocs folder if present. Old ColdFusion installs ship with sample files that include additional upload handlers.
+
+4. **Run a ColdFusion-specific WAF rule** blocking path traversal sequences (`../`, `..\`, URL-encoded variants) in the `path` parameter of requests to `/CFIDE/main/ide.cfm`.
+
+## The Pattern and What It Means
+
+ColdFusion is not going away. It runs in too many enterprises, governments, and universities. But it has become a reliable source of maximum-severity, remotely exploitable vulnerabilities that attackers weaponize within hours of disclosure.
+
+The lesson from APSB26-68 is not specific to Adobe or ColdFusion. It is a lesson about legacy surface area on the internet. Any application platform that:
+- was designed before 2010,
+- exposes administrative or development endpoints via HTTP,
+- runs with high OS privileges,
+- has a long patch cycle in its user base,
+
+...will eventually produce a bulletin like this one. The only question is when.
+
+For defenders running ColdFusion, the playbook is straightforward but requires discipline: inventory every instance, verify the version, apply Update 10 (2025) or Update 21 (2023) immediately, disable RDS where it is not needed, and monitor for unexpected `.cfm` files appearing in web-accessible directories. The attackers are already scanning. Assume they found you before you read this sentence.
+
+---
+
+*Based on analysis from [watchTowr Labs](https://labs.watchtowr.com/its-37oc-and-all-we-can-think-about-is-coldfusion-adobe-coldfusion-security-bulletin-apsb26-68-cve-bonanza/), [KEVIntel](https://kevintel.io), [Resecurity](https://www.resecurity.com/blog/article/cve-2026-48282-adobe-coldfusion-rds-path-traversal-leading-to-rce), [Hive Pro](https://www.hivepro.com/threat-advisory/coldfusion-path-traversal-cve-2026-48282-under-active-attack), [BleepingComputer](https://www.bleepingcomputer.com/news/security/max-severity-adobe-coldfusion-flaw-now-exploited-in-attacks/), and [CISA](https://www.cisa.gov/news-events/alerts/2026/07/07/cisa-adds-one-known-exploited-vulnerability-catalog).*
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
+<FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
 URL        : https://garrettstimpson.ca/posts/2026/07/01/cve-2026-55200-libssh2-transport-read-oob-write/
-CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, cve-2026-55200, CVE-2026-55200
+CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, CVE-2026-55200, cve-2026-55200
 CATEGORIES : exploits, supply-chain
 TAGS       : cve-2026-55200, libssh2, ssh, integer-overflow, rce, curl, supply-chain
 WORD_COUNT : 1276
@@ -98,7 +299,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
@@ -210,7 +411,7 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
@@ -275,12 +476,12 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
 URL        : https://garrettstimpson.ca/posts/2026/06/19/rogueplanet-cve-2026-50656-defender-toctou-lpe/
-CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, CVE-2026-50656, cve-2026-50656
+CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, cve-2026-50656, CVE-2026-50656
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-50656, windows-defender, lpe, toctou, oplock, ntfs-junction, nightmare-eclipse
 WORD_COUNT : 1305
@@ -362,7 +563,7 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
@@ -488,7 +689,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -553,7 +754,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -616,7 +817,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
@@ -696,7 +897,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
@@ -769,7 +970,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
@@ -863,12 +1064,12 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/yellowkey-cve-2026-45585-bitlocker-winre-txf-bypass/
-CVE        : cve-2026-45585, CVE-2026-45585
+CVE        : CVE-2026-45585, cve-2026-45585
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-45585, bitlocker, winre, transactional-ntfs, physical-access
 WORD_COUNT : 1166
@@ -927,7 +1128,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -1024,7 +1225,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -1106,7 +1307,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -1241,12 +1442,12 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : CVE-2026-41089, cve-2026-41089
+CVE        : cve-2026-41089, CVE-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -1327,12 +1528,12 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : cve-2026-35616, CVE-2026-35616
+CVE        : CVE-2026-35616, cve-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1182
@@ -1404,7 +1605,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -1500,12 +1701,12 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : CVE-2026-20817, cve-2026-20817
+CVE        : cve-2026-20817, CVE-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1052
@@ -1573,12 +1774,12 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
-CVE        : CVE-2026-0257, cve-2026-0257
+CVE        : cve-2026-0257, CVE-2026-0257
 CATEGORIES : exploits, network-security
 TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
 WORD_COUNT : 1255
@@ -1655,7 +1856,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -1794,12 +1995,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -1884,12 +2085,12 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : cve-2026-34926, CVE-2026-34926
+CVE        : CVE-2026-34926, cve-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -1949,12 +2150,12 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : cve-2026-46300, CVE-2026-46300
+CVE        : CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -2059,7 +2260,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -2171,7 +2372,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -2241,7 +2442,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -2418,7 +2619,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -2512,7 +2713,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -2675,7 +2876,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -2833,7 +3034,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -2967,7 +3168,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -3189,7 +3390,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -3317,7 +3518,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -3524,12 +3725,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : cve-2026-40369, CVE-2026-40369
+CVE        : CVE-2026-40369, cve-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -3638,7 +3839,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -3822,7 +4023,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -3978,7 +4179,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -4131,7 +4332,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -4231,12 +4432,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : CVE-2026-42945, cve-2026-42945
+CVE        : cve-2026-42945, CVE-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -4382,7 +4583,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
@@ -4590,7 +4791,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -4705,12 +4906,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -4802,7 +5003,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -4949,5 +5150,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 43 documents — 2026-07-14T16:46:08Z
+END OF CORPUS — 44 documents — 2026-07-14T16:50:20Z
 ================================================================================
