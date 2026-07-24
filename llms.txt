@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-07-23T06:57:44Z
+GENERATED    : 2026-07-24T06:58:32Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
@@ -416,7 +416,7 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : cve-2026-23111, CVE-2026-23111
+CVE        : CVE-2026-23111, cve-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -481,7 +481,7 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
 URL        : https://garrettstimpson.ca/posts/2026/06/19/rogueplanet-cve-2026-50656-defender-toctou-lpe/
-CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, cve-2026-50656, CVE-2026-50656
+CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, CVE-2026-50656, cve-2026-50656
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-50656, windows-defender, lpe, toctou, oplock, ntfs-junction, nightmare-eclipse
 WORD_COUNT : 1305
@@ -975,7 +975,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
 URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
-CVE        : CVE-2022-0492, cve-2022-0492
+CVE        : cve-2022-0492, CVE-2022-0492
 CATEGORIES : exploits, linux
 TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
 WORD_COUNT : 1248
@@ -1069,7 +1069,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/yellowkey-cve-2026-45585-bitlocker-winre-txf-bypass/
-CVE        : cve-2026-45585, CVE-2026-45585
+CVE        : CVE-2026-45585, cve-2026-45585
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-45585, bitlocker, winre, transactional-ntfs, physical-access
 WORD_COUNT : 1166
@@ -1447,7 +1447,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -2000,7 +2000,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : CVE-2026-43121, cve-2026-43121
+CVE        : cve-2026-43121, CVE-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -2090,7 +2090,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : cve-2026-34926, CVE-2026-34926
+CVE        : CVE-2026-34926, cve-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -2155,7 +2155,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : CVE-2026-46300, cve-2026-46300
+CVE        : cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -3730,7 +3730,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : cve-2026-40369, CVE-2026-40369
+CVE        : CVE-2026-40369, cve-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -4588,7 +4588,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431
+CVE        : cve-2026-31431, CVE-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -5150,5 +5150,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 44 documents — 2026-07-23T06:57:44Z
+END OF CORPUS — 44 documents — 2026-07-24T06:58:32Z
 ================================================================================
