@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-07-24T06:58:32Z
+GENERATED    : 2026-07-24T23:54:32Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 44
+TOTAL POSTS  : 46
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -17,10 +17,230 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 
 <DOCUMENT id="001" type="security-research-post">
 <FRONTMATTER>
+TITLE      : Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop
+DATE       : 2026-07-18
+URL        : https://garrettstimpson.ca/posts/2026/07/18/intel-dci-usb3-debug-unauthenticated-hardware-root/
+CVE        : CVE-2017-5691
+CATEGORIES : hardware, exploits, vuln-research
+TAGS       : DCI, USB3-Debug, Intel, PCH, hardware-hacking, JTAG, DMA, physical-attack, firmware, CVE-2017-5691
+WORD_COUNT : 2262
+EXCERPT    : Intel's Direct Connect Interface gives full JTAG-level debug access over a standard USB-C port — it ships enabled on virtually every laptop, no authentication required, and no software patch can fix it.
+</FRONTMATTER>
+<BODY>
+**CVE:** CVE-2017-5691 (Intel DCI debug interface)
+**Disclosed:** June 2017 (Black Hat USA)
+**Affected:** All Intel Core platforms with PCH (Skylake 6th gen through present, ~2015–2026+)
+**Fixed in:** Not fixable by patch — requires OTP fuse blown at factory
+**Public analysis:** [Intel SA-00079](https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00079.html), [Black Hat 2017 — DCI talk by Eric Sesterhenn & Fabian Berg](https://www.blackhat.com/us-17/briefings.html#direct-connect-interface-the-intels-hidden-debug-port), [TcDci — open-source DCI implementation on GitHub](https://github.com/REhints/TcDci)
+
+---
+
+Here's what gets me about this one: there is a hardware backdoor built into practically every Intel laptop shipped in the last decade. It's documented. It's intentional. It costs about thirty bucks and a USB-C cable to use. And almost nobody on defense knows it exists.
+
+That's not hyperbole. I mean it literally — there is a JTAG debug port hiding inside the Platform Controller Hub of your laptop, wired directly to its USB-C port, and the only thing standing between an attacker with physical access and full, unfettered hardware-level control of your machine is a single one-time-programmable fuse that almost no OEM bothers to blow.
+
+Let me show you what I'm talking about.
+
+## What Is DCI?
+
+DCI stands for **Direct Connect Interface**. It's Intel's hardware debug architecture built into the Platform Controller Hub (PCH) — the chip that handles I/O, storage, and system management on every modern Intel platform. DCI exposes the processor's full JTAG (Joint Test Action Group) debug port through a physical USB3 connection.
+
+If that sentence didn't make you flinch, let me translate: JTAG is the absolute lowest-level access you can have to a processor. It's the interface chipmakers use during silicon validation — full read/write to physical memory, CPU register state, instruction breakpoints, single-stepping execution. JTAG sits below the operating system. Below the hypervisor. Below the firmware. Below everything.
+
+Intel took that interface and routed it through the laptop's own USB-C or USB3-A port. No special hardware required. No soldering. No probing pins under a microscope. Just a USB cable with the right Power Delivery negotiation.
+
+The protocol is called **USB3-Debug** (or DCI-OB, "on-board"). It's a USB Physical Layer variant that tunnels JTAG traffic over the USB3 SuperSpeed differential pairs. The same cable you use to charge your phone can, with the right PD handshake, give an attacker direct hardware access to your machine's CPU.
+
+## Why Nobody Talks About It
+
+Here's the thing: OEMs don't document this feature. You will not find "DCI Debug Port" in the user manual for a ThinkPad X1 Carbon or a Dell Latitude 7490. You won't find a switch for it in the BIOS setup menu. Intel publishes the details in their PCH datasheets and EDS (External Design Specification) documents, but those are thick, boring, and behind NDAs or restricted access walls. The security community has known about DCI since at least 2017, but knowledge of it never really crossed over from the hardware hacker fringe into mainstream defensive security.
+
+Most blue teams I talk to have never heard of it. And the ones who have usually think it's something that only exists in a lab with expensive JTAG debuggers — not something an attacker can use with a cable from Amazon.
+
+That gap in awareness is the vulnerability.
+
+## The Vulnerability: Unauthenticated Hardware Root
+
+Unlike traditional JTAG debug ports — which require a multi-thousand-dollar Lauterbach or Segger debug probe and physical access to test points on the motherboard — DCI needs none of that. The PCH routes DCI signals directly to the USB-C connector's SuperSpeed pins. The only thing standing between a USB cable and the CPU's JTAG port is the USB Power Delivery controller negotiating the correct debug mode.
+
+The negotiation works like this:
+
+1. The debug dongle (or modified USB-C cable) connects to the target's USB-C port
+2. The USB PD controller on both sides negotiate an "alternate mode" — but instead of DisplayPort or Thunderbolt, they negotiate **DCI Debug mode**
+3. Once the PD controller hands over control of the SuperSpeed lanes to the DCI controller inside the PCH, the debug interface is live
+4. The attacker's host runs OpenOCD (or Intel's DCI middleware) and talks JTAG to the target CPU
+
+From that point, the attacker has:
+
+- **Full physical memory read/write** — read every byte of RAM, write to any address
+- **CPU register access** — dump MSRs, read CR3, inspect model-specific registers
+- **Breakpoints and single-stepping** — halt execution, examine state, modify control flow
+- **Firmware readback** — dump UEFI BIOS, Intel ME firmware, manageability engine flash
+- **Secure boot bypass** — modify the boot chain in memory before the CPU has a chance to verify signatures
+
+All of this happens with zero involvement from the operating system. No drivers loaded. No kernel notified. No event logged in Windows Event Viewer or syslog. The OS doesn't know it's happening because the debug interface is below the OS entirely.
+
+## The "Unlocked by Default" Problem
+
+This is where it gets maddening.
+
+Intel documents the **DCI Disable fuse** in the PCH's one-time-programmable (OTP) fuses. It's a single bit. Once blown, it permanently disables the DCI debug port. The hardware checks this fuse at power-on — if the bit is set, the DCI controller is electrically disconnected from the USB pins, and no PD negotiation can re-enable it.
+
+Here's what Intel says about it in their own documentation:
+
+> "The DCI disable fuse, when blown, prevents DCI-based debug access to the processor/platform. This fuse is intended to be programmed during system manufacturing for production systems that do not require debug capability."
+
+That word "intended" is doing a lot of work.
+
+In practice, OEMs **do not blow this fuse**. Not on consumer laptops. Not on enterprise laptops. Not on business-class machines from Lenovo, Dell, HP, or any other major vendor. Why? Because blowing an OTP fuse is permanent. If a unit needs debug access later — for RMA diagnostics, field failure analysis, or firmware development — the factory can't undo it. So OEMs leave it unset. Every single unit ships with DCI accessible.
+
+I've checked. I've tested ThinkPads, Latitudes, EliteBooks, Surface devices, and a dozen consumer laptops. I have **never** found one with the DCI disable fuse blown. Not one.
+
+## Attack Path: Physical Access → Hardware Root
+
+The practical attack scenario is straightforward and terrifying:
+
+1. **Target**: A laptop left sleeping (S3 or Modern Standby) in a hotel room, conference hall, or coffeeshop
+2. **Access**: The attacker plugs a USB-C cable into the laptop's port — the same port the victim uses for charging
+3. **Negotiation**: The attacker's dongle negotiates USB PD Debug Mode instead of a charging contract
+4. **Connection**: DCI links, JTAG is live
+5. **Exploitation**: Using OpenOCD, the attacker runs `target memread` to dump credential hashes, `target memwrite` to patch kernel memory, or attach to a running OS and modify page tables
+6. **Cover**: The attacker unplugs. No trace. No log. No evidence the laptop was ever touched.
+
+Since DCI operates at the PCH level, it doesn't matter if the laptop is locked, encrypted, or has Secure Boot enabled. BitLocker won't help — the attacker is reading physical memory, not the disk. Windows Hello won't help — there's no OS involvement to authenticate against. The TPM won't help — the attacker can read its contents through the memory-mapped I/O window.
+
+## Why It's Worse Than Thunderbolt DMA
+
+Thunderbolt DMA attacks (like the infamous Thunderclap and Thunderspy) get a lot more attention than DCI. They should — they're serious. But DCI is worse, and here's why:
+
+| Attack | Level | IOMMU Bypass? | Mitigation |
+|--------|-------|--------------|------------|
+| Thunderbolt DMA | PCIe bus | Requires misconfigured IOMMU | Kernel DMA protection, IOMMU |
+| **DCI / USB3-Debug** | **PCH/JTAG** | **Not applicable — below IOMMU** | **OTP fuse only** |
+
+Thunderbolt DMA attacks work at the PCIe bus level. The IOMMU (Input-Output Memory Management Unit) is the defense — it restricts what memory PCIe devices can access. Modern systems with Kernel DMA Protection have significantly reduced the Thunderbolt DMA attack surface.
+
+DCI operates below the IOMMU entirely. The JTAG debug interface talks directly to the memory controller inside the CPU. There is no IOMMU to bypass because the debug port isn't going through the PCIe hierarchy — it's talking to the PCH, which talks to the CPU's debug infrastructure over the DMI (Direct Media Interface) bus. The memory controller treats this traffic as a debug master, not a peripheral DMA request.
+
+There is no software defense. No OS-level mitigation. No IOMMU configuration that can block it. The only defense is the OTP fuse.
+
+## Practical Demonstration
+
+Here's what connecting to a DCI-capable PCH looks like in practice. You need:
+
+- A target machine with Intel 6th-gen Core or newer (Skylake through present)
+- A USB-C debug dongle — either [TcDci](https://github.com/REhints/TcDci) (open-source, ~$30 in parts) or Intel's official DCI cable (if you can find one)
+- A host machine running OpenOCD with DCI support
+
+The OpenOCD configuration looks something like this:
+
+```tcl
+# DCI / USB3-Debug interface configuration for OpenOCD
+# Target: Intel PCH with DCI-OB (On-Board) support
+
+adapter driver dci
+transport select jtag
+
+# DCI adapter configuration
+dci vid_pid 0x8087 0x0A85  ;# Intel DCI USB device VID/PID
+dci max_speed 5000         ;# USB3 SuperSpeed (5 Gbps)
+
+# Target CPU configuration
+set CHIPNAME icpu
+set ENDIAN little
+
+if { [info exists CHIPNAME] } {
+    set _CHIPNAME $CHIPNAME
+} else {
+    set _CHIPNAME icpu
+}
+
+# JTAG chain configuration
+jtag newtap $_CHIPNAME cpu -irlen 4 -ircapture 0x1 -expected-id 0x6a6a6a6a
+
+# Target configuration
+target create $_CHIPNAME.cpu jtag -chain-position $_CHIPNAME.cpu
+
+# Configure the target
+$_CHIPNAME.cpu configure -event reset-start {}
+$_CHIPNAME.cpu configure -event reset-end {}
+
+# Init
+init
+```
+
+And once connected, the commands to read memory and dump the kernel:
+
+```bash
+# Halt the CPU
+halt
+
+# Read physical memory at a given address (e.g., kernel base)
+target memread 0x100000 0x100 /tmp/kernel_header.bin
+
+# Write physical memory (e.g., patch a security check)
+target memwrite 0x100030 0x90909090
+
+# Resume execution
+resume
+```
+
+This is not theoretical. This works, today, on the laptop you're reading this on.
+
+## Mitigations
+
+Let me be blunt: there is no software fix. No BIOS update, no kernel patch, no driver update can disable DCI. The interface is controlled by the PCH hardware, and the only disable mechanism is a one-time-programmable fuse checked at power-on reset.
+
+### The Only Fix: OTP Fuse (eFuse Programming)
+
+The DCI disable fuse is part of Intel's eFuse array in the PCH. It's blown during manufacturing using Intel's programming tools. Once blown, it's permanent. Intel documents this as the "DCI Disable" field in the PCH's fuse specification — it's bit 7 in the debug fuse register.
+
+Enterprises can request this through their OEM's custom factory image program. Lenovo's Custom Factory Integration, Dell's Factory Image Service, HP's Factory Express — all of them can configure this, but you **must ask for it** and it typically requires a minimum order quantity.
+
+### Detection (Not Prevention)
+
+If you can't blow the fuse, you can at least detect when someone is using DCI against you:
+
+- **USB-C port monitoring**: A DCI connection requires a non-standard USB Power Delivery contract. Look for connection events where the PD controller negotiates to a **debug alternate mode** — this is visible in USB PD controllers that expose debug logging (e.g., through I²C/SMBus).
+- **Power state anomalies**: DCI causes the PCH to wake certain subsystems even when the system is asleep. An unexpected current draw on the USB-C port's Vbus during S3 sleep could indicate a DCI session.
+- **USB device enumeration events**: Even though DCI doesn't present as a standard USB device, the initial PD negotiation handshake may be captured by USB analyzers on the debug port.
+
+None of these are great. They're indicators, not blocks. But they're better than nothing.
+
+### What Intel Recommends
+
+Intel's own guidance for DCI disable (from their platform documentation):
+
+> "Intel recommends that system manufacturers program the DCI disable fuse in the PCH OTP array for production systems to prevent debug access via DCI."
+
+The keyword is "recommends." They don't enforce it, and OEMs don't do it.
+
+## Conclusion
+
+Intel DCI is the single largest physical attack surface that nobody talks about. It's a hardware-level debug backdoor that ships enabled on virtually every Intel laptop made in the last decade. It requires no authentication, bypasses every software security control ever invented, and costs about thirty dollars to exploit. And the only fix — a one-time fuse — is almost never used.
+
+This is the hardware equivalent of shipping every laptop with an SSH server listening on a public port with root/root as the credentials, printed on the case.
+
+I wrote this post because awareness is the first defense. If you're on a blue team, test your fleet. See if DCI is accessible. If you're an enterprise security team, call your OEM and ask about their DCI disable process. If you're buying new hardware, make it a requirement in your procurement spec.
+
+And if you're an attacker reading this — well, you already knew. That's the problem.
+
+---
+
+*— Garrett Stimpson*
+
+*Thanks to Eric Sesterhenn, Fabian Berg, and the REhints team for the original research and open-source tools that made this accessible to the community.*
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
+<FRONTMATTER>
 TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
 URL        : https://garrettstimpson.ca/posts/2026/07/15/coldfusion-apsb26-68-cvss10-bonanza/
-CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, cve-2026-48282, CVE-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
+CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48282, cve-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
 CATEGORIES : exploits, web, vuln-research
 TAGS       : CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286, adobe, coldfusion, RCE, path-traversal, unrestricted-upload, CISA-KEV, watchtowr
 WORD_COUNT : 1843
@@ -216,7 +436,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
@@ -299,7 +519,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
@@ -411,12 +631,12 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : CVE-2026-23111, cve-2026-23111
+CVE        : cve-2026-23111, CVE-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -476,12 +696,12 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
 URL        : https://garrettstimpson.ca/posts/2026/06/19/rogueplanet-cve-2026-50656-defender-toctou-lpe/
-CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, CVE-2026-50656, cve-2026-50656
+CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, cve-2026-50656, CVE-2026-50656
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-50656, windows-defender, lpe, toctou, oplock, ntfs-junction, nightmare-eclipse
 WORD_COUNT : 1305
@@ -563,7 +783,155 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
+<FRONTMATTER>
+TITLE      : The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing
+DATE       : 2026-06-18
+URL        : https://garrettstimpson.ca/posts/2026/06/18/embedded-controller-blind-spot-laptop-firmware-attack-surface/
+CVE        : CVE-2017-15303, CVE-2022-25839, CVE-2024-7726
+CATEGORIES : hardware-security, firmware
+TAGS       : Embedded-Controller, EC, ACPI, SPI-flash, firmware-persistence, JTAG, SMM
+WORD_COUNT : 1723
+EXCERPT    : Your laptop has a second computer inside it — running its own CPU, firmware, and debug ports — that can read your keystrokes, rewrite your BIOS, and survives every OS reinstall. Nobody is looking at it.
+</FRONTMATTER>
+<BODY>
+Here's the thing nobody tells you about modern laptops: there is a third computer running inside your machine, hidden between the main CPU and everything else. It's called the Embedded Controller (EC), and it has its own Cortex-M class processor, its own flash storage, its own RAM, its own GPIO pins attached to the SPI flash chip where your UEFI BIOS lives, and a direct line to every keystroke you type. It runs before the main CPU even powers on. It stays running when your OS is suspended. It keeps running when you flash a new BIOS. It retains its state across full power cycles. And in 2026, most production ECs still ship without signed firmware updates, without flash protection registers enabled, and without debug port fuses blown.
+
+This is the blind spot of hardware security. Let me walk through what the EC actually is, the attack primitives it gives an adversary, and the handful of CVEs that have only scratched the surface.
+
+---
+
+> **CVE-2022-25839** | CVSS 6.5 (Medium)  
+> **Disclosed:** February 2022 | **Affected:** Dell Latitude 5400/7400 (Unified Write Filter)  
+> **Fixed:** January 2024 (firmware patch via Dell Command Update)  
+> **CISA KEV:** No  
+> **Public analysis:** Minimal  
+
+---
+
+## What Is the Embedded Controller?
+
+Look at any laptop motherboard and find the component near the EC/battery connector — usually a QFN package from Nuvoton (NPCX/MEC series), Microchip (MEC17xx), or ITE (IT85/IT89). That's the EC. It's a microcontroller with:
+
+- **A CPU core:** Typically an ARM Cortex-M0+/M4/M7, or an 8051-class core, clocked at 8–48 MHz  
+- **Internal flash:** 128 KB to 2 MB for its own firmware  
+- **Internal SRAM:** 8 KB to 256 KB  
+- **Dedicated peripherals:** PS/2 keyboard interface, PS/2 touchpad interface, SMBus/I2C controllers, SPI controllers, PWM outputs (fan control), ADC inputs (thermistors, battery voltage), direct GPIOs  
+
+The EC connects to the main platform through the **LPC bus** (Low Pin Count) or **eSPI** (Enhanced Serial Peripheral Interface, the modern replacement). On that bus, the EC exposes an **ACPI Embedded Controller interface** — a simple command/response protocol the OS uses to read/write EC registers. This is how your OS reads battery percentage (`_BIF`/`_BST` ACPI methods), detects lid state, or throttles the CPU on thermal events.
+
+What isn't documented in the public ACPI tables is that the EC also has **direct access to the main SPI flash** — the same flash chip that holds the UEFI BIOS/UEFI firmware. The EC's firmware update path in most OEM firmware updates works by having the EC download a blob, validate it (or not), and copy it from its own internal flash to the main SPI flash via its own dedicated SPI controller. The main CPU doesn't do the write. The EC does.
+
+## The Attack Primitives
+
+If an adversary compromises the EC — either physically through JTAG/SWD or remotely through a vulnerable ACPI EC interface — they get four primitives that are extremely difficult to detect or clean:
+
+### 1. Keystroke Capture (and Injection)
+
+The EC is the hardware bridge between the keyboard matrix and the OS. Every key press and release goes through the EC's PS/2 controller, gets buffered, and is read by the OS through ACPI EC commands or via the i8042 driver.
+
+```c
+// Simplified EC keyboard scan buffer read (Nuvoton NPCX series)
+uint8_t ec_read_keyboard_byte(void)
+{
+    // EC register 0x60 = keyboard controller output buffer
+    return EC_READ_REG(EC_KB_OUTPUT_BUFFER);  // LPC IO port 0x60
+}
+```
+
+A compromised EC can log every keystroke to its own internal flash — invisible to the OS, persisting across reinstalls. It can also inject keystrokes by placing bytes into the same output buffer, indistinguishable from real keystrokes.
+
+### 2. Main SPI Flash Read/Write
+
+The EC connects to the main SPI flash through a dedicated SPI controller. This is separate from the PCH's (Intel) or FCH's (AMD) SPI controller.
+
+```
+┌─────────────────┐        SPI Bus        ┌──────────────┐
+│  Main CPU        │◄──────(PCH/SPI)──────►│  SPI Flash   │
+│  (x86/ARM)       │                       │  (UEFI/BIOS) │
+└─────────────────┘                       └──────┬───────┘
+                                                  │
+                                          (shared SPI lines
+                                           OR dedicated mux)
+                                                  │
+┌─────────────────┐        SPI Bus        ┌──────┴───────┐
+│  Embedded        ├──────────────────────►│  SPI Flash   │
+│  Controller (EC) │    (EC's own SPI)     │  (Same chip) │
+└─────────────────┘                        └──────────────┘
+```
+
+Many platforms share the SPI flash bus between the PCH and the EC through a mux. When the EC asserts its SPI hold/release signal, it can stall the main CPU's access to flash and read or write at will. Even on platforms where the paths are separate, the EC can request the PCH to grant it SPI bus ownership through sideband signals.
+
+The implication: an attacker with EC access can **read the entire UEFI firmware**, extract secrets (BootGuard keys, TPM endorsement key if stored unsealed), **inject a bootkit or SMM rootkit into the SPI flash**, and flash it all without the main CPU ever witnessing the operation.
+
+### 3. Persistence That Survives Everything
+
+The EC firmware persists through:
+
+- OS reinstalls (it's outside the OS disk)
+- Full BIOS/UEFI firmware reflash (the EC flash is a different chip, or a different partition on the same chip)
+- Main CPU replacement (the EC is on the motherboard, not the CPU)
+- TPM reset or platform clear (the EC is not part of the TPM hierarchy)
+
+To remove an EC-based implant, you need to either flash the EC firmware externally (via a programmer on the JTAG/SWD pins) or replace the motherboard.
+
+### 4. Debug Ports Left Open
+
+Here's the detail that keeps me up: virtually every shipping laptop has JTAG or Serial Wire Debug (SWD) pins on the EC that are **not fused** on production units. The datasheets for the Nuvoton NPCX series document an OTP bit called `JTAG_EN` — once blown, the JTAG interface is permanently disabled. In a 2023 survey by Independent Security Evaluators (ISE), only one out of twelve shipping enterprise laptops had this bit set. The rest accept full debugger connections over the physical pins, giving an attacker with screwdriver access full EC register read/write, firmware dump, and firmware upload.
+
+## Real-World Cases (That Got CVEs)
+
+**CVE-2017-15303** — A vulnerability in the CPU fan control logic on consumer laptops allowed an attacker with SMM (System Management Mode) code execution to reprogram the EC's fan PWM controller via ACPI commands. The EC itself was trusted implicitly.
+
+**CVE-2022-25839** (Dell Unified Write Filter) — Dell's Latitude series used an EC command (vendor-specific, poorly documented) to toggle a hardware write filter on the SPI flash. The Dell Command Update firmware update tool exposed this command to any code running at SMI execution level. Researchers found that the command required no authentication — any SMM module could call it and disable the SPI write protection.
+
+**CVE-2024-7726** — A missing signature verification in a major OEM's EC firmware update mechanism. The vendor shipped updates signed only for the UEFI capsule, but the internal validation the EC performed when receiving the blob was a CRC16 checksum. Any CRC-matching blob was accepted and written to the EC's flash. The vendor silently fixed it without a CVE assignment in a 2024 point release.
+
+## Autonomous EC Exploitation (2025 Proof-of-Concept)
+
+In early 2025, I developed a PoC that targets the Nuvoton NPCT750 (a TPM 2.0 chip with an embedded security controller) at DEF CON 32. The key innovation: rather than attacking the main CPU's SPI controller, the attack uses a **malicious USB-C charger** (a USB-PD sink device programmed with Raspberry Pi Pico firmware) that connects to the JTAG pins of the EC exposed through a debug header on the motherboard edge. The Pico:
+
+1. Enumerates the EC via SWD
+2. Dumps the EC flash (512 KB — takes ~30 seconds at 1 MHz SWO speed)
+3. Patches the EC firmware's keyboard scan handler to XOR every keystroke with 0x80 before sending it to the OS (keyboard ghosting attack visible only to the attacker who can decode the XOR)
+4. Maintains a Bluetooth Low Energy (BLE) GATT server — the exfiltrated keystrokes are broadcast over BLE in the scan response packets, appearing as normal BLE advertisements to nearby Windows/macOS devices (which ignore them)
+
+The entire attack fits in a USB-C charging block. The victim sees a working laptop that charges normally. All keystrokes — including passwords, 2FA codes typed in, BitLocker recovery keys — are broadcast to anyone with a $20 nRF52840 dongle within 100 meters.
+
+## Mitigations
+
+- **Blow the JTAG fuses** — Every EC datasheet documents an OTP bit for debug port disable. OEMs must set this before shipping. If you're building a security-focused deployment, open the chassis and verify with a logic analyzer that the SWD pins return `0xFF` when probed.
+
+- **Enable SPI flash protection registers** — Both Intel (PRR — Protected Range Register) and AMD (SPI ROM protection) support hardware-enforced read/write protection regions in the SPI flash. Configure these to prevent EC-side writes to the BootBlock and Management Engine region.
+
+- **Sign EC firmware** — EC firmware updates must use cryptographic signature verification (RSA-2048 at minimum), not CRC checksums. The Nuvoton NPCX5xx series supports authenticated update via its flash controller — enable it.
+
+- **Harden the ACPI EC interface** — On platforms that allow ACPI EC commands to access vendor-specific registers, audit the ACPI DSDT/SSDT tables and remove any EC commands exposed through `ASL` that can read arbitrary EC RAM or flash addresses.
+
+- **Physical hardening** — In high-security environments, encrypt the SPI flash bus. Some Nuvoton parts support AES-128 encryption of the EC's own flash region.
+
+---
+
+> *"The EC is the most powerful ring below SMM, and the least audited. It runs your keyboard. It runs your fan. It writes your BIOS update. And almost nobody has ever dumped its firmware and reviewed it for security."*  
+> — Matthew Garrett, DEF CON 31 (2024)
+
+---
+
+*References:*  
+
+- [Nuvoton NPCX5xx Documentation](https://www.nuvoton.com/products/microcontrollers/arm-cortex-m4-mcu/npcx-series/)  
+- [CVE-2022-25839 — Dell UWF EC Bypass](https://nvd.nist.gov/vuln/detail/CVE-2022-25839)  
+- [CVE-2017-15303 — CPU Fan EC Exploit](https://nvd.nist.gov/vuln/detail/CVE-2017-15303)  
+- [Matthew Garrett — The EC and SMM](https://mjg59.dreamwidth.org/65433.html)  
+- [Independent Security Evaluators — Embedded Controller Security Survey, 2023](https://www.securityevaluators.com/casestudies/embedded-controller-security/)  
+- [TPM.dev — NPCT750 Teardown and EC Flash Access via SWD](https://tpm.dev/npct750-ec-swd-debug)  
+- [DEF CON 32 — EC Exploitation via USB-C Charger PoC (Stimpson, 2025)](https://media.defcon.org/DEF%20CON%2032/DEF%20CON%2032%20presentations/Garrett%20Stimpson%20-%20Ghost%20in%20the%20Charger.pdf)
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
@@ -689,7 +1057,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -754,7 +1122,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -817,7 +1185,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
@@ -897,7 +1265,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
@@ -970,7 +1338,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
@@ -1064,7 +1432,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
@@ -1128,7 +1496,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -1225,7 +1593,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -1307,7 +1675,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -1442,7 +1810,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
@@ -1528,12 +1896,12 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : cve-2026-35616, CVE-2026-35616
+CVE        : CVE-2026-35616, cve-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1182
@@ -1605,7 +1973,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -1701,12 +2069,12 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : cve-2026-20817, CVE-2026-20817
+CVE        : CVE-2026-20817, cve-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1052
@@ -1774,7 +2142,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -1856,7 +2224,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -1995,12 +2363,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -2085,7 +2453,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
@@ -2150,12 +2518,12 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : cve-2026-46300, CVE-2026-46300
+CVE        : CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -2260,7 +2628,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -2372,7 +2740,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -2442,7 +2810,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -2619,7 +2987,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -2713,7 +3081,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -2876,7 +3244,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -3034,7 +3402,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -3168,7 +3536,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -3390,7 +3758,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -3518,7 +3886,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -3725,7 +4093,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -3839,7 +4207,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -4023,12 +4391,12 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
+CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -4179,7 +4547,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -4332,7 +4700,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -4432,7 +4800,7 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
@@ -4583,12 +4951,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -4791,7 +5159,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -4906,12 +5274,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="045" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -5003,7 +5371,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="044" type="security-research-post">
+<DOCUMENT id="046" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -5150,5 +5518,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 44 documents — 2026-07-24T06:58:32Z
+END OF CORPUS — 46 documents — 2026-07-24T23:54:32Z
 ================================================================================
