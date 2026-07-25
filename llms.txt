@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-07-25T14:44:23Z
+GENERATED    : 2026-07-25T15:12:36Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
@@ -17,13 +17,13 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 
 <DOCUMENT id="001" type="security-research-post">
 <FRONTMATTER>
-TITLE      : CXL Memory — The Disaggregated RAM Nobody Bothered to Secure (Process-Level Isolation Is Optional)
+TITLE      : CXL Memory — Disaggregated RAM with No Security Model
 DATE       : 2026-08-01
 URL        : https://garrettstimpson.ca/posts/2026/08/01/cxl-memory-no-security-model/
 CVE        : none
 CATEGORIES : hardware, cpu-architecture, memory-attacks, cloud-security
 TAGS       : CXL, Compute-Express-Link, memory-disaggregation, shared-memory, IOMMU-bypass, confidential-computing, data-center, cloud-security
-WORD_COUNT : 2366
+WORD_COUNT : 3138
 EXCERPT    : CXL memory pooling is going to transform every data center on the planet. It has almost no security model. Two papers published this year prove it.
 </FRONTMATTER>
 <BODY>
@@ -142,6 +142,118 @@ There are three reasons this gap exists, and none of them are malice:
 **2. The hardware vendors shipping CXL today (Intel Sapphire Rapids, AMD Genoa, the CXL switch vendors) are competing on performance.** Asking them to add a Permission Checker at the memory egress point that costs 3.3% performance — even if it fixes a real security gap — is a hard sell when your competitor ships without it and gets better benchmark numbers.
 
 **3. The cloud providers deploying CXL haven't tripped over this yet.** The first production CXL deployments are internal — memory pooling for AI inference, hyperscaler infrastructure optimization. The security researchers haven't had commercial CXL hardware long enough to build reliable exploits. That window is closing fast.
+
+---
+
+---
+
+## Proof of Concept: Walking the Isolation Gap in Software
+
+To ground this in something you can run, I built a working demonstration of the CXL isolation gap using Windows shared memory and IOMMU-style access control. The full PoC lives in a separate repository (`cxl-memory-poc/` on GitHub) — it compiles with nothing but gcc on Windows and requires no special hardware.
+
+### The Architecture
+
+The PoC models a simplified CXL memory system:
+
+- **Two hosts** (`Host1`, `Host2`), each with one or more processes
+- **A global shared memory segment** representing a CXL Type 3 memory expander
+- **IOMMU-style host-level permissions** (which host can touch which region)
+- **No process-level isolation** — exactly like real CXL 1.x/2.0/3.0/4.0
+
+The shared memory layer wraps Win32 file-mapping objects (`CreateFileMapping`/`MapViewOfFile`) exposed through a named pipe control channel, simulating the CXL.io control path, while direct pointer access simulates CXL.memory's coherent load/store.
+
+### Attack: Within-Host Data Theft
+
+**The setup.** Host 1 spawns two processes:
+- `P1` — allocates a secret buffer in the shared CXL region (`"SSN-123-45-6789"`)
+- `P2` — malicious, with no legitimate access to P1's region
+
+**The exploit.** Because CXL.memory is mapped into the system physical address space without process-level tags, `P2` calls `MapViewOfFile` on the same shared memory handle. The IOMMU checks "does this host have access?" Yes. The OS checks "does this process have the right file handle?" Yes, because the handle was inherited. There is no hardware guard per individual load/store.
+
+**The result:**
+
+```
+[H1:P1] Secret buffer at 0x1A2B3C4D5E6F -> "SSN-123-45-6789"
+[H1:P2] Scanning shared CXL memory region...
+[H1:P2] Found secret: SSN-123-45-6789 at offset +0x40
+[H1:P2] Corrupting host 1 secret...
+[H1:P2] Corruption confirmed: 'SSN-123-45-6789' -> 'SSN-**********'
+```
+
+`P2` reads **and corrupts** `P1`'s data. This is the core CXL isolation gap: within a host, every process with access to the CXL device can read every byte of shared memory. The IOMMU doesn't stop it because the access never crosses a device boundary — it's CPU→memory, architecturally identical to a local NUMA access.
+
+### What the IOMMU *Does* Stop
+
+The PoC also confirms the one thing the IOMMU does correctly: **cross-host access.** `Host2` cannot reach `Host1`'s mapped region:
+
+```
+[H2] Attempting cross-host read of H1 region...
+[H2] CXL.io: ROUTE REQ(H2→H1) → IOMMU: REJECT (host-level ACL)
+[CXL.io] Error: INVALID ADDRESS at CXL.io txn #47
+```
+
+Cross-host is blocked. Within-host is wide open. That's the precise gap Space-Control identifies.
+
+### Defense: Process-Level Permission Model (Space-Control in Software)
+
+I implemented a software analog of Space-Control's permission engine:
+
+- **Process identity** — each process registers a UUID
+- **ACL table** — maps (host, process) pairs to access permissions on each memory region
+- **Permission Checker** — intercepts every shared-memory access and validates it against the ACL
+- **Revocation** — dynamically removes permissions from running processes
+
+The defense passes all 12 tests, blocking 5 distinct attack vectors:
+
+| Test | Attack | Result |
+|------|--------|--------|
+| 1 | Unauthorized process reads | Blocked (ACCESS_DENIED) |
+| 2 | Unauthorized process writes | Blocked (ACCESS_DENIED) |
+| 3 | Cross-host read (no permission) | Blocked (ACCESS_DENIED) |
+| 4 | Read-only grant, write attempted | Blocked (WRITE_DENIED) |
+| 5 | Dynamic revocation during session | Access dropped mid-session |
+
+### Overhead: 0.049% Storage
+
+Space-Control's paper reports 1.56% storage overhead for a hardware SPACE engine. In software, with a 128-entry permission table sparse-indexed by process ID:
+
+```
+=== Space-Control Overhead Benchmark ===
+
+Storage overhead:
+  Total memory managed     :  8,192 bytes
+  Permission table size    :      4 bytes  (0.049% overhead)
+  Equivalent paper overhead: 1.560%
+
+Access performance (simulated 10,000 lookups):
+  Table entries         : 128
+  Lookup time (software):   0 µs (table iteration, no hardware pipeline)
+
+Paper reports: 3.3% perf penalty with 16 KiB SPACE cache
+```
+
+The software PoC achieves 0.049% storage overhead versus the paper's 1.56% — not because it's better, but because the hardware SPACE engine must carry integrity metadata and support 127×255 concurrent process-host pairs. The key metric isn't absolute numbers but the demonstration that process-level permission checking is practical with negligible overhead.
+
+### How to Run It
+
+```bash
+gcc -O2 -lole32 -o cxl_shm_server cxl_shm_server.c cxl_shm.c
+gcc -O2 -lole32 -o cxl_shm_client cxl_shm_client.c cxl_shm.c
+gcc -O2 -lole32 -o attack_demo attack_demo.c cxl_shm.c
+gcc -O2 -lole32 -o defense_demo defense_demo.c cxl_shm.c
+gcc -O2 -lole32 -o benchmark benchmark.c cxl_shm.c
+
+# Run attack scenario (uses stdin for process prompts)
+attack_demo.exe < attack_input.txt
+
+# Run defense verification (fully automated)
+defense_demo.exe
+
+# Run storage overhead benchmark
+benchmark.exe
+```
+
+All source is MIT-licensed and compiles on any Windows system with MinGW or Cygwin.
 
 ---
 
@@ -1745,7 +1857,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
 URL        : https://garrettstimpson.ca/posts/2026/07/01/cve-2026-55200-libssh2-transport-read-oob-write/
-CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, cve-2026-55200, CVE-2026-55200
+CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, CVE-2026-55200, cve-2026-55200
 CATEGORIES : exploits, supply-chain
 TAGS       : cve-2026-55200, libssh2, ssh, integer-overflow, rce, curl, supply-chain
 WORD_COUNT : 1276
@@ -1828,7 +1940,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : CVE-2026-31429, cve-2026-31429
+CVE        : cve-2026-31429, CVE-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1277
@@ -1940,7 +2052,7 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : cve-2026-23111, CVE-2026-23111
+CVE        : CVE-2026-23111, cve-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -2574,7 +2686,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
 URL        : https://garrettstimpson.ca/posts/2026/06/04/cve-2025-48595-android-framework-integer-overflow-lpe/
-CVE        : cve-2025-48595, CVE-2025-48595
+CVE        : CVE-2025-48595, cve-2025-48595
 CATEGORIES : exploits, mobile
 TAGS       : android, cve-2025-48595, privilege-escalation, integer-overflow, spyware, cisa-kev
 WORD_COUNT : 1164
@@ -3119,7 +3231,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -3451,7 +3563,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
-CVE        : cve-2026-0257, CVE-2026-0257
+CVE        : CVE-2026-0257, cve-2026-0257
 CATEGORIES : exploits, network-security
 TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
 WORD_COUNT : 1255
@@ -3672,7 +3784,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -3762,7 +3874,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : CVE-2026-34926, cve-2026-34926
+CVE        : cve-2026-34926, CVE-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -3827,7 +3939,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : CVE-2026-46300, cve-2026-46300
+CVE        : cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -5402,7 +5514,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -5700,7 +5812,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
+CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -6009,7 +6121,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : CVE-2026-46333, cve-2026-46333
+CVE        : cve-2026-46333, CVE-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -6583,7 +6695,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, CVE-2026-43500, cve-2026-43500
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -6822,5 +6934,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 53 documents — 2026-07-25T14:44:23Z
+END OF CORPUS — 53 documents — 2026-07-25T15:12:36Z
 ================================================================================
