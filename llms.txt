@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-07-25T19:45:38Z
+GENERATED    : 2026-07-25T20:01:21Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
@@ -1439,7 +1439,7 @@ URL        : https://garrettstimpson.ca/posts/2026/07/25/windows-object-namespac
 CVE        : none
 CATEGORIES : windows, kernel, security-research, dacl, lateral-movement
 TAGS       : Windows, kernel-objects, NULL-DACL, BaseNamedObjects, session-isolation, DACL, named-objects, cross-component-attack, PoC
-WORD_COUNT : 1984
+WORD_COUNT : 1559
 EXCERPT    : I ran a NULL-DACL audit against every named kernel object in my Windows session. 67 objects had no access control at all. Five of them were AMD GPU state events. I signaled them all from an unprivileged process. Nobody is talking about this.
 </FRONTMATTER>
 <BODY>
@@ -1455,7 +1455,7 @@ Then I tested whether I could actually *do* anything with them. I picked seven N
 
 Nobody talks about this attack surface. There is no built-in audit tool for kernel object DACLs. No Group Policy template. No Microsoft security baseline. The only visibility tool is WinObj, and it doesn't show DACLs unless you dig into the security tab one object at a time.
 
-This post has working proof-of-concept code that enumerates, classifies, and manipulates the entire session object namespace — four PoCs, compiled and run on a stock Windows 11 machine, producing real data.
+This post has working proof-of-concept code that enumerates, classifies, and manipulates the entire session object namespace — compiled and run on a stock Windows 11 machine, producing real data.
 
 ---
 
@@ -1475,32 +1475,11 @@ And there is almost no tooling to find these.
 
 ## The Audit — What I Built and What I Found
 
-I wrote four PoCs, each probing a different angle of the isolation gap. The code is in [the companion repo](https://github.com/gary23w/garrettstimpson.ca/tree/main/post-poc). All four were compiled with MinGW-w64 and run on a stock Windows 11 24H2 machine from an unprivileged user account (Session 9).
+I wrote a tool against the NT API that enumerates, classifies, and opens every named object in the session. The code is in [the companion repo](https://github.com/gary23w/garrettstimpson.ca/tree/main/post-poc). Compiled with MinGW-w64 and run on a stock Windows 11 24H2 machine from an unprivileged user account (Session 9).
 
-### PoC 1 — Cross-Session Enumeration
+### The Results
 
-Opens `\BaseNamedObjects` (the global directory) and dumps every named object it can find. This includes objects from ALL sessions because the global directory aggregates everything. Output was 166 KB — hundreds of named objects with per-session prefixes (`SM0:`, `SM9:`, etc.).
-
-**Finding:** Cross-session *visibility* works. You can see what objects other sessions created. The namespace isolation is NOT enforced at enumeration time.
-
-### PoC 2 — Global Namespace Interference (NULL DACL Objects)
-
-Creates objects in `\BaseNamedObjects\` with NULL DACLs, then demonstrates that a second process can open, overwrite, and delete them — even though both processes run as different users in the same session. Uses `Global\` prefix resolution (Win32 API) as the standard path.
-
-**Finding:** Any process in the session can create globally-visible objects with NULL DACLs and any other process — even running under a different user context — can interfere with them.
-
-### PoC 3 — Win32 DACL Audit (Global\ and Local\ Prefixes)
-
-Audits 500+ objects using Win32 `Global\` and `Local\` prefix resolution in the current session. Confirmed stock Windows 11 has zero NULL-DACL or WEAK-ACL objects in the Win32-resolvable namespace.
-
-**Finding:** The Win32 prefix layer (`Global\`, `Local\`) provides a *different* view of the namespace than the raw NT paths. Objects that look dangerous via NT enumeration may not be reachable via Win32 calls — but many ARE. And Win32 code can always switch to NT API calls.
-
-### PoC 4 (the main event) — NT-Namespace Cross-Session DACL Audit
-
-This is the one that matters. PoC 4 uses the NT API directly (`NtOpenDirectoryObject`, `NtQueryDirectoryObject`, `NtOpenEvent`, `NtOpenMutant`, etc.) to:
-1. Enumerate every named object in the current session's `\Sessions\9\BaseNamedObjects`
-2. Enumerate every object in the global `\BaseNamedObjects`
-3. Open each object with `READ_CONTROL` and classify its DACL
+I used the NT API directly (`NtOpenDirectoryObject`, `NtQueryDirectoryObject`, `NtOpenEvent`, `NtOpenMutant`, etc.) to enumerate every named object in `\BaseNamedObjects` and `\Sessions\9\BaseNamedObjects`, then opened each with `READ_CONTROL` to classify its DACL.
 
 **Results across 2,181 objects:**
 
@@ -1549,7 +1528,7 @@ Look at the vendor concentration. **AMD GPU driver** owns 19+ objects with NULL 
 
 **Microsoft's own Connected Devices Platform** creates semaphores with Everyone-write DACLs. **Desktop Window Manager** has `DwmComposedEvent_1` with Everyone write access. **StateRepository** notification channels — all WEAK_ACL.
 
-### PoC 4b — Manipulation Proof
+### Manipulation Proof
 
 After the audit, I wrote a second tool that opens each flagged NULL-DACL object with `EVENT_MODIFY_STATE` (from `NtOpenEvent`) and calls `SetEvent()` on it. No privilege escalation, no SeDebugPrivilege, no token manipulation. Just a regular process calling NT API functions it already has access to.
 
@@ -1570,7 +1549,6 @@ After the audit, I wrote a second tool that opens each flagged NULL-DACL object 
 The core finding stands: **NULL DACL means NULL DACL.** If you can open the object, you can do whatever you want with it.
 
 ---
-
 ## Why This Matters
 
 ### 1. Cross-Component Interference
@@ -1612,36 +1590,6 @@ The security community focuses on memory corruption, EoP, and RCE because those 
 3. **Driver verifier rules** — WHQL certification should flag drivers that create named objects with NULL DACLs. This is the single biggest source of the problem.
 
 4. **Per-type default DACLs** — The Object Manager could enforce per-type minimum DACLs. An Event object should never have a NULL DACL. A Semaphore object should never give Everyone write access by default. This is a kernel-level change, but it's architecturally clean.
-
----
-
-## Build and Run Yourself
-
-All four PoCs are in the `post-poc/` directory of the [site repo](https://github.com/gary23w/garrettstimpson.ca/tree/main/post-poc). Build with MinGW-w64:
-
-```
-# PoC 1 — Cross-session enumeration
-x86_64-w64-mingw32-gcc -O2 poc1_xsession_enum.c -o poc1.exe -lntdll -lwtsapi32
-
-# PoC 2 — Global namespace interference (needs two terminals)
-x86_64-w64-mingw32-gcc -O2 create_poc2_objects.c -o create_poc2.exe -ladvapi32
-x86_64-w64-mingw32-gcc -O2 poc2_global_ns_interference.c -o poc2.exe -ladvapi32
-# Terminal 1: create_poc2.exe
-# Terminal 2: poc2.exe
-
-# PoC 3 — Win32 DACL audit
-x86_64-w64-mingw32-gcc -O2 poc3_dacl_audit.c -o poc3.exe -ladvapi32
-
-# PoC 4 — NT-namespace DACL audit + classification
-x86_64-w64-mingw32-gcc -O2 poc4_session_bypass.c -o poc4.exe -ladvapi32 -lwtsapi32 -lntdll
-poc4.exe
-
-# PoC 4b — Manipulation proof
-x86_64-w64-mingw32-gcc -O2 poc4_manipulate.c -o poc4_manipulate.exe -lntdll
-poc4_manipulate.exe
-```
-
-All PoCs run as unprivileged user. No admin required. No SeDebugPrivilege. No token manipulation. Just the NT API calls that every process can make.
 
 ---
 
@@ -1882,7 +1830,7 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
 URL        : https://garrettstimpson.ca/posts/2026/07/15/coldfusion-apsb26-68-cvss10-bonanza/
-CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48282, cve-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
+CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, cve-2026-48282, CVE-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
 CATEGORIES : exploits, web, vuln-research
 TAGS       : CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286, adobe, coldfusion, RCE, path-traversal, unrestricted-upload, CISA-KEV, watchtowr
 WORD_COUNT : 1843
@@ -2343,7 +2291,7 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
 URL        : https://garrettstimpson.ca/posts/2026/06/19/rogueplanet-cve-2026-50656-defender-toctou-lpe/
-CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, cve-2026-50656, CVE-2026-50656
+CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, CVE-2026-50656, cve-2026-50656
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-50656, windows-defender, lpe, toctou, oplock, ntfs-junction, nightmare-eclipse
 WORD_COUNT : 1305
@@ -2832,7 +2780,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : CVE-2026-45247, cve-2026-45247
+CVE        : cve-2026-45247, CVE-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1214
@@ -3457,7 +3405,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : CVE-2026-41089, cve-2026-41089
+CVE        : cve-2026-41089, CVE-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -3789,7 +3737,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
-CVE        : cve-2026-0257, CVE-2026-0257
+CVE        : CVE-2026-0257, cve-2026-0257
 CATEGORIES : exploits, network-security
 TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
 WORD_COUNT : 1255
@@ -4010,7 +3958,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -6038,7 +5986,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
+CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -6447,7 +6395,7 @@ Check your kernel version. Patch if you haven't.
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : cve-2026-42945, CVE-2026-42945
+CVE        : CVE-2026-42945, cve-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -6921,7 +6869,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -7160,5 +7108,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 54 documents — 2026-07-25T19:45:38Z
+END OF CORPUS — 54 documents — 2026-07-25T20:01:21Z
 ================================================================================
