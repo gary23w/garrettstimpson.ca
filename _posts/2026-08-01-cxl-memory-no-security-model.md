@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "CXL Memory — Disaggregated RAM with No Security Model"
-date: 2026-08-01
+date: 2026-08-02
 categories: [hardware, cpu-architecture, memory-attacks, cloud-security]
 tags: [CXL, Compute-Express-Link, memory-disaggregation, shared-memory, IOMMU-bypass, confidential-computing, data-center, cloud-security]
 excerpt: "CXL memory pooling is going to transform every data center on the planet. It has almost no security model. Two papers published this year prove it."
