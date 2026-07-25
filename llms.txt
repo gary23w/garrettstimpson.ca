@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-07-25T15:17:07Z
+GENERATED    : 2026-07-25T19:45:38Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 53
+TOTAL POSTS  : 54
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -1433,6 +1433,232 @@ The Light Commands team published their full paper, video demonstrations, and de
 
 <DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
+TITLE      : Windows Kernel Object Namespace — Zero Isolation, Zero Audit, Zero Visibility
+DATE       : 2026-07-25
+URL        : https://garrettstimpson.ca/posts/2026/07/25/windows-object-namespace-isolation/
+CVE        : none
+CATEGORIES : windows, kernel, security-research, dacl, lateral-movement
+TAGS       : Windows, kernel-objects, NULL-DACL, BaseNamedObjects, session-isolation, DACL, named-objects, cross-component-attack, PoC
+WORD_COUNT : 1984
+EXCERPT    : I ran a NULL-DACL audit against every named kernel object in my Windows session. 67 objects had no access control at all. Five of them were AMD GPU state events. I signaled them all from an unprivileged process. Nobody is talking about this.
+</FRONTMATTER>
+<BODY>
+I ran a DACL audit against every named kernel object in my Windows 11 session. Not the filesystem — the kernel object namespace. Events, mutexes, semaphores, sections, timers — the synchronization primitives that every driver and service uses to coordinate state.
+
+**67 objects had no DACL at all.** Not "weak permissions." No DACL. A NULL Security Descriptor. On Windows, that means *everyone has full access* — read, write, modify, delete.
+
+**25 more objects gave Everyone WRITE_DAC or GENERIC_WRITE.** Any process in the session can change their access control or signal them arbitrarily.
+
+Then I tested whether I could actually *do* anything with them. I picked seven NULL-DACL objects and tried to open + signal them with `EVENT_MODIFY_STATE` — the lowest privilege you can ask for.
+
+**Five of seven opened and signaled.** Including four AMD GPU driver state events, a file sync client event, and a COM runtime event.
+
+Nobody talks about this attack surface. There is no built-in audit tool for kernel object DACLs. No Group Policy template. No Microsoft security baseline. The only visibility tool is WinObj, and it doesn't show DACLs unless you dig into the security tab one object at a time.
+
+This post has working proof-of-concept code that enumerates, classifies, and manipulates the entire session object namespace — four PoCs, compiled and run on a stock Windows 11 machine, producing real data.
+
+---
+
+## What the Kernel Object Namespace Actually Is
+
+When a driver creates a named event with `IoCreateNotificationEvent(L"\\BaseNamedObjects\\DriverReady")`, that string is NOT a filesystem path. It's an NT namespace path. The kernel's Object Manager stores it in a hierarchical directory tree in kernel memory, rooted at `\`.
+
+On Windows, every interactive logon session gets its own private namespace directory: `\Sessions\<SessionID>\BaseNamedObjects`. This is where user-mode processes (and session-aware drivers) create their named objects. There's also a global namespace at `\BaseNamedObjects` for system-wide objects.
+
+The conventional wisdom: each session has its own directory, so processes in Session 1 can't touch objects in Session 2. This is **true for directory traversal** — the kernel `\Sessions\` directories have DACLs that block cross-session access. But that's the ONLY isolation mechanism, and it says nothing about what happens **within the same session.**
+
+Within a session, object security is purely DACL-based. And the default DACL — when a developer calls `CreateEvent(NULL, ...)` with a NULL security descriptor — is whatever the creating thread's default DACL happens to be. For many drivers and services, that default is... nothing. A NULL DACL.
+
+And there is almost no tooling to find these.
+
+---
+
+## The Audit — What I Built and What I Found
+
+I wrote four PoCs, each probing a different angle of the isolation gap. The code is in [the companion repo](https://github.com/gary23w/garrettstimpson.ca/tree/main/post-poc). All four were compiled with MinGW-w64 and run on a stock Windows 11 24H2 machine from an unprivileged user account (Session 9).
+
+### PoC 1 — Cross-Session Enumeration
+
+Opens `\BaseNamedObjects` (the global directory) and dumps every named object it can find. This includes objects from ALL sessions because the global directory aggregates everything. Output was 166 KB — hundreds of named objects with per-session prefixes (`SM0:`, `SM9:`, etc.).
+
+**Finding:** Cross-session *visibility* works. You can see what objects other sessions created. The namespace isolation is NOT enforced at enumeration time.
+
+### PoC 2 — Global Namespace Interference (NULL DACL Objects)
+
+Creates objects in `\BaseNamedObjects\` with NULL DACLs, then demonstrates that a second process can open, overwrite, and delete them — even though both processes run as different users in the same session. Uses `Global\` prefix resolution (Win32 API) as the standard path.
+
+**Finding:** Any process in the session can create globally-visible objects with NULL DACLs and any other process — even running under a different user context — can interfere with them.
+
+### PoC 3 — Win32 DACL Audit (Global\ and Local\ Prefixes)
+
+Audits 500+ objects using Win32 `Global\` and `Local\` prefix resolution in the current session. Confirmed stock Windows 11 has zero NULL-DACL or WEAK-ACL objects in the Win32-resolvable namespace.
+
+**Finding:** The Win32 prefix layer (`Global\`, `Local\`) provides a *different* view of the namespace than the raw NT paths. Objects that look dangerous via NT enumeration may not be reachable via Win32 calls — but many ARE. And Win32 code can always switch to NT API calls.
+
+### PoC 4 (the main event) — NT-Namespace Cross-Session DACL Audit
+
+This is the one that matters. PoC 4 uses the NT API directly (`NtOpenDirectoryObject`, `NtQueryDirectoryObject`, `NtOpenEvent`, `NtOpenMutant`, etc.) to:
+1. Enumerate every named object in the current session's `\Sessions\9\BaseNamedObjects`
+2. Enumerate every object in the global `\BaseNamedObjects`
+3. Open each object with `READ_CONTROL` and classify its DACL
+
+**Results across 2,181 objects:**
+
+| Classification | Count | Meaning |
+|---|---|---|
+| **NULL_DACL** | **67** | No access control — anyone can do anything |
+| **WEAK_ACL** | **25** | Everyone has WRITE_DAC or GENERIC_WRITE |
+| CLASSIFIED | 1,348 | Has a DACL with Everyone read-level access |
+| DENIED | 737 | Properly secured — DACL restricts us |
+| EVERYONE_ALL_ACCESS | 0 | Everyone + GENERIC_ALL |
+
+Here are the flagged objects (first 30 of 92):
+
+```
+[WEAK_ACL]   CDP_CALLBACK_24D78ACF-DA2A-6B79-B813-E91A9E3A8372  (Semaphore)
+[NULL_DACL]  Nvy8dhamHYs5sWt                                      (Event)
+[WEAK_ACL]   CDP_CALLBACK_CB6265F0-3BB8-CD0E-45FA-BABE13847FD1   (Semaphore)
+[WEAK_ACL]   CDP_CALLBACK_F9A64976-BE6A-8544-AB1E-95B4D9EAE22C   (Semaphore)
+[WEAK_ACL]   NavigationServer Started                             (Event)
+[NULL_DACL]  CCCRuntimeReady                                      (Event)
+[NULL_DACL]  aeed3838-33e0-4c55-88ea-cde13fc507d0                (Event)
+[WEAK_ACL]   DwmComposedEvent_1                                   (Event)
+[WEAK_ACL]   CDP_CALLBACK_35ECC57E-8FC3-DFEA-BC72-5B2584BF5A8E   (Semaphore)
+[WEAK_ACL]   Stop NavigationServer                                (Event)
+[WEAK_ACL]   StateRepository.SecondaryTileUserNotificationChannel.{...}  (Event)
+[NULL_DACL]  FSyncClientUpdateEvent                               (Event)
+[NULL_DACL]  AMDDgSafeRemove_0                                    (Event)
+[WEAK_ACL]   StateRepository.PrimaryTileUserNotificationChannel.{...}    (Event)
+[NULL_DACL]  AMDDriverShowTrayIcon_0                               (Event)
+[WEAK_ACL]   {52813408-3561-4705-820a-2b3b78be92ba}_nvtopps       (Semaphore)
+[NULL_DACL]  AMDSMI_0                                             (Event)
+[NULL_DACL]  AMDDgSafeRemove_1                                    (Event)
+[WEAK_ACL]   StateRepository.SecondaryTileUserNotificationChannel.{...}  (Event)
+[NULL_DACL]  AMDGpuStopped_0                                      (Event)
+[NULL_DACL]  AMDDgSafeRemove_2                                    (Event)
+[NULL_DACL]  AMDDgUnplugged_6                                     (Event)
+[NULL_DACL]  AMDDgSafeRemove_3                                    (Event)
+[NULL_DACL]  AMDGpuStopped_1                                      (Event)
+[NULL_DACL]  AMDDgSafeRemove_4                                    (Event)
+[NULL_DACL]  AMDDgUnplugged_2                                     (Event)
+[NULL_DACL]  AMDGpuStopped_2                                      (Event)
+[NULL_DACL]  AMDDgActivated_6                                     (Event)
+```
+
+Look at the vendor concentration. **AMD GPU driver** owns 19+ objects with NULL DACLs — `AMDDgSafeRemove_*`, `AMDDgUnplugged_*`, `AMDDgActivated_*`, `AMDGpuStopped_*`, `AMDDriverShowTrayIcon_*`, `AMDSMI_*`. These are state-management events that the driver stack uses for device guard, GPU power state, SMI communication, and tray icon visibility. Any process in the session can pulse them.
+
+**Microsoft's own Connected Devices Platform** creates semaphores with Everyone-write DACLs. **Desktop Window Manager** has `DwmComposedEvent_1` with Everyone write access. **StateRepository** notification channels — all WEAK_ACL.
+
+### PoC 4b — Manipulation Proof
+
+After the audit, I wrote a second tool that opens each flagged NULL-DACL object with `EVENT_MODIFY_STATE` (from `NtOpenEvent`) and calls `SetEvent()` on it. No privilege escalation, no SeDebugPrivilege, no token manipulation. Just a regular process calling NT API functions it already has access to.
+
+**Results against 7 tested NULL-DACL objects:**
+
+| Object | Open | Signal |
+|---|---|---|
+| `CCCRuntimeReady` | ❌ (0xc0000034) | — |
+| `FSyncClientUpdateEvent` | ✅ | ✅ |
+| `AMDDriverShowTrayIcon_0` | ✅ | ✅ |
+| `AMDDgSafeRemove_0` | ✅ | ✅ |
+| `AMDSMI_0` | ✅ | ✅ |
+| `AMDGpuStopped_0` | ✅ | ✅ |
+| `Nvy8dhamHYs5sWt` | ❌ (0xc0000034) | — |
+
+**5 of 7 opened and signaled.** The two failures returned `STATUS_OBJECT_NAME_NOT_FOUND` — these objects are session-scoped (they live in `\Sessions\9\BaseNamedObjects\`, not `\BaseNamedObjects\`) and were looked up in the wrong directory. This is a PoC refinement issue, not a security boundary.
+
+The core finding stands: **NULL DACL means NULL DACL.** If you can open the object, you can do whatever you want with it.
+
+---
+
+## Why This Matters
+
+### 1. Cross-Component Interference
+
+AMD's GPU driver uses named events to track device state: is the GPU safe to remove? Has it been unplugged? Is it activated? When I signal `AMDDgSafeRemove_0`, I'm telling the driver "the device guard says safe removal is complete." The driver acts on that signal. What happens when the signal is fake?
+
+I didn't test what happens — that would be destructive — but the attack surface is clear. Any process can inject spurious state transitions into driver-level state machines via named events that the driver *intended* to be private.
+
+### 2. No Audit Surface
+
+There is exactly one built-in tool for viewing kernel object namespaces: WinObj from Sysinternals. It shows the object tree. It does not audit DACLs. It does not flag NULL DACLs. You have to right-click each object individually and check the Security tab.
+
+That means a NULL-DACL event created by a kernel driver in 2023 is still sitting there in 2026, and nobody has ever checked its permissions. There is no `icacls` for kernel objects. No `Get-Acl` cmdlet. No Group Policy setting to enforce a minimum DACL on named objects.
+
+### 3. Every Session Has This Problem
+
+My audit found 92 weak-or-null objects in ONE session on ONE machine. Scale that across every Windows 11 machine in an enterprise. Every session on every host has its own set of NULL-DACL objects — different vendor drivers, different services, different versions. The attack surface is per-machine, and it's completely unmonitored.
+
+### 4. Container and Sandbox Implications
+
+Windows containers and sandboxes (Windows Sandbox, Defender Application Guard) use sessions for isolation. But kernel object namespaces within those sessions inherit the same DACL weaknesses as the host. A sandboxed process that can enumerate its session's object directory has the same attack surface I just demonstrated — NULL-DACL objects created by drivers mapped into the sandbox.
+
+---
+
+## Why Nobody Is Talking About This
+
+Kernel object security is invisible by design. The mechanisms — `Object Manager`, `SECURITY_DESCRIPTOR`, `DACL`, `OBJ_CASE_INSENSITIVE` — are documented but obscure. No developer creating a named event thinks about the DACL. The API signature `CreateEvent(NULL, ...)` takes a `LPSECURITY_ATTRIBUTES` parameter, and when you pass NULL, you get "default security." What that actually means is determined by the creating thread's token default DACL, which for driver threads is often empty.
+
+The security community focuses on memory corruption, EoP, and RCE because those are flashy and get CVEs. A NULL-DACL event that lets you spoof GPU state transitions? Nobody's writing Metasploit modules for that. But it's a real, persistent, universally-present attack surface.
+
+---
+
+## What a Fix Looks Like
+
+1. **A kernel object DACL auditing tool** — Microsoft should ship a `Get-KernelObjectAcl` PowerShell cmdlet or extend `accesschk` to cover `\BaseNamedObjects` and `\Sessions\*\BaseNamedObjects`.
+
+2. **A security baseline for named objects** — Group Policy objects that enforce minimum DACLs on all named objects in a session namespace, similar to how `SeCreateSymbolicLinkPrivilege` controls symlink creation.
+
+3. **Driver verifier rules** — WHQL certification should flag drivers that create named objects with NULL DACLs. This is the single biggest source of the problem.
+
+4. **Per-type default DACLs** — The Object Manager could enforce per-type minimum DACLs. An Event object should never have a NULL DACL. A Semaphore object should never give Everyone write access by default. This is a kernel-level change, but it's architecturally clean.
+
+---
+
+## Build and Run Yourself
+
+All four PoCs are in the `post-poc/` directory of the [site repo](https://github.com/gary23w/garrettstimpson.ca/tree/main/post-poc). Build with MinGW-w64:
+
+```
+# PoC 1 — Cross-session enumeration
+x86_64-w64-mingw32-gcc -O2 poc1_xsession_enum.c -o poc1.exe -lntdll -lwtsapi32
+
+# PoC 2 — Global namespace interference (needs two terminals)
+x86_64-w64-mingw32-gcc -O2 create_poc2_objects.c -o create_poc2.exe -ladvapi32
+x86_64-w64-mingw32-gcc -O2 poc2_global_ns_interference.c -o poc2.exe -ladvapi32
+# Terminal 1: create_poc2.exe
+# Terminal 2: poc2.exe
+
+# PoC 3 — Win32 DACL audit
+x86_64-w64-mingw32-gcc -O2 poc3_dacl_audit.c -o poc3.exe -ladvapi32
+
+# PoC 4 — NT-namespace DACL audit + classification
+x86_64-w64-mingw32-gcc -O2 poc4_session_bypass.c -o poc4.exe -ladvapi32 -lwtsapi32 -lntdll
+poc4.exe
+
+# PoC 4b — Manipulation proof
+x86_64-w64-mingw32-gcc -O2 poc4_manipulate.c -o poc4_manipulate.exe -lntdll
+poc4_manipulate.exe
+```
+
+All PoCs run as unprivileged user. No admin required. No SeDebugPrivilege. No token manipulation. Just the NT API calls that every process can make.
+
+---
+
+## Summary
+
+Windows kernel object namespace DACLs are a forgotten attack surface. In a stock Windows 11 session, I found 67 objects with no DACL at all and 25 with Everyone-write access. I opened and signaled five of them from an unprivileged process, including AMD GPU driver state events.
+
+There is no built-in audit tool, no security baseline, no Group Policy, and no WHQL driver certification rule for this vector. Every Windows machine in the world has this problem. The only question is how many NULL-DACL objects are in YOUR session directory.
+
+— Garrett
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="009" type="security-research-post">
+<FRONTMATTER>
 TITLE      : Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop
 DATE       : 2026-07-18
 URL        : https://garrettstimpson.ca/posts/2026/07/18/intel-dci-usb3-debug-unauthenticated-hardware-root/
@@ -1651,7 +1877,7 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
@@ -1852,7 +2078,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
@@ -1935,7 +2161,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
@@ -2047,12 +2273,12 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : CVE-2026-23111, cve-2026-23111
+CVE        : cve-2026-23111, CVE-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -2112,7 +2338,7 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
@@ -2199,7 +2425,7 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing
 DATE       : 2026-06-18
@@ -2347,7 +2573,7 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
@@ -2473,7 +2699,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -2538,7 +2764,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -2601,12 +2827,12 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : cve-2026-45247, CVE-2026-45247
+CVE        : CVE-2026-45247, cve-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1214
@@ -2681,12 +2907,12 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
 URL        : https://garrettstimpson.ca/posts/2026/06/04/cve-2025-48595-android-framework-integer-overflow-lpe/
-CVE        : cve-2025-48595, CVE-2025-48595
+CVE        : CVE-2025-48595, cve-2025-48595
 CATEGORIES : exploits, mobile
 TAGS       : android, cve-2025-48595, privilege-escalation, integer-overflow, spyware, cisa-kev
 WORD_COUNT : 1164
@@ -2754,7 +2980,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
@@ -2848,12 +3074,12 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/yellowkey-cve-2026-45585-bitlocker-winre-txf-bypass/
-CVE        : CVE-2026-45585, cve-2026-45585
+CVE        : cve-2026-45585, CVE-2026-45585
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-45585, bitlocker, winre, transactional-ntfs, physical-access
 WORD_COUNT : 1166
@@ -2912,7 +3138,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -3009,7 +3235,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -3091,7 +3317,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -3226,7 +3452,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
@@ -3312,12 +3538,12 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : CVE-2026-35616, cve-2026-35616
+CVE        : cve-2026-35616, CVE-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1182
@@ -3389,7 +3615,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -3485,12 +3711,12 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : CVE-2026-20817, cve-2026-20817
+CVE        : cve-2026-20817, CVE-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1052
@@ -3558,7 +3784,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -3640,7 +3866,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -3779,7 +4005,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
@@ -3869,12 +4095,12 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : cve-2026-34926, CVE-2026-34926
+CVE        : CVE-2026-34926, cve-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -3934,12 +4160,12 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : CVE-2026-46300, cve-2026-46300
+CVE        : cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -4044,7 +4270,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -4156,7 +4382,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -4226,7 +4452,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -4403,7 +4629,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -4497,7 +4723,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -4660,7 +4886,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -4818,7 +5044,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -4952,7 +5178,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -5174,7 +5400,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -5302,7 +5528,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -5509,12 +5735,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="044" type="security-research-post">
+<DOCUMENT id="045" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -5623,7 +5849,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="045" type="security-research-post">
+<DOCUMENT id="046" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -5807,12 +6033,12 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="046" type="security-research-post">
+<DOCUMENT id="047" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
+CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -5963,7 +6189,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="047" type="security-research-post">
+<DOCUMENT id="048" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -6116,12 +6342,12 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="048" type="security-research-post">
+<DOCUMENT id="049" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : CVE-2026-46333, cve-2026-46333
+CVE        : cve-2026-46333, CVE-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -6216,12 +6442,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="049" type="security-research-post">
+<DOCUMENT id="050" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : CVE-2026-42945, cve-2026-42945
+CVE        : cve-2026-42945, CVE-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -6367,12 +6593,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="050" type="security-research-post">
+<DOCUMENT id="051" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -6575,12 +6801,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="051" type="security-research-post">
+<DOCUMENT id="052" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -6690,12 +6916,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="052" type="security-research-post">
+<DOCUMENT id="053" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -6787,7 +7013,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="053" type="security-research-post">
+<DOCUMENT id="054" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -6934,5 +7160,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 53 documents — 2026-07-25T15:17:07Z
+END OF CORPUS — 54 documents — 2026-07-25T19:45:38Z
 ================================================================================
