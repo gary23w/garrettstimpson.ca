@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-07-24T23:54:32Z
+GENERATED    : 2026-07-25T00:10:09Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 46
+TOTAL POSTS  : 47
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,138 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : Light Commands — Laser-Based Audio Injection on Voice-Controllable Systems
+DATE       : 2026-07-26
+URL        : https://garrettstimpson.ca/posts/2026/07/26/light-commands-laser-audio-injection-mems-microphone/
+CVE        : CVE-2016-3989
+CATEGORIES : hardware, exploits, iot, side-channels
+TAGS       : light-commands, laser, MEMS, microphone, voice-assistant, Amazon-Alexa, Google-Assistant, Apple-Siri, audio-injection, USENIX, physical-attack
+WORD_COUNT : 1670
+EXCERPT    : MEMS microphones convert light to sound. A laser pointer can inject commands into smart speakers from 110 meters away — through windows, inaudible, untraceable.
+</FRONTMATTER>
+<BODY>
+**CVE:** None assigned (architectural vulnerability class in MEMS microphone design)
+**Discovered by:** Takeshi Sugawara (UEC Tokyo), Benjamin Cyr, Sara Rampazzi, Daniel Genkin, Kevin Fu (University of Michigan)
+**Published:** USENIX Security Symposium 2020
+**Affected:** Any device using MEMS microphones with always-on voice assistants — Amazon Echo (all generations), Google Home/Nest, Apple iPhone XR/iPad, Facebook Portal, Samsung Galaxy S9, Google Pixel 2, and hundreds more
+**Fixed in:** No hardware fix exists for shipped devices. Software-side mitigations (phonetic challenge-response, second-factor confirmation) can reduce impact but do not fix the underlying physics.
+**Public PoC:** [lightcommands.com](https://lightcommands.com/) — paper, video demos, citation
+
+---
+
+Here's a scenario: you're sitting in your living room. Your Google Home is on the coffee table. Outside, across the street, someone points a modest laser pointer at your window. They modulate the laser beam — on and off, thousands of times per second — encoding a voice command into pulses of light so fast you can't even see them flicker.
+
+Inside your home, your Google Home hears: "OK Google, unlock the front door."
+
+And it does.
+
+No audio recording of the command exists. No microphone picked up any sound — because there was no sound. The command was never spoken. It was injected directly into the MEMS microphone's diaphragm using a beam of light.
+
+This is Light Commands: a vulnerability class in MEMS microphones that turns every smart speaker, phone, and voice-controlled device into a laser-addressable command receiver, controllable from over a hundred meters away through closed windows.
+
+## The Physics: MEMS Microphones Are Also Photodetectors
+
+The attack works because of how MEMS microphones are built. A MEMS (Micro-Electro-Mechanical Systems) microphone contains a tiny diaphragm — a thin membrane suspended over a backplate, forming a variable capacitor. Sound pressure waves cause the diaphragm to vibrate, changing the capacitance, and the on-chip ASIC converts that change into an electrical signal.
+
+The key insight is that the diaphragm absorbs light. When you shine a modulated laser on it, the diaphragm heats up and cools down in sync with the laser's modulation. This thermal expansion and contraction physically moves the diaphragm — exactly the same way sound pressure would. The ASIC can't tell the difference. It just sees capacitance changes and faithfully reproduces whatever waveform the laser encoded.
+
+This is fundamentally different from conventional optical eavesdropping (like the LASER microphone used by intelligence agencies since the 1970s). Those bounce a laser off a window and detect the vibration of the glass. Light Commands goes directly into the device's microphone — no window vibration, no ambient noise, no glass alignment needed. The laser is aimed at the acoustic port of the device itself.
+
+The researchers demonstrated this with wavelengths from 532 nm (green) through 1064 nm (infrared). Infrared is particularly dangerous because it's completely invisible to the human eye — the attacker can be actively injecting commands and nobody in the room would see anything.
+
+## What the Attackers Achieved
+
+The Light Commands team tested 27 different devices across Amazon Alexa, Google Assistant, Apple Siri, and Facebook Portal ecosystems. Their results:
+
+| Device | Assistant | Max Distance (60 mW laser) |
+|--------|-----------|---------------------------|
+| Google Home | Google Assistant | 110+ meters |
+| Echo Plus 1st Gen | Amazon Alexa | 110+ meters |
+| Echo Plus 2nd Gen | Amazon Alexa | 50 meters |
+| Echo (original) | Amazon Alexa | 50+ meters |
+| iPhone XR | Apple Siri | 110 meters |
+| Google Home Mini | Google Assistant | 20 meters |
+| Nest Cam IQ | Google Assistant | 50+ meters |
+| Facebook Portal Mini | Alexa + Portal | 18 meters |
+
+The attack works through standard double-pane windows with only minor power loss. At 60 mW — the legal limit for Class 3B lasers in many jurisdictions — they achieved reliable command injection at over 100 meters with telescoping optics.
+
+Most critically, they demonstrated real-world impact:
+
+- **Unlocking smart locks** — They injected "Alexa, unlock the front door" into an Echo Plus controlling a smart lock
+- **Opening garage doors** — Google Assistant commands sent to a connected garage door opener
+- **Vehicle unlock/start** — Using Google Assistant account integration to unlock and start a Tesla and a Ford via the victim's linked account
+- **E-commerce purchases** — Ordering physical goods through Alexa voice purchasing
+
+None of these required the victim to be home. None left an audio trace of the attack.
+
+## Why This Is Fundamentally Different From Voice Spoofing
+
+Existing voice-security research focuses on hidden voice commands (audio that humans can't understand but speech recognition still processes) or adversarial audio examples (subtle perturbations that cause misclassification). These are software attacks — they exploit the gap between how humans and speech recognition models process sound.
+
+Light Commands is a hardware attack. It bypasses the entire audio domain. The device's microphone electrically registers the same signal as if a human had spoken, at the full voice-capture bandwidth. No compression artifacts, no environmental noise, no audible clues. The voice assistant processes it as a normal, legitimate voice command because from its perspective, it is one.
+
+This also means the attack is undetectable by any audio-based monitoring. If a security camera records the room during the attack, it will hear silence. The device itself doesn't record the command to any audio log — the injected signal is indistinguishable from ambient voice trigger.
+
+## Why MEMS Microphones Do This
+
+MEMS microphones replaced electret condenser microphones in virtually every consumer device over the last decade because they are smaller, more reliable, cheaper, and can be reflow-soldered onto circuit boards. They are in every smartphone, every smart speaker, every laptop, every tablet, every IoT device with voice control.
+
+The photoresponse is a side effect of the MEMS design. The diaphragm is a thin polysilicon or metal film that sits directly in the path of any incoming light through the acoustic port. Shielding it would require adding an opaque physical barrier between the acoustic port and the diaphragm — which would change the acoustic response and potentially increase manufacturing cost.
+
+The researchers found that even a thin layer of dust on the diaphragm makes no difference to the photoresponse. This is not a manufacturing defect in one batch — it's a fundamental property of the MEMS architecture.
+
+## No CVE, No Patch
+
+This attack class never received a CVE. It's not a software bug that can be patched. It's not a firmware bug. It's not even a hardware bug in the traditional sense — it's a physics-expectation mismatch. The designers of MEMS microphones assumed the sensor would only respond to acoustic pressure. It turns out it also responds to modulated light.
+
+What does this mean for mitigation?
+
+**Hardware-side:** Future MEMS microphones could include opaque shielding over the diaphragm, or optical filters that block the relevant wavelengths. Some manufacturers have quietly added light-blocking meshes to newer revisions, but this isn't publicly documented and there's no industry-wide standard.
+
+**Software-side:** Defense-in-depth for voice commands. The most effective mitigation proposed by the researchers is **phonetic challenge-response**: for high-risk commands (unlock doors, make purchases, start cars), the assistant issues a randomized spoken challenge phrase — "To confirm, say the word 'umbrella'" — and the attacker's laser would need to inject two separate, unpredictable commands in sequence. Since the laser must be aimed continuously at the microphone, and the microphone's optical aperture is small, maintaining alignment through changing thermal conditions over an extended period is nontrivial.
+
+Google and Amazon have added some high-risk command confirmations to their voice assistants since 2020, but these are inconsistently applied and vary by region and device configuration.
+
+**Physical:** The most reliable defense is to close curtains or blinds on windows that face public areas. Even sheer curtains significantly attenuate the laser signal. A physical cover over the device's microphone port when not in use is also effective — though it defeats the purpose of an always-listening assistant.
+
+## The Bigger Picture: Sensors That Sense Things They Weren't Designed For
+
+Light Commands belongs to a growing class of vulnerabilities where a sensor responds to a physical phenomenon outside its intended domain:
+
+- **Acoustic attacks on hard drives** (CVE-2016-3989) — where sound vibrations cause head-arm misalignment and corrupted writes
+- **Gyroscope resonance** (GAIROSCOPE, 2020) — where acoustic tones at the gyro's resonant frequency produce false rotation readings
+- **Accelerometer injection** — where ultrasound modulates accelerometer readings, potentially confusing step counters or vehicle airbag systems
+- **LED eavesdropping** — where a device's own power/status LED is used as a photodiode to exfiltrate audio from the room
+
+Each of these exploits a gap between the sensor designer's threat model and reality. MEMS microphones were designed to detect sound. Nobody considered that they also detect light.
+
+## The Bottom Line
+
+There is a laser-addressable command injection vector in every smart speaker, every smartphone, every tablet, every laptop with a voice assistant, and every IoT device with a MEMS microphone — which is to say, nearly every internet-connected consumer device manufactured in the last decade.
+
+The attack has a range of over 100 meters. It works through windows. It's invisible if you use infrared. It leaves no audio trace. And because it exploits the physical operating principle of the microphone itself, there is no patch for existing devices.
+
+The Light Commands team published their full paper, video demonstrations, and device-specific measurements at lightcommands.com. It's worth reading if you design IoT products, work on hardware security, or just want to understand why your smart speaker can hear things that never made a sound.
+
+---
+
+*— Garrett Stimpson*
+
+*Thanks to Takeshi Sugawara, Benjamin Cyr, Sara Rampazzi, Daniel Genkin, and Kevin Fu for the research, the open-access paper, and the excellent public documentation at lightcommands.com. This is the standard for how hardware security research should be communicated.*
+
+### References
+- [Light Commands official site](https://lightcommands.com/) — paper, videos, device test results
+- Sugawara et al., "Light Commands: Laser-Based Audio Injection Attacks on Voice-Controllable Systems," USENIX Security 2020
+- [USENIX Security 2020 paper page](https://www.usenix.org/conference/usenixsecurity20/presentation/sugawara)
+- Sugawara et al., *sec20-sugawara.pdf* — full paper with methodology and measurement data
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop
 DATE       : 2026-07-18
@@ -235,7 +367,7 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
@@ -436,7 +568,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
@@ -519,7 +651,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
@@ -631,12 +763,12 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : cve-2026-23111, CVE-2026-23111
+CVE        : CVE-2026-23111, cve-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -696,7 +828,7 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
@@ -783,7 +915,7 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing
 DATE       : 2026-06-18
@@ -931,7 +1063,7 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
@@ -1057,7 +1189,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -1122,7 +1254,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -1185,12 +1317,12 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : CVE-2026-45247, cve-2026-45247
+CVE        : cve-2026-45247, CVE-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1214
@@ -1265,7 +1397,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
@@ -1338,12 +1470,12 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
 URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
-CVE        : cve-2022-0492, CVE-2022-0492
+CVE        : CVE-2022-0492, cve-2022-0492
 CATEGORIES : exploits, linux
 TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
 WORD_COUNT : 1248
@@ -1432,7 +1564,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
@@ -1496,7 +1628,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -1593,7 +1725,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -1675,7 +1807,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -1810,12 +1942,12 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : CVE-2026-41089, cve-2026-41089
+CVE        : cve-2026-41089, CVE-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -1896,7 +2028,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
@@ -1973,7 +2105,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -2069,7 +2201,7 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
@@ -2142,12 +2274,12 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
-CVE        : cve-2026-0257, CVE-2026-0257
+CVE        : CVE-2026-0257, cve-2026-0257
 CATEGORIES : exploits, network-security
 TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
 WORD_COUNT : 1255
@@ -2224,7 +2356,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -2363,12 +2495,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : CVE-2026-43121, cve-2026-43121
+CVE        : cve-2026-43121, CVE-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -2453,7 +2585,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
@@ -2518,7 +2650,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
@@ -2628,7 +2760,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -2740,7 +2872,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -2810,7 +2942,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -2987,7 +3119,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -3081,7 +3213,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -3244,7 +3376,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -3402,7 +3534,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -3536,7 +3668,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -3758,7 +3890,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -3886,7 +4018,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -4093,12 +4225,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -4207,7 +4339,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -4391,7 +4523,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -4547,7 +4679,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -4700,12 +4832,12 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : cve-2026-46333, CVE-2026-46333
+CVE        : CVE-2026-46333, cve-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -4800,12 +4932,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : CVE-2026-42945, cve-2026-42945
+CVE        : cve-2026-42945, CVE-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -4951,7 +5083,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
@@ -5159,12 +5291,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="044" type="security-research-post">
+<DOCUMENT id="045" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -5274,12 +5406,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="045" type="security-research-post">
+<DOCUMENT id="046" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -5371,7 +5503,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="046" type="security-research-post">
+<DOCUMENT id="047" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -5518,5 +5650,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 46 documents — 2026-07-24T23:54:32Z
+END OF CORPUS — 47 documents — 2026-07-25T00:10:09Z
 ================================================================================
