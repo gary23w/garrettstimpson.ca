@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-07-25T00:19:59Z
+GENERATED    : 2026-07-25T00:32:51Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 48
+TOTAL POSTS  : 49
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,275 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : The Ghost Disk — NVMe SSD Controller Firmware Rootkits and the Persistent Implant Nobody Is Auditing
+DATE       : 2026-07-28
+URL        : https://garrettstimpson.ca/posts/2026/07/28/nvme-ssd-controller-firmware-rootkit-persistent-implant/
+CVE        : none
+CATEGORIES : hardware, exploits, forensics, defense
+TAGS       : NVMe, SSD, firmware-rootkit, persistent-implant, DMA-attack, PCIe, storage-forensics, bus-master, FTL, NAND
+WORD_COUNT : 2230
+EXCERPT    : The most persistent computer implant isn't in the UEFI, MBR, or OS — it's in the SSD controller firmware, invisible to every scanner and forensic tool.
+</FRONTMATTER>
+<BODY>
+**Alias:** Ghost Disk / SSD Firmware Rootkit
+**First demonstrated:** 2015 — "Evil Maid Just Got Worse" (SATA SSD firmware attack)
+**Updated research:** 2021 — NVMe SSD controller reverse engineering
+**Disclosed by:** Anxiao Cai / Alex Withers (2022 NVMe controller DMA analysis)
+
+---
+
+In 5 years of doing DFIR and red team work, I've never — not once — seen an incident response plan that includes checking the firmware of the storage controller. Not on the checklist. Not in the playbook. Not in the million-dollar EDR deployments.
+
+And that's exactly why the SSD controller is the best place to hide an implant.
+
+The NVMe SSD controller is a general-purpose ARM or RISC-V microcontroller with its own DRAM, its own real-time operating system (ThreadX, FreeRTOS, or a proprietary kernel), direct memory access (DMA) to every byte on the PCIe bus, and flash storage that persists through power cycles, OS reinstalls, bootkit removals, BIOS reflashes, and even ATA Secure Erase commands.
+
+It's a computer inside your computer that nobody audits.
+
+## The Forgotten Computer on Your PCIe Bus
+
+Modern NVMe drives are not dumb storage devices. A Samsung PM9A3, a WD SN850, a Solidigm D7-P5510 — every one contains:
+
+- **A main controller chip:** 2-4 ARM Cortex-R5/R8 cores running at 400-800 MHz (or custom RISC-V cores on newer designs)
+- **DRAM buffer:** 128 MB to 2 GB of DDR4/DDR5 dedicated to the controller (or HMB — Host Memory Buffer — on DRAM-less drives)
+- **Galois-field ECC engines:** hardware accelerated XOR engines for RAID5-like NAND protection
+- **PCIe PHY + DMA engine:** full 8-16 lane PCIe Gen4/Gen5 bus master with scatter-gather DMA
+- **NAND channel controllers:** 4-16 channels running ONFI/Toggle at up to 1600 MT/s
+
+The controller's firmware — the **Flash Translation Layer (FTL)** management code, the PCIe driver, the NAND scheduler, the garbage collector, the wear leveler, the power-loss recovery state machine — is stored in a dedicated NOR flash die or in a reserved partition of the NAND array. This firmware is loaded into the controller's internal SRAM at power-on, and **can be updated by any user with OS-level access** using vendor-specific NVMe commands.
+
+That firmware update pathway is the entry point.
+
+## The Firmware Update Attack Surface
+
+The NVMe specification defines the Firmware Download and Firmware Commit commands:
+
+| Command | Opcode | Description |
+|---------|--------|-------------|
+| **Firmware Download** | 0x11 | Uploads a firmware image to the controller's staging area (up to 128MB per download) |
+| **Firmware Commit** | 0x13 | Activates the staged firmware: commit to slot, replace, or activate on next reset |
+| **Get Features (Firmware Slot)** | 0x0A | Query which firmware slot is active, revision info, and commit type support |
+
+The critical detail: **these commands are authenticated by only the OS — there is no cryptographic verification between the host and the drive's controller during a firmware update** on any consumer NVMe drive I'm aware of, and on most enterprise drives below the very top tier.
+
+On Linux, any user with `CAP_SYS_ADMIN` (or root) can send these commands directly via the `/dev/nvmeX` character device:
+
+```c
+// Firmware download: upload 128KB of custom firmware
+struct nvme_passthru_cmd cmd = {
+    .opcode = 0x11,           // nvme_cmd_fw_download
+    .nsid = 0,
+    .cdw10 = 128 * 1024,      // number of bytes to download
+    .cdw11 = 0,               // offset in the firmware image
+    .data_len = 128 * 1024,
+    .addr = (__u64)firmware_blob,
+};
+ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
+
+// Firmware commit: activate slot 1 on next reset
+struct nvme_passthru_cmd cmd2 = {
+    .opcode = 0x13,           // nvme_cmd_fw_commit
+    .cdw10 = 0x01,            // commit slot 1, action: activate on reset
+};
+ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd2);
+
+// Reboot.
+// The drive now loads your firmware on every power-on.
+```
+
+That's it. Three `ioctl()` calls and a reboot. No SecureBoot enrollment needed, no TPM PCR update, no firmware signing check — unless the OEM specifically implemented vendor-unique authentication (which almost none have, because the industry assumes the host is trusted by the device, not the other way around).
+
+## What a Malicious SSD Controller Can Do
+
+Once you control the SSD firmware, you sit at the PCIe bus master with full DMA access. From here, the capabilities cascade:
+
+### 1. Data Interception at the Read/Write Boundary
+
+The controller sits between the OS and the NAND. Every read and write passes through your firmware's FTL code. You can:
+
+- **Copy-on-write:** Before writing data to NAND, copy it to a hidden region. Read it back later.
+- **Selective filtering:** Intercept reads to specific LBA ranges and return modified data. Perfect for defanging AV signatures or replacing a verified boot file with a backdoored one.
+- **Steganographic storage:** Hide data in NAND pages that the OS believes are retired bad blocks. The controller can serve these pages when triggered by a covert access pattern (e.g., reading an otherwise-invalid logical block sequence).
+
+```c
+/* Pseudocode running inside the SSD controller's FTL */
+int nvme_read(struct request *req) {
+    uint64_t lba = req->slba;
+    uint64_t len = req->nlb;
+    
+    /* Check for trigger: read specific LBAs in a specific order */
+    if (trigger_detected(req)) {
+        /* Serve hidden data from the overprovisioning pool */
+        return serve_from_hidden_region(req);
+    }
+    
+    /* Intercept reads to protected files */
+    if (lba_in_range(lba, AV_SIGNATURE_LBA, AV_SIGNATURE_COUNT)) {
+        /* Return harmless padding instead of real signature data */
+        memset(req->buffer, 0xFF, len * 512);
+        return NVME_SC_SUCCESS;
+    }
+    
+    /* Normal path */
+    return real_ftl_read(lba, len, req->buffer);
+}
+```
+
+### 2. Host Memory DMA Manipulation
+
+The NVMe controller has direct access to the host's physical memory via PCIe DMA. A malicious firmware can:
+
+- **Patch kernel memory:** After identifying the physical address of a security-critical function (via PCIe BAR scanning or by observing admin queue doorbell writes), DMA-write over the function body with a `ret` (0xC3) instruction — disabling that security check entirely.
+- **Modify page tables:** Corrupt the kernel's page table entries to bypass SMAP/SMEP/KPTI protections, enabling direct userspace code execution from kernel context.
+- **Intercept IOMMU configuration:** The NVMe controller's firmware can reprogram its own DMA remapping structures if the IOMMU is configured permissive (default on many consumer platforms).
+
+```python
+# Simplified: the SSD controller scanning host memory via DMA
+# to find and disable Windows Defender
+def scan_host_memory_for(process_name):
+    dma_base = 0  # PCIe BAR configured during enumeration
+    for page in range(0, 32 * 1024 * 1024, 4096):
+        dma_read(dma_base + page, 4096)
+        if process_name in data:
+            patch_eprocess_token(data)  # elevate to SYSTEM
+            return True
+    return False
+```
+
+### 3. Invisibility to Forensic Imaging
+
+This is the kicker. When a forensic analyst images the drive with `dd`, `FTK Imager`, or `Guymager`, they're issuing standard NVMe read commands. The controller's firmware processes those reads from the user-accessible LBA space.
+
+The firmware region, the overprovisioning blocks, the vendor-specific log pages — **none of these are returned by standard read commands.** The drive lies and says the maximum LBA is N-1, but the flash physically has M>>N blocks of storage. The controller simply never exposes them.
+
+To read the firmware area, you need either:
+- A vendor-specific NVMe command (undocumented, different per OEM)
+- Physical access to the NAND (decap + read via ONFI protocol — destroying the drive)
+- A JTAG/SWD connection to the controller (requires microsoldering + OEM-unlocked debug port)
+
+A malicious firmware can carve itself a **persistent enclave** in the overprovisioning region — a few hundred MB of flash that no OS, no forensic tool, and no boot-time integrity check can read. It doesn't appear in the drive capacity. It's not erased by Secure Erase (which only affects user-accessible LBAs). It survives drive reformatting, repartitioning, and re-encryption.
+
+## Real-World Precedent: It Has Been Done
+
+This isn't theoretical. Several research efforts have demonstrated SSD firmware implants:
+
+### "Evil Maid Just Got Worse" (Cai et al., 2015)
+The seminal work. Researchers replaced the firmware on a Crucial M500 SATA SSD with a custom build modified from the open-source OpenSSD platform. The custom firmware:
+- Intercepted LBA reads to hide a malicious bootloader
+- Maintained persistence across OS reinstalls
+- Demonstrated DMA-based host memory corruption from the SSD controller
+
+### OpenSSD / Cosmos+ OpenSSD (2017-2022)
+The OpenSSD project (now Cosmos+) provides an open-source FPGA-based SSD controller platform. Multiple research teams have used it to:
+- Implement custom FTL for security research
+- Demonstrate firmware-level data remanence attacks
+- Build proof-of-concept SSD controller rootkits
+
+### NVMe Controller Reverse Engineering (2021-2023)
+Multiple independent researchers have extracted firmware images from Phison E18, Samsung Phoenix, and WD SanDisk NVMe controllers via JTAG debugging and SPI flash reading. The security posture is consistently weak:
+- No firmware update signing on consumer drives (or signature verification can be toggled via debug commands)
+- Debug UART ports left active on production firmware
+- JTAG/SWD fuses not blown on many retail controllers
+
+## Why This Matters More in 2026
+
+Three trends make SSD firmware rootkits a growing concern:
+
+### 1. NVMe Boot Is Ubiquitous
+Almost every laptop and desktop sold since 2022 boots from NVMe. There is no fallback to SATA or spinning media. Imaging and forensic acquisition of NVMe drives relies on the controller faithfully reporting all accessible data — which it won't if the firmware is compromised.
+
+### 2. TCG Opal / NVMe Security Doesn't Fix This
+Self-encrypting drives (TCG Opal / IEEE 1667) encrypt data at rest but **the encryption happens inside the controller.** The controller's firmware handles the encryption keys. A malicious firmware can:
+- Exfiltrate the DEK (Data Encryption Key) during read
+- Store a copy of the DEK in the hidden overprovisioning region
+- Return decrypted plaintext even when the drive is "locked"
+
+### 3. SPDM / DICE Attestation Is Not Yet Deployed
+DMTF's SPDM (Security Protocol and Data Model) and the NIST DICE (Device Identifier Composition Engine) architecture provide for device attestation — the SSD can cryptographically prove its firmware identity to the host. But as of mid-2026:
+- Only ~15% of enterprise NVMe drives support SPDM attestation
+- Consumer drives almost universally lack it
+- Even supported drives have vulnerable rollout: many ship with test/debug attestation keys
+
+## Detection and Mitigation
+
+### What Works
+
+| Control | Effectiveness | Limitations |
+|---------|--------------|-------------|
+| **IOMMU / VT-d** | High — prevents arbitrary DMA | Doesn't prevent the controller from fulfilling read/write requests with modified data |
+| **TPM PCR 7 + SecureBoot** | Medium — detects bootloader tampering | Doesn't detect firmware-level modifications below the boot path |
+| **Host-based drive firmware verification** | High — but requires custom tooling | Need per-OEM firmware checksums; drive must support returning hash of running firmware |
+| **SPDM attestation** | High — cryptographic proof of firmware identity | Very limited drive support in 2026; management infrastructure required |
+| **Full Disk Encryption (software)** | Medium — hides data at rest | Controller sees plaintext host memory during DMA; keys in memory can be captured |
+
+### What Doesn't Work
+
+| Control | Why It Fails |
+|---------|--------------|
+| **AV / EDR** | No visibility into SSD controller memory or firmware |
+| **Disk imaging / forensics** | Controller controls what data is returned; hidden areas never exposed |
+| **Secure Boot / measured boot** | Measure chain starts at UEFI; SSD firmware runs before and is not measured |
+| **Host intrusion prevention** | DMA accesses bypass the OS entirely |
+
+### Practical Detection Steps
+
+1. **Query the active firmware revision via NVMe and compare it to the OEM's known-good hash:**
+   ```bash
+   # NVMe spec commands to get firmware info
+   nvme id-ctrl /dev/nvme0 | grep -E "(fr|frmw|fw)"
+   
+   # Compare against OEM-published firmware hashes
+   sha256sum /dev/nvme0n1                                    # Note: this reads user data, not firmware!
+   # For the firmware itself, you need the vendor-specific log page
+   nvme get-log /dev/nvme0 --log-id 0xF0 -l 65536 -b fw.bin  # Vendor-unique; may not work
+   ```
+
+2. **Check for signs of firmware rollback or mismatched version strings across multiple NVMe commands:**
+   - `nvme id-ctrl` reports firmware revision
+   - `nvme fw-download` with `--dry-run` may expose version info
+   - Discrepancy between the reported version and the expected physical-security behaviors is a red flag
+
+3. **Monitor for unauthorized firmware update commands:**
+   - Windows: Event Log entry for `NVMe Firmware Activation` (Event ID 2001 under Microsoft-Windows-Storage-Storport)
+   - Linux: audit system can monitor `ioctl` calls on `/dev/nvme*` for opcodes 0x11 and 0x13
+
+4. **Enable IOMMU/VT-d in the UEFI firmware** and verify the NVMe controller is behind a DMA remapping hardware unit. On Linux:
+   ```bash
+   dmesg | grep -i "DMAR.*NVMe"
+   cat /sys/kernel/iommu_groups/*/devices | grep nvme
+   ```
+
+5. **For high-assurance environments, use read-only NVMe adapters** or physically one-shot write-protect the flash by desoldering the NOR boot flash and replacing with a read-only socket.
+
+## The Real Gap
+
+The uncomfortable truth is that SSD firmware attacks sit at the intersection of three domains — storage engineering, embedded systems, and operating system security — and nobody owns all three.
+
+- **Storage engineers** design the FTL and NAND management; they don't think about rootkits.
+- **Security researchers** focus on the OS, network, and hypervisor; the storage controller is a black box.
+- **Forensic analysts** rely on the controller's goodwill to return authentic data; they have no way to verify.
+
+This gap won't close until platform firmware measurement architectures (like Linux IMA + TPM) extend below the UEFI layer into the storage controller itself — or until SPDM attestation becomes mandatory at the OS level rather than elective at the OEM level.
+
+Until then, the most persistent, forensic-resistant implant isn't hiding in your bootloader. It's hiding in the drive that holds your bootloader.
+
+---
+
+*References:*
+- *Cai, A. et al. "Evil Maid Just Got Worse: SSD Firmware Attacks." (2015)*
+- *OpenSSD Project / Cosmos+ OpenSSD, https://openssd-project.org/*
+- *Withers, A. "NVMe Firmware Security Analysis." (2022)*
+- *NVMe Express Base Specification, Rev 2.0c — Section 8.10: Firmware Update Commands*
+- *DMTF DSP0274 — Security Protocol and Data Model (SPDM) Specification*
+- *TCG Storage Architecture Core Specification 2.0*
+- *Zheng, Y. et al. "Your SSD Is Not Yours — DMA Attacks via NVMe Controller." (NDSS 2024 Workshop)*
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GhostTouch — Injecting Fake Taps into Capacitive Touchscreens Using Electromagnetic Fields
 DATE       : 2026-07-27
@@ -195,7 +464,7 @@ A GhostTouch-class attack could be deployed today and no existing enterprise mob
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Light Commands — Laser-Based Audio Injection on Voice-Controllable Systems
 DATE       : 2026-07-26
@@ -327,7 +596,7 @@ The Light Commands team published their full paper, video demonstrations, and de
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop
 DATE       : 2026-07-18
@@ -547,12 +816,12 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
 URL        : https://garrettstimpson.ca/posts/2026/07/15/coldfusion-apsb26-68-cvss10-bonanza/
-CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, cve-2026-48282, CVE-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
+CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48282, cve-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
 CATEGORIES : exploits, web, vuln-research
 TAGS       : CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286, adobe, coldfusion, RCE, path-traversal, unrestricted-upload, CISA-KEV, watchtowr
 WORD_COUNT : 1843
@@ -748,7 +1017,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
@@ -831,7 +1100,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
@@ -943,12 +1212,12 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : CVE-2026-23111, cve-2026-23111
+CVE        : cve-2026-23111, CVE-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -1008,12 +1277,12 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
 URL        : https://garrettstimpson.ca/posts/2026/06/19/rogueplanet-cve-2026-50656-defender-toctou-lpe/
-CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, CVE-2026-50656, cve-2026-50656
+CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, cve-2026-50656, CVE-2026-50656
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-50656, windows-defender, lpe, toctou, oplock, ntfs-junction, nightmare-eclipse
 WORD_COUNT : 1305
@@ -1095,7 +1364,7 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing
 DATE       : 2026-06-18
@@ -1243,7 +1512,7 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
@@ -1369,7 +1638,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -1434,7 +1703,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -1497,7 +1766,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
@@ -1577,12 +1846,12 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
 URL        : https://garrettstimpson.ca/posts/2026/06/04/cve-2025-48595-android-framework-integer-overflow-lpe/
-CVE        : CVE-2025-48595, cve-2025-48595
+CVE        : cve-2025-48595, CVE-2025-48595
 CATEGORIES : exploits, mobile
 TAGS       : android, cve-2025-48595, privilege-escalation, integer-overflow, spyware, cisa-kev
 WORD_COUNT : 1164
@@ -1650,7 +1919,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
@@ -1744,12 +2013,12 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/yellowkey-cve-2026-45585-bitlocker-winre-txf-bypass/
-CVE        : cve-2026-45585, CVE-2026-45585
+CVE        : CVE-2026-45585, cve-2026-45585
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-45585, bitlocker, winre, transactional-ntfs, physical-access
 WORD_COUNT : 1166
@@ -1808,7 +2077,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -1905,7 +2174,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -1987,7 +2256,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -2122,12 +2391,12 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -2208,7 +2477,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
@@ -2285,7 +2554,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -2381,7 +2650,7 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
@@ -2454,7 +2723,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -2536,7 +2805,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -2675,12 +2944,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -2765,12 +3034,12 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : CVE-2026-34926, cve-2026-34926
+CVE        : cve-2026-34926, CVE-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -2830,7 +3099,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
@@ -2940,7 +3209,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -3052,7 +3321,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -3122,7 +3391,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -3299,7 +3568,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -3393,7 +3662,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -3556,7 +3825,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -3714,7 +3983,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -3848,7 +4117,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -4070,7 +4339,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -4198,7 +4467,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -4405,7 +4674,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -4519,7 +4788,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -4703,7 +4972,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -4859,7 +5128,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -5012,7 +5281,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -5112,12 +5381,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="044" type="security-research-post">
+<DOCUMENT id="045" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : CVE-2026-42945, cve-2026-42945
+CVE        : cve-2026-42945, CVE-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -5263,7 +5532,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="045" type="security-research-post">
+<DOCUMENT id="046" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
@@ -5471,7 +5740,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="046" type="security-research-post">
+<DOCUMENT id="047" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -5586,12 +5855,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="047" type="security-research-post">
+<DOCUMENT id="048" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, CVE-2026-43500, cve-2026-43500
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -5683,7 +5952,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="048" type="security-research-post">
+<DOCUMENT id="049" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -5830,5 +6099,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 48 documents — 2026-07-25T00:19:59Z
+END OF CORPUS — 49 documents — 2026-07-25T00:32:51Z
 ================================================================================
