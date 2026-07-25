@@ -19,7 +19,7 @@ Then I tested whether I could actually *do* anything with them. I picked seven N
 
 Nobody talks about this attack surface. There is no built-in audit tool for kernel object DACLs. No Group Policy template. No Microsoft security baseline. The only visibility tool is WinObj, and it doesn't show DACLs unless you dig into the security tab one object at a time.
 
-This post has working proof-of-concept code that enumerates, classifies, and manipulates the entire session object namespace — four PoCs, compiled and run on a stock Windows 11 machine, producing real data.
+This post has working proof-of-concept code that enumerates, classifies, and manipulates the entire session object namespace — compiled and run on a stock Windows 11 machine, producing real data.
 
 ---
 
@@ -39,32 +39,11 @@ And there is almost no tooling to find these.
 
 ## The Audit — What I Built and What I Found
 
-I wrote four PoCs, each probing a different angle of the isolation gap. The code is in [the companion repo](https://github.com/gary23w/garrettstimpson.ca/tree/main/post-poc). All four were compiled with MinGW-w64 and run on a stock Windows 11 24H2 machine from an unprivileged user account (Session 9).
+I wrote a tool against the NT API that enumerates, classifies, and opens every named object in the session. The code is in [the companion repo](https://github.com/gary23w/garrettstimpson.ca/tree/main/post-poc). Compiled with MinGW-w64 and run on a stock Windows 11 24H2 machine from an unprivileged user account (Session 9).
 
-### PoC 1 — Cross-Session Enumeration
+### The Results
 
-Opens `\BaseNamedObjects` (the global directory) and dumps every named object it can find. This includes objects from ALL sessions because the global directory aggregates everything. Output was 166 KB — hundreds of named objects with per-session prefixes (`SM0:`, `SM9:`, etc.).
-
-**Finding:** Cross-session *visibility* works. You can see what objects other sessions created. The namespace isolation is NOT enforced at enumeration time.
-
-### PoC 2 — Global Namespace Interference (NULL DACL Objects)
-
-Creates objects in `\BaseNamedObjects\` with NULL DACLs, then demonstrates that a second process can open, overwrite, and delete them — even though both processes run as different users in the same session. Uses `Global\` prefix resolution (Win32 API) as the standard path.
-
-**Finding:** Any process in the session can create globally-visible objects with NULL DACLs and any other process — even running under a different user context — can interfere with them.
-
-### PoC 3 — Win32 DACL Audit (Global\ and Local\ Prefixes)
-
-Audits 500+ objects using Win32 `Global\` and `Local\` prefix resolution in the current session. Confirmed stock Windows 11 has zero NULL-DACL or WEAK-ACL objects in the Win32-resolvable namespace.
-
-**Finding:** The Win32 prefix layer (`Global\`, `Local\`) provides a *different* view of the namespace than the raw NT paths. Objects that look dangerous via NT enumeration may not be reachable via Win32 calls — but many ARE. And Win32 code can always switch to NT API calls.
-
-### PoC 4 (the main event) — NT-Namespace Cross-Session DACL Audit
-
-This is the one that matters. PoC 4 uses the NT API directly (`NtOpenDirectoryObject`, `NtQueryDirectoryObject`, `NtOpenEvent`, `NtOpenMutant`, etc.) to:
-1. Enumerate every named object in the current session's `\Sessions\9\BaseNamedObjects`
-2. Enumerate every object in the global `\BaseNamedObjects`
-3. Open each object with `READ_CONTROL` and classify its DACL
+I used the NT API directly (`NtOpenDirectoryObject`, `NtQueryDirectoryObject`, `NtOpenEvent`, `NtOpenMutant`, etc.) to enumerate every named object in `\BaseNamedObjects` and `\Sessions\9\BaseNamedObjects`, then opened each with `READ_CONTROL` to classify its DACL.
 
 **Results across 2,181 objects:**
 
@@ -113,7 +92,7 @@ Look at the vendor concentration. **AMD GPU driver** owns 19+ objects with NULL 
 
 **Microsoft's own Connected Devices Platform** creates semaphores with Everyone-write DACLs. **Desktop Window Manager** has `DwmComposedEvent_1` with Everyone write access. **StateRepository** notification channels — all WEAK_ACL.
 
-### PoC 4b — Manipulation Proof
+### Manipulation Proof
 
 After the audit, I wrote a second tool that opens each flagged NULL-DACL object with `EVENT_MODIFY_STATE` (from `NtOpenEvent`) and calls `SetEvent()` on it. No privilege escalation, no SeDebugPrivilege, no token manipulation. Just a regular process calling NT API functions it already has access to.
 
@@ -134,7 +113,6 @@ After the audit, I wrote a second tool that opens each flagged NULL-DACL object 
 The core finding stands: **NULL DACL means NULL DACL.** If you can open the object, you can do whatever you want with it.
 
 ---
-
 ## Why This Matters
 
 ### 1. Cross-Component Interference
@@ -176,36 +154,6 @@ The security community focuses on memory corruption, EoP, and RCE because those 
 3. **Driver verifier rules** — WHQL certification should flag drivers that create named objects with NULL DACLs. This is the single biggest source of the problem.
 
 4. **Per-type default DACLs** — The Object Manager could enforce per-type minimum DACLs. An Event object should never have a NULL DACL. A Semaphore object should never give Everyone write access by default. This is a kernel-level change, but it's architecturally clean.
-
----
-
-## Build and Run Yourself
-
-All four PoCs are in the `post-poc/` directory of the [site repo](https://github.com/gary23w/garrettstimpson.ca/tree/main/post-poc). Build with MinGW-w64:
-
-```
-# PoC 1 — Cross-session enumeration
-x86_64-w64-mingw32-gcc -O2 poc1_xsession_enum.c -o poc1.exe -lntdll -lwtsapi32
-
-# PoC 2 — Global namespace interference (needs two terminals)
-x86_64-w64-mingw32-gcc -O2 create_poc2_objects.c -o create_poc2.exe -ladvapi32
-x86_64-w64-mingw32-gcc -O2 poc2_global_ns_interference.c -o poc2.exe -ladvapi32
-# Terminal 1: create_poc2.exe
-# Terminal 2: poc2.exe
-
-# PoC 3 — Win32 DACL audit
-x86_64-w64-mingw32-gcc -O2 poc3_dacl_audit.c -o poc3.exe -ladvapi32
-
-# PoC 4 — NT-namespace DACL audit + classification
-x86_64-w64-mingw32-gcc -O2 poc4_session_bypass.c -o poc4.exe -ladvapi32 -lwtsapi32 -lntdll
-poc4.exe
-
-# PoC 4b — Manipulation proof
-x86_64-w64-mingw32-gcc -O2 poc4_manipulate.c -o poc4_manipulate.exe -lntdll
-poc4_manipulate.exe
-```
-
-All PoCs run as unprivileged user. No admin required. No SeDebugPrivilege. No token manipulation. Just the NT API calls that every process can make.
 
 ---
 

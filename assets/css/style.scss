@@ -554,6 +554,10 @@ pre code {
   color: var(--text) !important;
 }
 
+.post-content table tr:nth-child(even) td {
+  background: transparent !important;
+}
+
 .post-content table tr:hover td {
   background: var(--green-glow) !important;
 }
