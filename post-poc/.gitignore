@@ -1,8 +1,0 @@
-# Binaries
-*.exe
-*.dll
-*.o
-
-# Output logs
-*_output*.txt
-*_trace*.txt
