@@ -562,8 +562,11 @@ pre code {
   color: var(--text) !important;
 }
 
+table tr:nth-child(even),
+.post-content table tr:nth-child(even),
 .post-content table tr:nth-child(even) td {
-  /* background: transparent; */
+  /* kill the minima light-skin even-row background — it clashes with the dark theme */
+  background: transparent !important;
 }
 
 .post-content table tr:hover td {
