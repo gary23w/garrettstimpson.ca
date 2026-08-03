@@ -36,6 +36,7 @@ html {
   scroll-behavior: smooth;
   scrollbar-width: thin;
   scrollbar-color: var(--green-dim) var(--bg);
+  overflow-x: clip;
 }
 
 ::-webkit-scrollbar { width: 6px; }
@@ -225,6 +226,13 @@ body {
   margin: 0 auto !important;
   padding: 0 24px !important;
 }
+@media screen and (max-width: 600px) {
+  .wrapper {
+    max-width: 100% !important;
+    padding: 0 16px !important;
+  }
+}
+
 
 /* ============================================================
    TYPOGRAPHY
