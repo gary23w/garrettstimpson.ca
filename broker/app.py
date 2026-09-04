@@ -10,16 +10,30 @@ Contract (matches the Worker's runBrokerTool):
   Auth:      Authorization: Bearer <BROKER_TOKEN>
   Returns:   { "ok": true, "tool": "<name>", "result": "<text>" }
 """
-import os, re, time, hashlib, subprocess
+import hashlib
+import hmac
+import http.client
+import ipaddress
+import json
+import os
+import re
+import socket
+import ssl
+import subprocess
+import tempfile
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 import requests
+from starlette.concurrency import run_in_threadpool
 
 BROKER_TOKEN = os.environ.get("BROKER_TOKEN", "")
 TOR_PROXY = os.environ.get("TOR_PROXY", "socks5h://127.0.0.1:9050")
+MAX_REQUEST_BYTES = 64 * 1024
+MAX_REDIRECTS = 3
 
 app = FastAPI(title="Agent Garrett OSINT Broker", docs_url=None, redoc_url=None)
-ONION_RE = re.compile(r"[a-z2-7]{16}\.onion|[a-z2-7]{56}\.onion", re.I)
+ONION_RE = re.compile(r"(?:[a-z2-7]{16}|[a-z2-7]{56})\.onion", re.I)
 
 
 def tor_session():
@@ -42,19 +56,64 @@ def run_cli(cmd, timeout=180):
         return f"(tool not installed: {cmd[0]})"
 
 
-def onion_fetch(url):
-    if not url:
-        return "onion_fetch: a .onion url is required."
-    if not url.startswith("http"):
-        url = "http://" + url
-    host = re.sub(r"^https?://", "", url).split("/")[0]
-    if not ONION_RE.search(host):
-        return "onion_fetch: not a .onion host."
+def normalize_onion_url(value):
+    raw = (value or "").strip()
+    if not raw:
+        raise ValueError("a .onion url is required")
+    if "://" not in raw:
+        raw = "http://" + raw
+    parsed = urlsplit(raw)
+    if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
+        raise ValueError("only plain http/https onion URLs are allowed")
     try:
-        r = tor_session().get(url, timeout=50)
-        text = re.sub(r"<[^>]+>", " ", r.text)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("invalid onion port") from exc
+    host = (parsed.hostname or "").lower()
+    if not ONION_RE.fullmatch(host) or (port is not None and port not in (80, 443)):
+        raise ValueError("not an exact .onion authority")
+    authority = host if port is None else f"{host}:{port}"
+    return urlunsplit((parsed.scheme, authority, parsed.path or "/", parsed.query, ""))
+
+
+def tor_get_onion(url, timeout=50):
+    current = normalize_onion_url(url)
+    scoped_host = urlsplit(current).hostname
+    session = tor_session()
+    for _ in range(MAX_REDIRECTS + 1):
+        response = session.get(current, timeout=timeout, allow_redirects=False, stream=True)
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("location")
+            response.close()
+            if not location:
+                raise ValueError("onion redirect omitted Location")
+            next_url = normalize_onion_url(urljoin(current, location))
+            if urlsplit(next_url).hostname != scoped_host:
+                raise ValueError("cross-host onion redirect is outside the authorized target")
+            current = next_url
+            continue
+        return response, current
+    raise ValueError("too many onion redirects")
+
+
+def onion_fetch(url):
+    try:
+        normalized = normalize_onion_url(url)
+        host = urlsplit(normalized).hostname
+    except ValueError as exc:
+        return f"onion_fetch: {exc}."
+    try:
+        r, _ = tor_get_onion(normalized)
+        data = b""
+        for chunk in r.iter_content(65536):
+            data += chunk
+            if len(data) > 1024 * 1024:
+                raise ValueError("onion response exceeded 1 MiB")
+        r.close()
+        text_raw = data.decode(r.encoding or "utf-8", errors="replace")
+        text = re.sub(r"<[^>]+>", " ", text_raw)
         text = re.sub(r"\s+", " ", text).strip()
-        links = sorted({m.group(0).lower() for m in ONION_RE.finditer(r.text)})[:20]
+        links = sorted({m.group(0).lower() for m in ONION_RE.finditer(text_raw)})[:20]
         out = f"onion_fetch {host} (HTTP {r.status_code}, via Tor)\n\n{text[:6000]}"
         if links:
             out += "\n\ndiscovered onion links:\n" + "\n".join(links)
@@ -67,8 +126,15 @@ def onion_search(query):
     if not query:
         return "onion_search: a term is required."
     try:
-        r = tor_session().get("https://ahmia.fi/search/", params={"q": query}, timeout=50)
-        hits = [h for h in sorted({m.group(0).lower() for m in ONION_RE.finditer(r.text)})
+        r = tor_session().get("https://ahmia.fi/search/", params={"q": query}, timeout=50, stream=True)
+        data = bytearray()
+        for chunk in r.iter_content(65536):
+            data.extend(chunk)
+            if len(data) > 1024 * 1024:
+                raise ValueError("search response exceeded 1 MiB")
+        r.close()
+        text = bytes(data).decode(r.encoding or "utf-8", errors="replace")
+        hits = [h for h in sorted({m.group(0).lower() for m in ONION_RE.finditer(text)})
                 if not h.startswith("juhanurmihxlp")][:20]
         if hits:
             return f"onion_search '{query}' (Tor): {len(hits)} onion site(s)\n" + "\n".join(hits)
@@ -92,19 +158,108 @@ def holehe(email):
     return f"holehe {email}:\n" + (out[:4000] if out.strip() else "(no used accounts reported)")
 
 
-def fetch_sample(url, max_mb=25):
-    if not url or ".onion" in url:
+def public_addresses(host, port):
+    addresses = []
+    for item in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
+        value = item[4][0]
+        address = ipaddress.ip_address(value)
+        if not address.is_global:
+            raise ValueError(f"sample host resolved to non-public address {value}")
+        if value not in addresses:
+            addresses.append(value)
+    if not addresses:
+        raise ValueError("sample host did not resolve")
+    return addresses
+
+
+def pinned_public_get(url):
+    parsed = urlsplit((url or "").strip())
+    allow_http = os.environ.get("BROKER_ALLOW_HTTP_SAMPLES", "").lower() in ("1", "true", "yes")
+    if parsed.scheme not in (("https", "http") if allow_http else ("https",)):
+        raise ValueError("sample URL must use https (set BROKER_ALLOW_HTTP_SAMPLES=true only for an isolated lab)")
+    if parsed.username or parsed.password or parsed.fragment or not parsed.hostname:
+        raise ValueError("sample URL contains an invalid authority or fragment")
+    host = parsed.hostname.lower()
+    if ONION_RE.fullmatch(host):
         raise ValueError("a clearnet sample URL is required")
-    path = "/tmp/sample_%d" % int(time.time() * 1000)
-    with requests.get(url, stream=True, timeout=60, headers={"User-Agent": "gg-broker/1.0"}) as r:
-        r.raise_for_status()
-        n = 0
-        with open(path, "wb") as f:
-            for chunk in r.iter_content(65536):
-                f.write(chunk); n += len(chunk)
-                if n > max_mb * 1024 * 1024:
-                    break
-    return path
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        raise ValueError("invalid sample URL port") from exc
+    expected_port = 443 if parsed.scheme == "https" else 80
+    if port != expected_port:
+        raise ValueError(f"sample URL port must be {expected_port} for {parsed.scheme}")
+    path = parsed.path or "/"
+    if parsed.query:
+        path += "?" + parsed.query
+    host_header = host
+    last_error = None
+    for address in public_addresses(host, port):
+        conn = None
+        try:
+            if parsed.scheme == "https":
+                conn = http.client.HTTPSConnection(host, port, timeout=60, context=ssl.create_default_context())
+            else:
+                conn = http.client.HTTPConnection(host, port, timeout=60)
+            # Pin the socket to the address already classified above. TLS still uses
+            # the original hostname for SNI and certificate verification.
+            conn._create_connection = lambda _destination, timeout=None, source_address=None, _addr=address: socket.create_connection(
+                (_addr, port), timeout, source_address
+            )
+            conn.request("GET", path, headers={"Host": host_header, "User-Agent": "garrettstimpson-broker/2.0", "Accept-Encoding": "identity"})
+            return conn, conn.getresponse()
+        except Exception as exc:
+            last_error = exc
+            if conn:
+                conn.close()
+    raise ValueError(f"sample host connection failed ({last_error})")
+
+
+def fetch_sample(url, max_mb=25):
+    current = (url or "").strip()
+    scoped_host = urlsplit(current).hostname
+    limit = max_mb * 1024 * 1024
+    for _ in range(MAX_REDIRECTS + 1):
+        conn, response = pinned_public_get(current)
+        try:
+            if response.status in (301, 302, 303, 307, 308):
+                location = response.getheader("Location")
+                if not location:
+                    raise ValueError("sample redirect omitted Location")
+                next_url = urljoin(current, location)
+                if urlsplit(next_url).hostname != scoped_host:
+                    raise ValueError("cross-host sample redirect is outside the authorized target")
+                current = next_url
+                continue
+            if response.status >= 400:
+                raise ValueError(f"sample download returned HTTP {response.status}")
+            advertised = response.getheader("Content-Length")
+            if advertised and int(advertised) > limit:
+                raise ValueError(f"sample exceeds {max_mb} MiB limit")
+            tmp = tempfile.NamedTemporaryFile(prefix="sample_", dir="/tmp", delete=False)
+            path = tmp.name
+            total = 0
+            try:
+                while True:
+                    chunk = response.read(65536)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > limit:
+                        raise ValueError(f"sample exceeds {max_mb} MiB limit")
+                    tmp.write(chunk)
+                tmp.close()
+                return path
+            except Exception:
+                tmp.close()
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                raise
+        finally:
+            conn.close()
+    raise ValueError("too many sample redirects")
 
 
 def re_analyze(url):
@@ -187,6 +342,7 @@ TOOLS = {
     "sherlock":     lambda a: sherlock(a.get("username") or a.get("user") or a.get("target") or ""),
     "holehe":       lambda a: holehe(a.get("email") or a.get("target") or ""),
     "re_analyze":   lambda a: re_analyze(a.get("url") or a.get("target") or ""),
+    "reverse_analyze": lambda a: re_analyze(a.get("url") or a.get("target") or ""),
     "ole_macros":   lambda a: ole_macros(a.get("url") or a.get("target") or ""),
     "exif":         lambda a: exif(a.get("url") or a.get("target") or ""),
     "yara_scan":    lambda a: yara_scan(a.get("url") or a.get("target") or ""),
@@ -195,16 +351,35 @@ TOOLS = {
 
 @app.get("/health")
 def health():
-    return {"ok": True, "tools": sorted(TOOLS.keys())}
+    return {"ok": True, "auth_configured": len(BROKER_TOKEN) >= 24, "tools": sorted(TOOLS.keys())}
 
 
 @app.post("/run")
 async def run(req: Request):
-    if BROKER_TOKEN:
-        if req.headers.get("authorization", "") != f"Bearer {BROKER_TOKEN}":
-            raise HTTPException(status_code=401, detail="unauthorized")
+    if len(BROKER_TOKEN) < 24:
+        raise HTTPException(status_code=503, detail="broker authentication is not securely configured")
+    supplied = req.headers.get("authorization", "")
+    expected = f"Bearer {BROKER_TOKEN}"
+    if not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    advertised = req.headers.get("content-length")
+    if advertised:
+        try:
+            if int(advertised) > MAX_REQUEST_BYTES:
+                raise HTTPException(status_code=413, detail="request too large")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid content length")
     try:
-        body = await req.json()
+        raw = bytearray()
+        async for chunk in req.stream():
+            raw.extend(chunk)
+            if len(raw) > MAX_REQUEST_BYTES:
+                raise HTTPException(status_code=413, detail="request too large")
+        body = json.loads(bytes(raw))
+        if not isinstance(body, dict):
+            raise ValueError("object required")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=400, detail="bad json")
     tool = (body.get("tool") or "").strip().lower()
@@ -212,6 +387,7 @@ async def run(req: Request):
     if tool not in TOOLS:
         return JSONResponse({"ok": False, "error": f"unknown broker tool: {tool}"}, status_code=404)
     try:
-        return {"ok": True, "tool": tool, "result": TOOLS[tool](args)}
+        result = await run_in_threadpool(TOOLS[tool], args)
+        return {"ok": True, "tool": tool, "result": result}
     except Exception as e:
         return JSONResponse({"ok": False, "tool": tool, "error": str(e)}, status_code=500)

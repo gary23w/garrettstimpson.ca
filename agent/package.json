@@ -1,8 +1,16 @@
 {
   "name": "garrettstimpson-agent",
-  "version": "4.3.0",
+  "version": "5.0.0",
   "private": true,
-  "description": "Security research agent \u2014 neuron-db (Rust core compiled to in-Worker WASM) powers corpus RAG + conversation memory, with a runtime model picker over the Cloudflare Workers AI catalog (mirroring the neuron-db lab), plus NVD/EPSS/KEV, passive OSINT and web search. Deploy to your own Cloudflare account in one click.",
+  "scripts": {
+    "test": "node validate.js && node --test *.test.mjs",
+    "check": "node --check src/index.js && npm test",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.129.0"
+  },
+  "description": "Security research agent \u2014 neuron-db WASM powers corpus RAG and conversation memory, with current Cloudflare Workers AI models, evidence-aware tool routing, NVD/EPSS/KEV, passive OSINT, and web search.",
   "cloudflare": {
     "bindings": [
       {
@@ -28,6 +36,16 @@
         "name": "ACCESS_USER",
         "text": "",
         "description": "Optional login username. NOTE: setting this alone turns the login on, but for real security also set ACCESS_PASSWORD."
+      },
+      {
+        "type": "secret_text",
+        "name": "ACCESS_SESSION_SECRET",
+        "description": "Random secret used to sign expiring login cookies independently from the password."
+      },
+      {
+        "type": "secret_text",
+        "name": "MCP_API_TOKEN",
+        "description": "Independent random bearer token (24+ characters) for the stateless /mcp endpoint."
       },
       {
         "type": "secret_text",

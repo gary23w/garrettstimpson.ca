@@ -10,7 +10,7 @@ social recon uses the in-worker `username_enum`. **Defensive / educational use o
 - `onion_search` — Ahmia search over Tor
 - `sherlock` — username across 400+ sites (sherlock-project)
 - `holehe` — which sites a given email is registered on
-- `re_analyze` — RE triage of a sample (file, sha256, strings, radare2 imports, capa capabilities)
+- `re_analyze` / `reverse_analyze` — RE triage of a sample (file, sha256, strings, radare2 imports, capa capabilities)
 - `ole_macros` — extract/decode Office macros (olevba)
 - `exif` — full EXIF/metadata (exiftool)
 - `yara_scan` — YARA-scan a sample (starter rules.yar; override with YARA_RULES env)
@@ -30,14 +30,17 @@ In the Cloudflare Worker (dashboard → Settings → Variables, or wrangler.toml
 ```
 TOOL_BROKER_URL    = https://your-host:8080/run      # put it behind HTTPS!
 TOOL_BROKER_TOKEN  = <the same BROKER_TOKEN>
-CUSTOM_TOOL_NAMES  = sherlock,holehe,re_analyze,ole_macros,exif,yara_scan                  # makes them appear/run in the UI
+CUSTOM_TOOL_NAMES  = sherlock,holehe,re_analyze,ole_macros,exif,yara_scan  # makes them appear/run in the UI
 ```
 `onion_fetch` / `onion_search` automatically prefer the broker when configured.
 
 ## Security
 - Always terminate TLS in front of it (Caddy/nginx/Cloudflare Tunnel) — never expose `:8080` raw.
-- Use a long random `BROKER_TOKEN`; the Worker sends it as `Authorization: Bearer`.
+- Use a random `BROKER_TOKEN` of at least 24 characters; `/run` fails closed if it is missing or short.
+- Sample download tools accept HTTPS only, resolve every hop to public addresses, pin the checked address for the connection, limit redirects, and enforce a strict byte cap. Enable `BROKER_ALLOW_HTTP_SAMPLES=true` only inside an isolated lab.
 - Firewall the port to Cloudflare egress where possible. Keep usage lawful and defensive.
+
+Run the broker tests inside the built image with `docker run --rm --entrypoint python gg-broker -m unittest -v test_app.py`.
 
 ## 5-minute deploy with HTTPS (Cloudflare Tunnel — no open ports)
 

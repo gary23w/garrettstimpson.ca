@@ -1,6 +1,6 @@
 name = "garrettstimpson-agent"
 main = "src/index.js"
-compatibility_date = "2024-09-23"
+compatibility_date = "2026-09-03"
 
 # Bundle neuron-db's Rust core (compiled to wasm32-unknown-unknown) as a CompiledWasm
 # module so `import NDB_WASM from "./neuron_core.wasm"` resolves to a WebAssembly.Module.
@@ -12,7 +12,7 @@ globs = ["**/*.wasm"]
 fallthrough = true
 
 # Workers AI — free tier, no API key required. Drives the chat model (picked at runtime
-# from a Workers-AI catalog mirroring neuron-db's lab model picker; defaults to llama-3.1-8b)
+# from a current Workers-AI catalog; defaults to GLM 4.7 Flash)
 # and the embedding model (bge-base-en-v1.5, retained only for the optional Vectorize path).
 [ai]
 binding = "AI"
@@ -22,10 +22,34 @@ LLMS_URL  = "https://raw.githubusercontent.com/gary23w/garrettstimpson.ca/refs/h
 SITE_NAME = "Garrett Stimpson Security Research"
 ACCESS_USER     = ""      # optional login username (blank = password only)
 ACCESS_PASSWORD = ""      # set a value here to lock the agent behind a login (blank = open access)
+CTF_SAFE_MODE = "true"
+CTF_REQUIRE_CONFIRM = "true"
+AGENT_ALLOW_ACTIVE_TOOLS = "false" # model-driven chat can only run passive tools by default
+MCP_ALLOW_ACTIVE_TOOLS = "false"   # MCP can only expose passive tools by default
+MCP_ALLOW_DARKWEB = "false"
 # Optional reliable search (set as secrets or here): GOOGLE_CSE_KEY + GOOGLE_CSE_CX, or BING_API_KEY.
 # Without them, web_search falls back to keyless SearXNG/DuckDuckGo/Wikipedia (less reliable from Workers).
 # For better secrecy, leave ACCESS_PASSWORD = "" above and instead run:
 #   wrangler secret put ACCESS_PASSWORD   (a secret overrides this var and is not stored in the repo)
+#   wrangler secret put ACCESS_SESSION_SECRET
+#   wrangler secret put MCP_API_TOKEN      (enables the independent bearer-protected /mcp endpoint)
+
+# Strict cross-isolate quota for the optional responsible-disclosure sender.
+[[durable_objects.bindings]]
+name = "DISCLOSURE_LIMITER"
+class_name = "DisclosureLimiter"
+
+[[durable_objects.bindings]]
+name = "LOGIN_LIMITER"
+class_name = "LoginLimiter"
+
+[[durable_objects.bindings]]
+name = "AUTH_SESSIONS"
+class_name = "AuthSession"
+
+[[migrations]]
+tag = "security-limiters-v1"
+new_sqlite_classes = ["DisclosureLimiter", "LoginLimiter", "AuthSession"]
 
 # Daily reindex of the Vectorize index, 1h after llms.txt regenerates (06:00 UTC).
 # No-op when the VECTORIZE binding below is not enabled.
