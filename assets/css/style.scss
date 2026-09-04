@@ -902,6 +902,17 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
    ============================================================ */
 .site-nav .agent-link { color: var(--blue-accent) !important; border-color: var(--border) !important; }
 .site-nav .agent-link:hover { color: var(--bg) !important; background: var(--blue-accent) !important; box-shadow: 0 0 12px rgba(0,212,255,0.4) !important; }
+.site-nav .mcp-link {
+  color: var(--green) !important;
+  border-color: rgba(0,255,65,0.35) !important;
+  box-shadow: inset 0 0 10px rgba(0,255,65,0.06) !important;
+}
+.site-nav .mcp-link:hover {
+  color: var(--bg) !important;
+  background: var(--green) !important;
+  box-shadow: 0 0 14px rgba(0,255,65,0.45) !important;
+  text-shadow: none !important;
+}
 .hero-cta {
   display: inline-block !important; margin-top: 18px !important;
   font-family: var(--font-mono) !important; font-size: 13px !important; font-weight: 700 !important;
@@ -910,6 +921,73 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   box-shadow: 0 0 18px var(--green-glow) !important; transition: transform .15s, box-shadow .15s !important;
 }
 .hero-cta:hover { transform: translateY(-2px) !important; box-shadow: 0 4px 26px rgba(0,255,65,0.5) !important; }
+
+/* ============================================================
+   MCP ONBOARDING
+   ============================================================ */
+.mcp-hero {
+  margin: 4px 0 28px !important; padding: 26px !important;
+  background: linear-gradient(135deg, rgba(0,255,65,0.08), rgba(0,212,255,0.035)) !important;
+  border: 1px solid var(--border) !important; border-left: 4px solid var(--green) !important;
+  border-radius: 7px !important; box-shadow: 0 0 26px rgba(0,255,65,0.06) !important;
+}
+.mcp-page { max-width: 900px !important; margin: 0 auto !important; }
+.mcp-kicker {
+  margin: 0 0 8px !important; color: var(--blue-accent) !important;
+  font-size: 11px !important; letter-spacing: .12em !important; text-transform: uppercase !important;
+}
+.mcp-hero h1 { margin: 0 0 10px !important; font-size: clamp(24px, 5vw, 38px) !important; }
+.mcp-hero p:last-child { margin-bottom: 0 !important; }
+.mcp-status {
+  display: inline-flex !important; align-items: center !important; gap: 8px !important;
+  margin-top: 10px !important; padding: 5px 9px !important; color: var(--green) !important;
+  border: 1px solid var(--border) !important; border-radius: 999px !important; font-size: 10px !important;
+  letter-spacing: .08em !important; text-transform: uppercase !important;
+}
+.mcp-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 9px var(--green); }
+.mcp-grid {
+  display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 16px !important; margin: 20px 0 30px !important;
+}
+.mcp-grid-single { grid-template-columns: 1fr !important; }
+.mcp-card {
+  padding: 20px !important; background: rgba(5,15,8,.92) !important;
+  border: 1px solid var(--border-dim) !important; border-radius: 7px !important;
+}
+.mcp-card:hover { border-color: var(--border) !important; box-shadow: 0 0 18px rgba(0,255,65,.07) !important; }
+.mcp-card h2 { margin: 0 0 8px !important; font-size: 17px !important; color: var(--green) !important; }
+.mcp-card p { margin-bottom: 12px !important; font-size: 12px !important; }
+.mcp-step {
+  display: inline-flex !important; align-items: center !important; justify-content: center !important;
+  width: 24px !important; height: 24px !important; margin-right: 8px !important;
+  border: 1px solid var(--green-dim) !important; border-radius: 50% !important;
+  color: var(--green) !important; font-size: 11px !important;
+}
+.mcp-endpoint {
+  overflow-wrap: anywhere !important; padding: 10px 12px !important; margin: 12px 0 !important;
+  color: var(--blue-accent) !important; background: #020603 !important;
+  border: 1px solid var(--border-dim) !important; border-radius: 4px !important;
+  font-size: 11px !important;
+}
+.mcp-actions { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; margin: 14px 0 !important; }
+.mcp-action {
+  display: inline-block !important; padding: 9px 13px !important; border: 1px solid var(--green) !important;
+  border-radius: 4px !important; color: var(--green) !important; text-decoration: none !important;
+  font-size: 11px !important; font-weight: 700 !important; letter-spacing: .06em !important; text-transform: uppercase !important;
+}
+.mcp-action.primary { color: #000 !important; background: var(--green) !important; }
+.mcp-action:hover { transform: translateY(-1px) !important; box-shadow: 0 0 14px rgba(0,255,65,.3) !important; }
+.mcp-note {
+  margin: 18px 0 !important; padding: 13px 15px !important; color: var(--text-muted) !important;
+  background: rgba(0,212,255,.035) !important; border-left: 3px solid var(--blue-accent) !important;
+  font-size: 11px !important;
+}
+.mcp-tool-list { display: flex !important; flex-wrap: wrap !important; gap: 7px !important; margin: 12px 0 24px !important; }
+.mcp-tool-list code { color: var(--green) !important; border: 1px solid var(--border-dim) !important; border-radius: 999px !important; padding: 4px 8px !important; }
+@media screen and (max-width: 720px) {
+  .mcp-grid { grid-template-columns: 1fr !important; }
+  .mcp-hero { padding: 20px 17px !important; }
+}
 
 /* ============================================================
    RELATED RESEARCH (post footer)

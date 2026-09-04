@@ -35,6 +35,7 @@ header_pages:
   - policy.md
   - tags.md
   - search.md
+  - mcp.md
 
 exclude:
   - README.md
