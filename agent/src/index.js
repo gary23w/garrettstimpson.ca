@@ -18,7 +18,9 @@ import { NeuronDB } from './neuron-db.mjs';  // the official typed binding over 
 import { handleMcpRequest } from './mcp.mjs';
 import {
   buildIntelPlan,
+  buildPowerShellIocEvidence,
   collectToolTargets,
+  deobfuscatePowerShellArrayJoins,
   extractAiText,
   extractSecurityTargets,
   isPublicIpv4,
@@ -33,7 +35,7 @@ import {
 const MODEL         = '@cf/zai-org/glm-4.7-flash'; // current, fast long-context default
 const ROUTER_MODEL  = '@cf/zai-org/glm-4.7-flash'; // deterministic JSON routing pass
 const OUTPUT_FALLBACK_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'; // active non-reasoning recovery path
-const BUILD_VERSION = '2026-09-04-mcp1';  // bump per deploy; shown in header + /api/tools/catalog
+const BUILD_VERSION = '2026-09-04-powershell-static1';  // bump per deploy; shown in header + /api/tools/catalog
 const EMBED_MODEL   = '@cf/baai/bge-base-en-v1.5'; // 768-dim (only used by the optional Vectorize path)
 const EMBED_DIM     = 768;
 
@@ -1659,7 +1661,9 @@ async function runBuiltinCached(env, tool, args) {
   if (noCache.has(tool)) return String(await runBuiltinTool(env, tool, args));
   let cache; try { cache = caches.default; } catch (e) { cache = null; }
   const digest = await sha256hex(JSON.stringify(args || {}));
-  const key = 'https://toolcache.local/' + encodeURIComponent(tool) + '?h=' + digest;
+  // Namespace cached evidence by build so a newly deployed detector never serves
+  // the previous build's false negative for the remainder of its ten-minute TTL.
+  const key = 'https://toolcache.local/' + encodeURIComponent(tool) + '?v=' + encodeURIComponent(BUILD_VERSION) + '&h=' + digest;
   if (cache) { try { const hit = await cache.match(key); if (hit) return await hit.text(); } catch (e) {} }
   const v = String(await runBuiltinTool(env, tool, args));
   if (cache) { try { await cache.put(key, new Response(v, { headers: { 'Cache-Control': 'max-age=600' } })); } catch (e) {} }
@@ -2893,30 +2897,90 @@ async function decodeOne(s) {
   }
   return null;
 }
+function gsRefang(s) {
+  return String(s || '').replace(/\[:?\/\/\]/g, '://').replace(/\[\.\]/g, '.').replace(/\(\.\)/g, '.').replace(/\[:\]/g, ':').replace(/hxxp/gi, 'http');
+}
+function gsDecodeIocs(text) {
+  const source = String(text || '');
+  const values = [
+    ...(source.match(/https?:\/\/[^\s"'<>]{6,200}/gi) || []),
+    ...((source.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || []).filter(ip => ip.split('.').every(octet => +octet <= 255))),
+    ...((source.match(/\b(?:[a-z0-9-]+\.)+[a-z]{2,18}\b/gi) || []).filter(domain => !/\.(?:exe|dll|js|css|html?|txt|md|json|xml|zip)$/i.test(domain))),
+  ];
+  return [...new Set(values)];
+}
+function gsDefang(s) {
+  return String(s || '').replace(/^http/i, 'hxxp').replace(/:\/\//g, '[://]').replace(/\./g, '[.]');
+}
 async function decodeTool(input) {
   let s = String(input || '').trim();
   if (!s) return 'decode: paste an encoded/obfuscated string (url / base64 / hex / gzip — multi-layer).';
   if (s.length > 256 * 1024) return 'decode: input exceeds the 256 KiB safety limit.';
-  const refanged = s.replace(/\[:?\/\/\]/g, '://').replace(/\[\.\]/g, '.').replace(/\(\.\)/g, '.').replace(/\[:\]/g, ':').replace(/hxxp/gi, 'http');
   const chain = [];
-  let cur = refanged, layers = 0;
-  if (refanged !== s) chain.push('refang -> ' + refanged.slice(0, 200));
+  const warnings = [];
+  const confirmedIocTexts = [];
+  const candidateIocTexts = [];
+  const applyStaticPowerShell = (value, provenance, inheritedAssumption = false) => {
+    const result = deobfuscatePowerShellArrayJoins(value);
+    if (result.limitReached) warnings.push(`${provenance}: static PowerShell scan hit a safety limit; coverage-sampled results may be incomplete`);
+    if (!inheritedAssumption) {
+      confirmedIocTexts.push(gsRefang(value));
+      if (result.confirmedText !== value) confirmedIocTexts.push(gsRefang(result.confirmedText));
+    } else {
+      candidateIocTexts.push(gsRefang(value));
+    }
+    let assumed = inheritedAssumption;
+    for (const candidate of result.candidates) {
+      const candidateAssumption = candidate.assumption || (inheritedAssumption ? 'inherits an unresolved-separator assumption from an earlier layer' : '');
+      chain.push(`${provenance}: powershell ${candidate.arrayKind} array/index/-join -> ${candidate.value.slice(0, 400)}` +
+        (candidateAssumption ? ` [CANDIDATE, NOT CONFIRMED: ${candidateAssumption}]` : ' [deterministic empty separator]'));
+      if (candidateAssumption) {
+        candidateIocTexts.push(gsRefang(candidate.value));
+        assumed = true;
+      } else {
+        confirmedIocTexts.push(gsRefang(candidate.value));
+      }
+    }
+    if (assumed) candidateIocTexts.push(gsRefang(result.text));
+    return { text: result.text, assumed };
+  };
+
+  const initial = applyStaticPowerShell(s, 'input');
+  let cur = gsRefang(initial.text);
+  let curAssumed = initial.assumed;
+  let layers = 0;
+  if (cur !== initial.text) chain.push('input: refang -> ' + cur.slice(0, 200) + (curAssumed ? ' [candidate path]' : ''));
   while (layers < 8) {
     const step = await decodeOne(cur);
     if (!step) break;
-    chain.push('[' + (layers + 1) + '] ' + step.label + ' -> ' + step.value.slice(0, 400));
-    cur = step.value; layers++;
+    layers++;
+    chain.push('[' + layers + '] ' + step.label + ' -> ' + step.value.slice(0, 400) + (curAssumed ? ' [CANDIDATE, NOT CONFIRMED: depends on unresolved separator]' : ''));
+    const decoded = applyStaticPowerShell(step.value, `after ${step.label} layer ${layers}`, curAssumed);
+    cur = gsRefang(decoded.text);
+    curAssumed = decoded.assumed;
+    if (cur !== decoded.text) chain.push(`after ${step.label} layer ${layers}: refang -> ` + cur.slice(0, 200) + (curAssumed ? ' [candidate path]' : ''));
   }
-  if (!chain.length) return 'decode: no confident decoding (tried url / base64 / hex / gzip, multi-layer). May be plaintext or an unsupported codec.';
-  const iocs = [...new Set(cur.match(/https?:\/\/[^\s"'<>]{6,200}|\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])].slice(0, 12);
-  return 'decode (' + layers + ' layer' + (layers === 1 ? '' : 's') + ')\n' + chain.join('\n') + (iocs.length ? '\n\nIOCs in final output:\n' + iocs.join('\n') : '');
+  if (!chain.length && !warnings.length) return 'decode: no confident decoding (tried url / base64 / hex / gzip, multi-layer). May be plaintext or an unsupported codec.';
+  const confirmedIocs = gsDecodeIocs(confirmedIocTexts.join('\n')).slice(0, 12);
+  const confirmedSet = new Set(confirmedIocs.map(value => value.toLowerCase()));
+  const candidateIocs = gsDecodeIocs(candidateIocTexts.join('\n'))
+    .filter(value => !confirmedSet.has(value.toLowerCase()))
+    .slice(0, 12);
+  return 'decode (' + layers + ' layer' + (layers === 1 ? '' : 's') + ')\n' + chain.join('\n') +
+    (confirmedIocs.length ? '\n\nConfirmed lexical/static IOCs:\n' + confirmedIocs.map(gsDefang).join('\n') : '') +
+    (candidateIocs.length ? '\n\nUnresolved-separator IOC candidates (NOT CONFIRMED):\n' + candidateIocs.map(gsDefang).join('\n') : '') +
+    (warnings.length ? '\n\nLIMIT WARNING:\n' + [...new Set(warnings)].join('\n') : '');
 }
 
 // Extract + defang IOCs from arbitrary text (logs, emails, reports).
 function iocExtract(text) {
   const raw = String(text || '');
   if (!raw.trim()) return 'ioc_extract: paste text (logs, email, report) to pull IOCs from.';
-  const t = raw.replace(/\[:?\/\/\]/g, '://').replace(/\[\.\]/g, '.').replace(/\(\.\)/g, '.').replace(/\[:\]/g, ':').replace(/hxxp/gi, 'http');
+  const evidence = buildPowerShellIocEvidence(raw);
+  const powershell = evidence.deobfuscation;
+  // Preserve every literal IOC in the submitted evidence, then augment it with
+  // deterministic reconstructions. Assumption-dependent reconstructions stay out.
+  const t = gsRefang(evidence.confirmedEvidenceText);
   const uniq = a => [...new Set(a)];
   const urls = uniq(t.match(/https?:\/\/[^\s"'<>\])]{4,}/gi) || []);
   const ipv4 = uniq((t.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || []).filter(ip => ip.split('.').every(o => +o <= 255)));
@@ -2929,14 +2993,21 @@ function iocExtract(text) {
   const cves = uniq((t.match(/CVE-\d{4}-\d+/gi) || []).map(c => c.toUpperCase()));
   const btc = uniq(t.match(/\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39})\b/g) || []);
   const eth = uniq(t.match(/\b0x[a-f0-9]{40}\b/gi) || []);
-  const defang = s => s.replace(/^http/i, 'hxxp').replace(/:\/\//g, '[://]').replace(/\./g, '[.]');
   const sections = [];
-  const add = (label, arr, df) => { if (arr.length) sections.push(`${label} (${arr.length}):\n` + arr.slice(0, 50).map(x => df ? defang(x) : x).join('\n')); };
+  const notes = [];
+  const add = (label, arr, df) => { if (arr.length) sections.push(`${label} (${arr.length}):\n` + arr.slice(0, 50).map(x => df ? gsDefang(x) : x).join('\n')); };
+  const deterministic = powershell.candidates.filter(candidate => !candidate.assumption);
+  const assumed = powershell.candidates.filter(candidate => candidate.assumption);
+  if (deterministic.length) notes.push('Deterministic static PowerShell reconstructions:\n' + deterministic.map(candidate => gsDefang(candidate.value)).join('\n'));
+  if (assumed.length) notes.push('Unresolved-separator candidates (NOT CONFIRMED; assumes an empty separator):\n' + assumed.map(candidate =>
+    `${gsDefang(candidate.value)} [${candidate.assumption}]`
+  ).join('\n'));
+  if (powershell.limitReached) notes.push('LIMIT WARNING: static PowerShell scan hit a safety limit; coverage-sampled results may be incomplete.');
   add('URLs', urls, true); add('IPv4', ipv4, true); add('Domains', domains, true); add('Emails', emails, true);
   add('MD5', md5, false); add('SHA1', sha1, false); add('SHA256', sha256, false);
   add('CVEs', cves, false); add('BTC addresses', btc, false); add('ETH addresses', eth, false);
-  if (!sections.length) return 'ioc_extract: no IOCs found in the provided text.';
-  return 'ioc_extract — IOCs (defanged where applicable; safe to share):\n\n' + sections.join('\n\n');
+  if (!sections.length) return 'ioc_extract: no confirmed IOCs found in the provided text.' + (notes.length ? '\n\n' + notes.join('\n\n') : '');
+  return 'ioc_extract — confirmed IOCs (defanged where applicable; safe to share):\n\n' + sections.join('\n\n') + (notes.length ? '\n\n' + notes.join('\n\n') : '');
 }
 
 // Quick CTF crypto helper: decode candidates + frequency/IOC hints.

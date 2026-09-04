@@ -5,7 +5,271 @@ const EMAIL_RE = /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g;
 const DOMAIN_RE = /\b(?:[a-z0-9-]+\.)+[a-z]{2,24}\b/gi;
 const BAD_DOMAIN_SUFFIX = /\.(md|txt|js|json|png|jpe?g|gif|svg|webp|exe|dll|so|sh|py|c|go|rs|html?|css|yml|yaml|toml|pdf|zip)$/i;
 
+const PS_ARRAY_JOIN_LIMITS = Object.freeze({
+  inputChars: 256 * 1024,
+  expressionChars: 32 * 1024,
+  attempts: 8192,
+  expressions: 1024,
+  literals: 128,
+  literalChars: 4096,
+  indices: 256,
+  candidateChars: 4096,
+});
+
 const uniq = values => [...new Set(values || [])];
+
+const isPsSpace = char => char === ' ' || char === '\t' || char === '\r' || char === '\n';
+const isAsciiDigit = char => !!char && char >= '0' && char <= '9';
+const isPsIdentifierChar = char => !!char && (
+  (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') || isAsciiDigit(char) || char === '_'
+);
+
+function skipPsSpace(source, offset, end = source.length) {
+  let cursor = offset;
+  while (cursor < end && isPsSpace(source[cursor])) cursor++;
+  return cursor;
+}
+
+function parseStaticPsString(source, offset, expressionStart) {
+  const quote = source[offset];
+  if (quote !== "'" && quote !== '"') return null;
+  let value = '';
+  let cursor = offset + 1;
+  while (cursor < source.length && cursor - expressionStart <= PS_ARRAY_JOIN_LIMITS.expressionChars) {
+    const char = source[cursor];
+    if (char === quote) {
+      if (quote === "'" && source[cursor + 1] === "'") {
+        if (value.length >= PS_ARRAY_JOIN_LIMITS.literalChars) return null;
+        value += "'";
+        cursor += 2;
+        continue;
+      }
+      return { value, end: cursor + 1 };
+    }
+    // Double-quoted PowerShell strings can interpolate variables/subexpressions and
+    // backtick escapes. Leave those dynamic forms to a real parser rather than guess.
+    if (quote === '"' && (char === '$' || char === '`')) return null;
+    if (value.length >= PS_ARRAY_JOIN_LIMITS.literalChars) return null;
+    value += char;
+    cursor++;
+  }
+  return null;
+}
+
+function isPsExpressionDelimiter(char) {
+  return !char || isPsSpace(char) || char === ')' || char === '|' || char === ';' || char === ',' || char === '}';
+}
+
+function parseStaticPsArrayJoinAt(source, start) {
+  let arrayKind = '';
+  let arrayOffset = start;
+  if (source[start] === '@' && source[start + 1] === '(') {
+    arrayKind = '@(...)';
+    arrayOffset = start + 2;
+  } else if (source[start] === '(') {
+    arrayKind = '(...)';
+    arrayOffset = start + 1;
+  } else {
+    return null;
+  }
+  const expressionEnd = Math.min(source.length, start + PS_ARRAY_JOIN_LIMITS.expressionChars);
+  const withinBound = cursor => cursor <= expressionEnd;
+  let cursor = skipPsSpace(source, arrayOffset, expressionEnd);
+  const literals = [];
+
+  while (withinBound(cursor)) {
+    if (literals.length >= PS_ARRAY_JOIN_LIMITS.literals) return null;
+    const literal = parseStaticPsString(source, cursor, start);
+    if (!literal) return null;
+    literals.push(literal.value);
+    cursor = skipPsSpace(source, literal.end, expressionEnd);
+    if (source[cursor] === ',') {
+      cursor = skipPsSpace(source, cursor + 1, expressionEnd);
+      continue;
+    }
+    if (source[cursor] === ')') {
+      cursor++;
+      break;
+    }
+    return null;
+  }
+  if (!literals.length || !withinBound(cursor)) return null;
+
+  cursor = skipPsSpace(source, cursor, expressionEnd);
+  if (source[cursor] !== '[') return null;
+  cursor = skipPsSpace(source, cursor + 1, expressionEnd);
+  const indices = [];
+  while (withinBound(cursor)) {
+    if (indices.length >= PS_ARRAY_JOIN_LIMITS.indices) return null;
+    let sign = 1;
+    if (source[cursor] === '-') {
+      sign = -1;
+      cursor++;
+    }
+    if (!isAsciiDigit(source[cursor])) return null;
+    const numberStart = cursor;
+    while (cursor < expressionEnd && isAsciiDigit(source[cursor]) && cursor - numberStart <= 6) cursor++;
+    if (cursor - numberStart > 6) return null;
+    const requestedIndex = sign * Number(source.slice(numberStart, cursor));
+    const index = requestedIndex < 0 ? literals.length + requestedIndex : requestedIndex;
+    if (!Number.isSafeInteger(index) || index < 0 || index >= literals.length) return null;
+    indices.push(index);
+    cursor = skipPsSpace(source, cursor, expressionEnd);
+    if (source[cursor] === ',') {
+      cursor = skipPsSpace(source, cursor + 1, expressionEnd);
+      continue;
+    }
+    if (source[cursor] === ']') {
+      cursor++;
+      break;
+    }
+    return null;
+  }
+  if (!indices.length || !withinBound(cursor)) return null;
+
+  cursor = skipPsSpace(source, cursor, expressionEnd);
+  if (source.slice(cursor, cursor + 5).toLowerCase() !== '-join' || isPsIdentifierChar(source[cursor + 5])) return null;
+  cursor = skipPsSpace(source, cursor + 5, expressionEnd);
+
+  let assumption = '';
+  const separatorStart = cursor;
+  if (source[cursor] === "'" || source[cursor] === '"') {
+    const separator = parseStaticPsString(source, cursor, start);
+    if (!separator || separator.value !== '') return null;
+    cursor = separator.end;
+  } else if (source[cursor] === '$') {
+    cursor++;
+    const nameStart = cursor;
+    while (cursor < expressionEnd && isPsIdentifierChar(source[cursor])) cursor++;
+    if (cursor === nameStart) return null;
+    const variable = source.slice(separatorStart, cursor);
+    if (variable.toLowerCase() !== '$null') {
+      assumption = `separator variable ${variable} is unresolved; candidate assumes it is empty`;
+    }
+  } else {
+    return null;
+  }
+  if (!withinBound(cursor) || !isPsExpressionDelimiter(source[cursor])) return null;
+
+  let value = '';
+  for (const index of indices) {
+    if (value.length + literals[index].length > PS_ARRAY_JOIN_LIMITS.candidateChars) return null;
+    value += literals[index];
+  }
+  return { start, end: cursor, value, assumption, arrayKind };
+}
+
+function collectStaticPsArrayStarts(source) {
+  const starts = [];
+  let quote = '';
+  for (let cursor = 0; cursor < source.length; cursor++) {
+    const char = source[cursor];
+    if (quote) {
+      if (quote === "'" && char === "'" && source[cursor + 1] === "'") {
+        cursor++;
+        continue;
+      }
+      if (quote === '"' && char === '`') {
+        cursor++;
+        continue;
+      }
+      if (char === quote) quote = '';
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === '@' && source[cursor + 1] === '(') {
+      starts.push(cursor);
+      cursor++;
+      continue;
+    }
+    if (char !== '(' || source[cursor - 1] === '@') continue;
+    let lookahead = cursor + 1;
+    while (lookahead < source.length && isPsSpace(source[lookahead])) lookahead++;
+    if (source[lookahead] === "'" || source[lookahead] === '"') starts.push(cursor);
+  }
+  return starts;
+}
+
+function selectCoverage(items, limit) {
+  if (items.length <= limit) return items;
+  if (limit <= 1) return [items[items.length - 1]];
+  const selected = [];
+  for (let slot = 0; slot < limit; slot++) {
+    const index = Math.floor(slot * (items.length - 1) / (limit - 1));
+    selected.push(items[index]);
+  }
+  return selected;
+}
+
+// Statically recover a narrow PowerShell obfuscation idiom without invoking a
+// PowerShell parser or evaluator: @('pieces')[index,order] (or the parenthesized
+// literal-array form) joined with an empty-ish separator. Negative indices use
+// PowerShell's end-relative array semantics.
+// Unknown separator variables are useful triage leads, but are explicitly marked
+// as assumptions. Dynamic strings, selectors, indices and non-empty joins fail closed.
+export function deobfuscatePowerShellArrayJoins(input) {
+  const source = String(input || '');
+  if (!source || source.length > PS_ARRAY_JOIN_LIMITS.inputChars) {
+    return { text: source, confirmedText: source, candidates: [], limitReached: source.length > PS_ARRAY_JOIN_LIMITS.inputChars };
+  }
+
+  const allStarts = collectStaticPsArrayStarts(source);
+  const starts = selectCoverage(allStarts, PS_ARRAY_JOIN_LIMITS.attempts);
+  const parsedCandidates = starts
+    .map(start => parseStaticPsArrayJoinAt(source, start))
+    .filter(Boolean)
+    .sort((left, right) => left.start - right.start || right.end - left.end);
+
+  // Prefer the outermost expression at each position and discard overlaps before
+  // coverage sampling. This keeps replacement deterministic even when a literal
+  // contains text that itself resembles another array expression.
+  const nonOverlapping = [];
+  let previousEnd = -1;
+  for (const candidate of parsedCandidates) {
+    if (candidate.start < previousEnd) continue;
+    nonOverlapping.push(candidate);
+    previousEnd = candidate.end;
+  }
+  const candidates = selectCoverage(nonOverlapping, PS_ARRAY_JOIN_LIMITS.expressions);
+  const limitReached = allStarts.length > starts.length || nonOverlapping.length > candidates.length;
+  if (!candidates.length) return { text: source, confirmedText: source, candidates, limitReached };
+
+  const chunks = [];
+  const confirmedChunks = [];
+  let copiedThrough = 0;
+  for (const candidate of candidates) {
+    const original = source.slice(candidate.start, candidate.end);
+    chunks.push(source.slice(copiedThrough, candidate.start), candidate.value);
+    confirmedChunks.push(source.slice(copiedThrough, candidate.start), candidate.assumption ? original : candidate.value);
+    copiedThrough = candidate.end;
+  }
+  chunks.push(source.slice(copiedThrough));
+  confirmedChunks.push(source.slice(copiedThrough));
+  return {
+    text: chunks.join(''),
+    confirmedText: confirmedChunks.join(''),
+    candidates: candidates.map(candidate => ({
+      value: candidate.value,
+      assumption: candidate.assumption,
+      start: candidate.start,
+      end: candidate.end,
+      arrayKind: candidate.arrayKind,
+    })),
+    limitReached,
+  };
+}
+
+export function buildPowerShellIocEvidence(input) {
+  const source = String(input || '');
+  const deobfuscation = deobfuscatePowerShellArrayJoins(source);
+  return {
+    deobfuscation,
+    confirmedEvidenceText: source + (deobfuscation.confirmedText !== source ? '\n' + deobfuscation.confirmedText : ''),
+  };
+}
 
 export function normalizeTarget(target) {
   const value = String(target || '').trim().toLowerCase();
