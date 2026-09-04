@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handleMcpRequest, MCP_PROTOCOLS } from './src/mcp.mjs';
+import { handleMcpRequest, mcpToolDefinition, MCP_PROTOCOLS } from './src/mcp.mjs';
 
 const env = { MCP_API_TOKEN: 'a-test-token-long-enough', MCP_ALLOW_ACTIVE_TOOLS: 'false' };
 const handlers = {
@@ -63,6 +63,17 @@ test('tools/list returns private cache metadata and annotations', async () => {
   assert.equal(body.result.tools[0].annotations.readOnlyHint, true);
 });
 
+test('network-free passive compute tools advertise a closed-world contract', () => {
+  const tool = mcpToolDefinition({
+    name: 'persistence_analyze',
+    passive: true,
+    openWorld: false,
+    description: 'Passive persistence evidence triage',
+  });
+  assert.equal(tool.annotations.readOnlyHint, true);
+  assert.equal(tool.annotations.openWorldHint, false);
+});
+
 test('tools/call returns MCP content and structured evidence metadata', async () => {
   const response = await handleMcpRequest(post({
     jsonrpc: '2.0', id: 4, method: 'tools/call',
@@ -73,6 +84,31 @@ test('tools/call returns MCP content and structured evidence metadata', async ()
   assert.equal(body.result.structuredContent.target, 'CVE-2026-1');
 });
 
+test('tools/call preserves persistence uncertainty metadata', async () => {
+  const evidenceHandlers = {
+    ...handlers,
+    callTool: async () => ({
+      result: 'persistence_analyze — passive textual evidence only',
+      via: 'builtin',
+      target: '',
+      evidence: {
+        confidence: 'low',
+        confidenceScore: 0.55,
+        uncertain: true,
+        evidenceBasis: 'textual-evidence-only',
+      },
+    }),
+  };
+  const response = await handleMcpRequest(post({
+    jsonrpc: '2.0', id: 9, method: 'tools/call',
+    params: { name: 'persistence_analyze', arguments: { text: 'Analyze this persistence report: scheduled task' } },
+  }), env, evidenceHandlers);
+  const body = await response.json();
+  assert.equal(body.result.structuredContent.confidence, 'low');
+  assert.equal(body.result.structuredContent.uncertain, true);
+  assert.equal(body.result.structuredContent.evidenceBasis, 'textual-evidence-only');
+});
+
 test('tools/call enforces its advertised argument schema', async () => {
   const response = await handleMcpRequest(post({
     jsonrpc: '2.0', id: 8, method: 'tools/call',
@@ -80,6 +116,18 @@ test('tools/call enforces its advertised argument schema', async () => {
   }), env, handlers);
   assert.equal(response.status, 400);
   assert.match((await response.json()).error.message, /Unknown tool argument/);
+
+  const structured = await handleMcpRequest(post({
+    jsonrpc: '2.0', id: 10, method: 'tools/call',
+    params: { name: 'nvd_lookup', arguments: { cveId: ['CVE-2026-1'] } },
+  }), env, handlers);
+  assert.equal(structured.status, 400);
+  assert.match((await structured.json()).error.message, /cveId must be a string/);
+
+  const schema = mcpToolDefinition({ name: 'jwt', passive: true }).inputSchema;
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(schema.properties.token, { type: 'string', maxLength: 12000 });
+  assert.deepEqual(schema.properties.scope, { type: 'string', maxLength: 12000 });
 });
 
 test('cross-origin browser requests are rejected', async () => {

@@ -23,19 +23,30 @@ import {
   deobfuscatePowerShellArrayJoins,
   extractAiText,
   extractSecurityTargets,
+  formatWindowsPersistenceEvidence,
+  guardDeterministicToolPlan,
+  hasExplicitPersistenceAnalysisIntent,
+  hasExplicitWebSearchIntent,
   isPublicIpv4,
   normalizeTarget,
   removeSessionIndexEntry,
   renderBalancedContext,
   resolveScopedRedirect,
+  selectDeterministicToolShortcut,
+  selectPersistenceTextInput,
+  shouldCacheToolResult,
   splitSseLines,
+  toolEvidenceMetadata,
   toolCallKey,
+  validateDerivedNetworkTarget,
+  validateDirectToolInput,
+  validateDirectToolPolicy,
 } from './harness.mjs';
 
 const MODEL         = '@cf/zai-org/glm-4.7-flash'; // current, fast long-context default
 const ROUTER_MODEL  = '@cf/zai-org/glm-4.7-flash'; // deterministic JSON routing pass
 const OUTPUT_FALLBACK_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'; // active non-reasoning recovery path
-const BUILD_VERSION = '2026-09-04-powershell-static1';  // bump per deploy; shown in header + /api/tools/catalog
+const BUILD_VERSION = '2026-09-04-persistence-static5';  // bump per deploy; shown in header + /api/tools/catalog
 const EMBED_MODEL   = '@cf/baai/bge-base-en-v1.5'; // 768-dim (only used by the optional Vectorize path)
 const EMBED_DIM     = 768;
 
@@ -608,7 +619,7 @@ function analyseQuery(query) {
   const ips = targets.publicIps;
   const cveIds = targets.cveIds;
   const domains = targets.domains.slice(0, 2);
-  const wantSearch = SEARCH_TRIGGERS.some(t => q.includes(t));
+  const wantSearch = hasExplicitWebSearchIntent(query) || SEARCH_TRIGGERS.some(t => q.includes(t));
   return { cveIds, ips, domains, wantSearch };
 }
 
@@ -647,7 +658,7 @@ function shouldUseWebSearch(query, opts = {}) {
   if (corpusIntent) return { use: false, reason: 'corpus-intent' };
   if (/\b(do not|don'?t|without)\s+(search|google|web|internet)\b/.test(q)) return { use: false, reason: 'explicit-no-web' };
 
-  const explicitWeb = /\b(search (the )?web|web search|google (it|this|that)?|look (it )?up online|online sources?|news search|search online)\b/.test(q);
+  const explicitWeb = hasExplicitWebSearchIntent(query);
   const freshness = /\b(latest|recent|today|this week|current|breaking|in the wild|newly disclosed)\b/.test(q);
   const threatCtx = /\b(cve-|exploit|advisory|poc|patch|kev|epss|nvd|vendor bulletin|ioc|campaign)\b/.test(q);
   const externalPlatform = /\b(github|shodan|reddit|x\.com|twitter|hackernews|news|blog post)\b/.test(q);
@@ -681,6 +692,15 @@ function buildToolRoutePolicy(query, opts = {}) {
   const corpusIntent = !!opts.corpusIntent;
   const darkwebEnabled = opts.darkwebEnabled !== false;
   const targets = extractToolTargets(query);
+  if (opts.kind === 'persistence_text' || hasExplicitPersistenceAnalysisIntent(query)) {
+    return {
+      use: true,
+      reason: 'explicit-persistence-text-closed-world',
+      classes: ['persistence_text'],
+      allowedTools: ['persistence_analyze'],
+      targets,
+    };
+  }
   const explicitToolIntent = /\b(run|use|check|scan|lookup|look up|investigate|analy[sz]e|recon|osint|enumerate|crawl|fingerprint|pivot|decode|encode|parse|extract|identify|score|draft|profile|dig)\b/.test(q);
   const artifact = hasActionableArtifact(q);
   const classes = [];
@@ -697,7 +717,7 @@ function buildToolRoutePolicy(query, opts = {}) {
   }
   if (targets.domains.length || targets.urls.length) {
     classes.push('domain_url');
-    allow(['rdap_domain', 'dns_lookup', 'dns_records', 'cert_ct', 'crtsh_subs', 'subdomains', 'subdomain_takeover', 'wayback', 'archive_urls', 'urlscan', 'urlhaus', 'wellknown', 'email_security', 'typosquat', 'origin_ip', 'tech_fingerprint', 'phish_check', 'cors_check', 'http_headers', 'bucket_finder', 'favicon_hash', 'unshorten', 'fetch_url', 'crawl', 'file_analyze', 'vuln_scan', 'dork', 'github_osint', 'disclosure_draft', 'image_osint', 'post_malware_pipeline', 'nmap_scan', 'pcap_analyze', 'forensics_triage']);
+    allow(['rdap_domain', 'dns_lookup', 'dns_records', 'cert_ct', 'crtsh_subs', 'subdomains', 'subdomain_takeover', 'wayback', 'archive_urls', 'urlscan', 'urlhaus', 'wellknown', 'email_security', 'typosquat', 'origin_ip', 'tech_fingerprint', 'phish_check', 'cors_check', 'http_headers', 'bucket_finder', 'favicon_hash', 'unshorten', 'fetch_url', 'crawl', 'file_analyze', 'vuln_scan', 'dork', 'github_osint', 'disclosure_draft', 'image_osint', 'post_malware_pipeline', 'nmap_scan', 'pcap_analyze']);
   }
   if (targets.emails.length) {
     classes.push('email');
@@ -709,7 +729,7 @@ function buildToolRoutePolicy(query, opts = {}) {
   }
   if (targets.hashes.length) {
     classes.push('hash');
-    allow(['hash_lookup', 'hash_id', 'file_analyze', 'reverse_analyze', 'forensics_triage']);
+    allow(['hash_lookup', 'hash_id', 'file_analyze', 'reverse_analyze']);
   }
   if (targets.crypto.length) {
     classes.push('crypto');
@@ -732,6 +752,10 @@ function buildToolRoutePolicy(query, opts = {}) {
     classes.push('text_util');
     allow(['decode', 'encode', 'jwt', 'cidr', 'timestamp', 'ioc_extract', 'hash_id', 'crypto_ctf', 'cvss', 'unshorten']);
   }
+  if (hasExplicitWebSearchIntent(query)) {
+    classes.push('web_search');
+    allow(['web_search']);
+  }
   // People / corporate records — name/phone based; no reliable target typing, gate on intent.
   if (/\b(background|public records?|relatives?|people search|who is behind|sec filings?|edgar|incorporat|registered (agent|business)|corporate registr|phone (number|lookup)|reverse phone|do?xx?)\b/.test(q)) {
     classes.push('people');
@@ -740,7 +764,7 @@ function buildToolRoutePolicy(query, opts = {}) {
   // Forensics / RE / memory / pcap workflows (broker-delegated, heavy).
   if (/\b(memory (dump|image|forensics)|volatility|reverse[\s-]?engineer|disassemble|malware analysis|pcap|packet capture|triage|forensic)\b/.test(q)) {
     classes.push('forensics');
-    allow(['reverse_analyze', 'memory_forensics', 'pcap_analyze', 'forensics_triage', 'file_analyze', 'ioc_extract', 'hash_lookup']);
+    allow(['reverse_analyze', 'memory_forensics', 'pcap_analyze', 'file_analyze', 'ioc_extract', 'hash_lookup']);
   }
   // Password exposure check.
   if (/\bpassword\b/.test(q) && /\b(pwned|breach|leaked|exposed|compromis|safe|hibp)\b/.test(q)) {
@@ -1295,6 +1319,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'post_malware_pipeline', category: 'malware', passive: false, description: 'Fetch a post and linked samples for bounded static triage (contacts targets)' },
   { name: 'decode', category: 'malware', passive: true, description: 'Recursive multi-layer decode (base64/hex/url/gzip) + refang + IOCs' },
   { name: 'ioc_extract', category: 'malware', passive: true, description: 'Extract + defang all IOCs (IP/domain/URL/email/hash/CVE/crypto) from pasted text' },
+  { name: 'persistence_analyze', category: 'forensics', passive: true, openWorld: false, description: 'Passive Windows persistence and C2-continuity evidence triage from pasted text; never executes or contacts targets' },
   { name: 'cvss', category: 'intel', passive: true, description: 'CVSS v3.1 base-score calculator from a vector string' },
   { name: 'unshorten', category: 'recon', passive: false, description: 'Trace a shortened/redirecting URL (contacts each redirect target)' },
 ];
@@ -1401,31 +1426,9 @@ function getToolSpec(name) {
   return TOOL_SPEC_BY_NAME[name] || { name, category: 'custom', passive: false, description: 'custom tool' };
 }
 
-function confidenceLabel(score) {
-  if (score >= 0.8) return 'high';
-  if (score >= 0.6) return 'medium';
-  return 'low';
-}
-
-function assessEvidence(spec, result) {
-  const txt = String(result || '');
-  const lowSignal = /(unknown|unavailable|failed|error|timeout|no record|none\/private|not found|lookup failed|UNKNOWN)/i;
-  const strongSignal = /(CISA KEV: LISTED|cvss|epss|rdap|DNS |sha256|asn|provider|snapshot|GitHub public user)/i;
-  let score = spec.passive ? 0.72 : 0.62;
-  if (spec.category === 'intel') score += 0.08;
-  if (spec.category === 'search') score -= 0.08;
-  if (!txt.trim()) score = 0.2;
-  if (lowSignal.test(txt)) score -= 0.28;
-  if (strongSignal.test(txt)) score += 0.08;
-  if (txt.length > 280) score += 0.03;
-  score = Math.max(0.1, Math.min(0.95, score));
-  const uncertain = lowSignal.test(txt) || score < 0.65;
-  return { score: +score.toFixed(2), label: confidenceLabel(score), uncertain };
-}
-
 function makeEvidenceEntry({ tool, input, args, result, via, index }) {
   const spec = getToolSpec(tool);
-  const assessed = assessEvidence(spec, result);
+  const metadata = toolEvidenceMetadata(spec, result);
   return {
     id: `T${index}`,
     tool,
@@ -1436,9 +1439,7 @@ function makeEvidenceEntry({ tool, input, args, result, via, index }) {
     result: String(result || ''),
     passive: !!spec.passive,
     category: spec.category || 'custom',
-    confidence: assessed.label,
-    confidenceScore: assessed.score,
-    uncertain: assessed.uncertain,
+    ...metadata,
   };
 }
 
@@ -1450,6 +1451,7 @@ function formatEvidenceForPrompt(e, maxChars = 2800) {
     `observed_at: ${e.observedAt}`,
     `confidence: ${e.confidence} (${e.confidenceScore})`,
     `uncertain: ${e.uncertain ? 'yes' : 'no'}`,
+    `evidence_basis: ${e.evidenceBasis || 'tool-result'}`,
     `input: ${e.input || '(none)'}`,
     'result:',
     String(e.result || '').slice(0, maxChars),
@@ -1458,7 +1460,7 @@ function formatEvidenceForPrompt(e, maxChars = 2800) {
 
 function buildEvidenceLedger(entries) {
   if (!entries || !entries.length) return '';
-  return entries.map(e => `${e.id} | tool=${e.tool} | input=${String(e.input || '').replace(/\s+/g, ' ').slice(0, 160)} | source=${e.source} | observed_at=${e.observedAt} | confidence=${e.confidence} (${e.confidenceScore}) | uncertain=${e.uncertain ? 'yes' : 'no'}`).join('\n');
+  return entries.map(e => `${e.id} | tool=${e.tool} | input=${String(e.input || '').replace(/\s+/g, ' ').slice(0, 160)} | source=${e.source} | observed_at=${e.observedAt} | confidence=${e.confidence} (${e.confidenceScore}) | uncertain=${e.uncertain ? 'yes' : 'no'} | evidence_basis=${e.evidenceBasis || 'tool-result'}`).join('\n');
 }
 
 async function executeTool(env, tool, args, via) {
@@ -1597,7 +1599,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'phish_check')  return phishCheck(String(args.url || args.target || ''));
   if (name === 'archive_urls') return archiveUrls(String(args.domain || args.target || ''));
   if (name === 'favicon_hash') return faviconHash(String(args.url || args.target || ''));
-  if (name === 'crawl')        return crawl(String(args.url || args.target || ''));
+  if (name === 'crawl')        return crawl(env, String(args.url || args.target || ''));
   if (name === 'subdomains')   return subdomains(String(args.domain || args.target || ''));
   if (name === 'vuln_scan')    return vulnScan(String(args.target || args.url || args.domain || ''));
   if (name === 'keybase')      return keybaseLookup(String(args.username || args.user || args.target || ''));
@@ -1619,6 +1621,7 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'post_malware_pipeline') return postMalwarePipeline(env, String(args.url || args.target || ''));
   if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
   if (name === 'ioc_extract')  return iocExtract(String(args.text || args.input || args.target || ''));
+  if (name === 'persistence_analyze') return persistenceAnalyze(selectPersistenceTextInput(args));
   if (name === 'cvss')         return cvssCalc(String(args.vector || args.target || ''));
   if (name === 'unshorten')    return unshorten(String(args.url || args.target || ''));
   if (name === 'crypto_ctf')   return cryptoCtf(String(args.input || args.text || args.target || ''));
@@ -1657,8 +1660,7 @@ async function runBuiltinTool(env, name, args = {}) {
 // Cache-API wrapper for builtin tool results (10-min TTL) — speeds the agentic loop
 // and OSINT fan-out, and reduces upstream API rate-limit pressure.
 async function runBuiltinCached(env, tool, args) {
-  const noCache = new Set(['pwned_password', 'breach_check', 'exposure_search', 'email_recon', 'holehe', 'leakcheck', 'stealer_check']);
-  if (noCache.has(tool)) return String(await runBuiltinTool(env, tool, args));
+  if (!shouldCacheToolResult(tool)) return String(await runBuiltinTool(env, tool, args));
   let cache; try { cache = caches.default; } catch (e) { cache = null; }
   const digest = await sha256hex(JSON.stringify(args || {}));
   // Namespace cached evidence by build so a newly deployed detector never serves
@@ -1709,7 +1711,7 @@ function validateToolAccess(policy, toolName, target, confirmed) {
 }
 
 function validateAutonomousToolAccess(env, policy, spec, args = {}) {
-  const targets = collectToolTargets('', args);
+  const targets = collectToolTargets('', args, spec.name);
   if (!spec.passive) {
     if (!isTruthy(env.AGENT_ALLOW_ACTIVE_TOOLS, false)) {
       return { ok: false, error: `Autonomous active tool ${spec.name} is disabled.` };
@@ -2789,6 +2791,10 @@ async function fileAnalyze(url) {
 async function postMalwarePipeline(env, postUrl) {
   let u; try { u = new URL(/^https?:\/\//i.test(postUrl) ? postUrl : 'https://' + postUrl); } catch { return 'post_malware_pipeline: provide a valid post URL.'; }
   if (isPrivateHost(u.hostname)) return `post_malware_pipeline: ${u.hostname} is private/internal — blocked.`;
+  const targetPolicy = getToolPolicy(env);
+  const seedAccess = validateDerivedNetworkTarget(targetPolicy, u.toString(), u.toString());
+  if (!seedAccess.ok) return `post_malware_pipeline: ${seedAccess.error}`;
+  u = new URL(seedAccess.url);
 
   const SHORT = /^(bit\.ly|t\.co|tinyurl\.com|rb\.gy|ow\.ly|buff\.ly|is\.gd|cutt\.ly)$/i;
   const FILE_EXT = /\.(?:exe|dll|sys|msi|scr|js|jse|vbs|vbe|ps1|bat|cmd|jar|apk|iso|img|zip|rar|7z|bin|dat|elf|so|dylib|pdf)(?:$|[?#])/i;
@@ -2826,10 +2832,31 @@ async function postMalwarePipeline(env, postUrl) {
     const inlineHashes = [...new Set((plain.match(/\b[a-f0-9]{32}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{64}\b/ig) || []).map(x => x.toLowerCase()))].slice(0, 10);
 
     const triage = [];
+    const blockedCandidates = [];
     const discoveredHashes = new Set(inlineHashes);
-    for (const c of candidates.slice(0, 4)) {
-      let target = c;
-      try { const h = new URL(c).hostname; if (SHORT.test(h)) { const us = await unshorten(c); const lm = us.match(/final destination:\s*(https?:\/\/\S+)/i); if (lm) target = lm[1]; } } catch {}
+    for (const c of candidates) {
+      if (triage.length >= 4) break;
+      const candidateAccess = validateDerivedNetworkTarget(targetPolicy, u.toString(), c);
+      if (!candidateAccess.ok) {
+        blockedCandidates.push(new URL(c).hostname);
+        continue;
+      }
+      let target = candidateAccess.url;
+      try {
+        const h = new URL(target).hostname;
+        if (SHORT.test(h)) {
+          const us = await unshorten(target);
+          const lm = us.match(/final destination:\s*(https?:\/\/\S+)/i);
+          if (lm) {
+            const finalAccess = validateDerivedNetworkTarget(targetPolicy, target, lm[1]);
+            if (!finalAccess.ok) {
+              blockedCandidates.push(new URL(lm[1]).hostname);
+              continue;
+            }
+            target = finalAccess.url;
+          }
+        }
+      } catch {}
       const out = await fileAnalyze(target);
       triage.push(`### file_analyze ${target}\n${out}`);
       (String(out).match(/\b[a-f0-9]{32}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{64}\b/ig) || []).forEach(h => discoveredHashes.add(h.toLowerCase()));
@@ -2848,6 +2875,7 @@ async function postMalwarePipeline(env, postUrl) {
     lines.push(`links discovered: ${allLinks.length}`);
     lines.push(`candidate sample links: ${candidates.length}`);
     lines.push(`inline hashes in post: ${inlineHashes.length}`);
+    if (blockedCandidates.length) lines.push(`candidate hosts blocked by scope: ${[...new Set(blockedCandidates)].join(', ')}`);
     if (candidates.length) lines.push('candidates:\n' + candidates.slice(0, 8).join('\n'));
     if (triage.length) lines.push('\n' + triage.join('\n\n'));
     if (rep.length) lines.push('\n' + rep.join('\n\n'));
@@ -3008,6 +3036,10 @@ function iocExtract(text) {
   add('CVEs', cves, false); add('BTC addresses', btc, false); add('ETH addresses', eth, false);
   if (!sections.length) return 'ioc_extract: no confirmed IOCs found in the provided text.' + (notes.length ? '\n\n' + notes.join('\n\n') : '');
   return 'ioc_extract — confirmed IOCs (defanged where applicable; safe to share):\n\n' + sections.join('\n\n') + (notes.length ? '\n\n' + notes.join('\n\n') : '');
+}
+
+function persistenceAnalyze(text) {
+  return formatWindowsPersistenceEvidence(text);
 }
 
 // Quick CTF crypto helper: decode candidates + frequency/IOC hints.
@@ -3354,24 +3386,19 @@ async function toolRouter(env, userMsg, already, contextSoFar, allowedTools) {
     /\b\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}\b/,                                 // CIDR
   ];
   const TEXT_VERB = /\b(decode|encode|base64|base32|hex|rot13|de-?obfuscate|jwt|cidr|subnet|netmask|timestamp|epoch|unix\s*time|iocs?|indicators?|cvss)\b/i.test(msg);
+  const PERSISTENCE_TEXT_INTENT = hasExplicitPersistenceAnalysisIntent(msg);
   const PEOPLE_INTENT = /\b(background|public records?|relatives?|people search|who is behind|sec filings?|edgar|corporate registr|phone (?:number|lookup)|reverse phone)\b/i.test(msg);
   const PEOPLE_ARTIFACT = PEOPLE_INTENT && (/\+?\d[\d\s().-]{7,}\d/.test(msg) || /\b[A-Z][a-z]{1,30}\s+[A-Z][a-z]{1,30}\b/.test(msg));
-  const hasArtifact = ARTIFACT.some(re => re.test(msg)) || TEXT_ARTIFACT.some(re => re.test(msg)) || TEXT_VERB || PEOPLE_ARTIFACT;
-  const low = msg.toLowerCase();
+  const hasArtifact = ARTIFACT.some(re => re.test(msg)) || TEXT_ARTIFACT.some(re => re.test(msg)) || TEXT_VERB || PERSISTENCE_TEXT_INTENT || PEOPLE_ARTIFACT;
+  const allowedWasProvided = Array.isArray(allowedTools) || allowedTools instanceof Set;
+  const allowed = new Set([...(allowedTools || [])].map(x => String(x).toLowerCase()));
   if (isCorpusIntent(msg)) return null;
-  // Explicit web-search intent is deterministic — no model needed.
-  if (/\b(search (the )?web|google (it|this|that)|look (it )?up online|search (online|now)|find more (on|about)|web search)\b/.test(low)) {
-    // arg = explicit query if given ('search the web for X'), else the topic in context.
-    let q = (msg.match(/(?:search (?:the )?web (?:for |about )?|web search (?:for )?|find more (?:on|about) |google )(.+)/i) || [])[1] || '';
-    q = q.replace(/["'?.!]+$/,'').trim();
-    if (!q && contextSoFar) { const cm = contextSoFar.match(/[A-Z][A-Za-z0-9]{3,}(?:[A-Z][a-z]+)?/); q = cm ? cm[0] : ''; }
-    if (q) return { tool: 'web_search', arg: q };
-  }
+  const shortcut = selectDeterministicToolShortcut(msg, { already, contextSoFar, allowedTools });
+  if (shortcut.handled) return shortcut.choice;
   // No artifact in the message and no chain context -> nothing concrete to route. Skip the model.
   if (!hasArtifact && !(contextSoFar && /(hash|sample|\.onion|http|@|CVE-)/i.test(contextSoFar))) return null;
 
-  const allowed = new Set((allowedTools || []).map(x => String(x).toLowerCase()));
-  const catalog = toolCatalog(env).filter(t => !allowed.size || allowed.has(String(t.name).toLowerCase()));
+  const catalog = toolCatalog(env).filter(t => !allowedWasProvided || allowed.has(String(t.name).toLowerCase()));
   if (!catalog.length) return null;
   const menu = catalog.map(t => `${t.name}: ${t.description}`).join('\n');
   const sys = [
@@ -3417,13 +3444,13 @@ async function toolRouter(env, userMsg, already, contextSoFar, allowedTools) {
     const norm = arg.toLowerCase().replace(/[?.!,]+$/, '').replace(/^(the|a|an)\s+/, '');
     if (arg && PRON.has(norm)) return null;
     const tool = String(o.tool).toLowerCase().trim();
-    if (allowed.size && !allowed.has(tool)) return null;
+    if (allowedWasProvided && !allowed.has(tool)) return null;
     if ((already || []).includes(toolCallKey(tool, arg))) return null;
     const ID_TOOLS = new Set(['username_enum','github_user','keybase','devto_user','stealer_check','leakcheck','exposure_search']);
     if (arg && ID_TOOLS.has(tool) && isPlaceholderIdentity(arg)) return null;
     // Grounding: for entity tools, the arg must literally appear in the message/context —
     // the model may not invent a target. Pure-compute tools (cvss/decode/encode/...) are exempt.
-    const COMPUTE = new Set(['cvss','decode','encode','jwt','cidr','hash_id','timestamp','ioc_extract','cve_search','web_search','people_search','phone_osint']);
+    const COMPUTE = new Set(['cvss','decode','encode','jwt','cidr','hash_id','timestamp','ioc_extract','persistence_analyze','cve_search','web_search','people_search','phone_osint']);
     if (arg && !COMPUTE.has(tool)) {
       const hay = (msg + ' ' + (contextSoFar || '')).toLowerCase();
       if (hay.indexOf(norm) < 0 && hay.indexOf(arg.toLowerCase()) < 0) return null;
@@ -3601,9 +3628,13 @@ function buildCrawlReasoning(pageUrl, summary, ctx) {
 }
 
 // Website crawler — fetch a page, extract & classify links, follow interesting files, scan for secrets.
-async function crawl(url) {
+async function crawl(env, url) {
   let u; try { u = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch { return 'crawl: a URL is required.'; }
   if (isPrivateHost(u.hostname)) return `crawl: ${u.hostname} is private/internal — blocked.`;
+  const targetPolicy = getToolPolicy(env);
+  const seedAccess = validateDerivedNetworkTarget(targetPolicy, u.toString(), u.toString());
+  if (!seedAccess.ok) return `crawl: ${seedAccess.error}`;
+  u = new URL(seedAccess.url);
   const SECRET = [
     [/AKIA[0-9A-Z]{16}/, 'AWS access key'],
     [/-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/, 'private key'],
@@ -3628,7 +3659,14 @@ async function crawl(url) {
     const homeSecrets = scan(html);
     const followed = [];
     const followedMeta = [];
-    const toFetch = [...new Set([...interesting, u.origin + '/robots.txt', u.origin + '/.well-known/security.txt'])].slice(0, 7);
+    const fetchCandidates = [...new Set([...interesting, u.origin + '/robots.txt', u.origin + '/.well-known/security.txt'])].slice(0, 7);
+    const blockedDerived = [];
+    const toFetch = [];
+    for (const candidate of fetchCandidates) {
+      const derivedAccess = validateDerivedNetworkTarget(targetPolicy, u.toString(), candidate);
+      if (derivedAccess.ok) toFetch.push(derivedAccess.url);
+      else { try { blockedDerived.push(new URL(candidate, u).hostname); } catch {} }
+    }
     for (const f of toFetch) {
       try {
         const fr = await fetchPublicUrl(f, { headers: { 'User-Agent': 'garrettstimpson-agent/5.1' }, signal: AbortSignal.timeout(7000) });
@@ -3656,6 +3694,7 @@ async function crawl(url) {
     if (homeSecrets.length) out += `\nSECRETS IN PAGE SOURCE: ${homeSecrets.join(', ')}`;
     if (interesting.length) out += `\ninteresting files (${interesting.length}):\n${interesting.slice(0, 12).join('\n')}`;
     if (followed.length) out += `\nfollowed files:\n${followed.join('\n')}`;
+    if (blockedDerived.length) out += `\nderived hosts blocked by scope: ${[...new Set(blockedDerived)].join(', ')}`;
     return out;
   } catch (e) { return `crawl ${u.hostname}: failed (${e.message}).`; }
 }
@@ -4748,6 +4787,22 @@ async function init(){
   }catch(e){ stat.textContent='status unavailable — '+e.message; }
 }
 
+function isExplicitOsintSweep(q){
+  return /^(?:\\/osint\\b|(?:please\\s+)?(?:run|conduct|perform|start)\\s+(?:a\\s+)?(?:(?:full|deep)\\s+)?(?:osint|recon(?:naissance)?)\\s+(?:sweep|investigation|report|scan)\\b)/i.test(String(q||'').trim());
+}
+function isPersistenceTextEnvelope(q){
+  var source=String(q||'').slice(0,262144), trimmed=source.trimStart(), newline=trimmed.search(/\\r?\\n/);
+  var preamble=(newline<0?trimmed:trimmed.slice(0,newline)).slice(0,1024);
+  var action=/^(?:(?:please)\\s+|(?:(?:can|could|would|will)\\s+you\\s+))?(?:analy[sz]e|assess|audit|check|classify|evaluate|examine|explain|extract|find|inspect|investigate|parse|review|scan|summari[sz]e|triage)\\b/i;
+  var prose=preamble.replace(/\\b(?:[a-z0-9-]+\\.)+[a-z]{2,24}\\b/gi,' ');
+  var multilineEvidence=newline<0?'':trimmed.slice(newline).trim();
+  var inlineEvidence=(preamble.match(/:\\s+(.+)$/)||[])[1]||'';
+  return action.test(prose) &&
+    /\\b(?:persist(?:ence|ent|ed|ing|s)?|auto[- ]?(?:run|start)|foothold|reboot survival|logon survival)\\b/i.test(prose) &&
+    /\\b(?:artifacts?|behavio(?:u)?rs?|commands?|evidence|findings?|logs?|malware|outputs?|paste|pasted|reports?|samples?|scripts?|strings?|text|traces?|following|below)\\b/i.test(prose) &&
+    !!(multilineEvidence||inlineEvidence.trim());
+}
+
 inp.addEventListener('keydown', async function(e){
   if(!ensureLegalConsent()) return;
   if(e.key!=='Enter'||busy||!inp.value.trim()) return;
@@ -4756,7 +4811,7 @@ inp.addEventListener('keydown', async function(e){
   if(!c.msgs.length){ c.title=q.slice(0,40); }
   c.msgs.push({role:'user',content:q}); saveChats(chats); renderChats();
   addMsg('user',q);
-  { var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions,hashes:od.hashes,persons:od.persons}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
+  if(isExplicitOsintSweep(q)){ var od=detectOsint(q, window.__lastOsint); if(od.isOsint){ window.__lastOsint={emails:od.emails,ips:od.ips,domains:od.domains,handles:od.handles,cves:od.cves,images:od.images,crypto:od.crypto,onions:od.onions,hashes:od.hashes,persons:od.persons}; try{ await runOsintFlow(q, od, c); }catch(err){ addMsg('system','OSINT run error: '+err.message); } busy=false; inp.disabled=false; inp.focus(); return; } }
   var el2=addMsg('agent',''); el2.className='msg agent streaming'; var full=''; var firstTok=true;
   el2.innerHTML='<span class="spinner"></span><span class="think">Agent Garrett is thinking…</span>'; window.__chipsEl=null;
   var opts={ webSearch:el('s-search').checked, temperature:parseFloat(el('s-temp').value),
@@ -4768,7 +4823,7 @@ inp.addEventListener('keydown', async function(e){
   dbg('query', q+'  [search='+opts.webSearch+' temp='+opts.temperature+' topK='+opts.topK+']');
   try{
     var res=await fetch('/api/chat',{ method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ sessionId:c.id, message:q, messages:c.msgs.slice(-MAX_HIST), memory:MEM.retrieve(q,4), settings:opts }) });
+      body: JSON.stringify({ sessionId:c.id, message:q, kind:isPersistenceTextEnvelope(q)?'persistence_text':undefined, messages:c.msgs.slice(-MAX_HIST), memory:MEM.retrieve(q,4), settings:opts }) });
     if(!res.ok) throw new Error('HTTP '+res.status);
     var reader=res.body.getReader(), decoder=new TextDecoder(), buf='';
     function handleLine(line){
@@ -5136,7 +5191,7 @@ async function runOsintFlow(q, od, c){
     (od.emails||[]).forEach(function(x){ jobs.push(['breach_check '+x,'breach_check',x]); });
   } else if(od.intent==='malware'){
     (od.hashes||[]).forEach(function(x){ jobs.push(['hash_lookup '+x,'hash_lookup',x]); });
-    (od.hashes||[]).forEach(function(x){ jobs.push(['reverse_analyze '+x,'reverse_analyze',x]); jobs.push(['forensics_triage '+x,'forensics_triage',x]); });
+    (od.hashes||[]).forEach(function(x){ jobs.push(['reverse_analyze '+x,'reverse_analyze',x]); });
     var furl=''; var hi=q.indexOf('http'); if(hi>=0) furl=q.slice(hi).split(' ')[0];
     if(furl) jobs.push(['file_analyze '+furl,'file_analyze',furl]);
     if(furl) jobs.push(['reverse_analyze '+furl,'reverse_analyze',furl]);
@@ -5380,7 +5435,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', post_malware_pipeline:'url', decode:'input', ioc_extract:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', nmap_scan:'target', pcap_analyze:'target', reverse_analyze:'target', forensics_triage:'target', memory_forensics:'target', crypto_ctf:'input', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email', exposure_search:'selector' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', post_malware_pipeline:'url', decode:'input', ioc_extract:'text', persistence_analyze:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', nmap_scan:'target', pcap_analyze:'target', reverse_analyze:'target', forensics_triage:'target', memory_forensics:'target', crypto_ctf:'input', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email', exposure_search:'selector' };
 async function loadCatalog(){
   try{
     var broker=(el('s-broker-url')?el('s-broker-url').value.trim():'');
@@ -5580,7 +5635,7 @@ export default {
           const policy = getToolPolicy(env);
           const selected = toolCatalog(env).find(spec => spec.name === name);
           if (!selected) throw new Error(`Unknown tool: ${name}`);
-          const targets = collectToolTargets('', args);
+          const targets = collectToolTargets('', args, name);
           if (!selected.passive) {
             if (!isTruthy(env.MCP_ALLOW_ACTIVE_TOOLS, false)) throw new Error('Active MCP tools are disabled.');
             if (!policy.toolAllowlist.size || !policy.toolAllowlist.has(name)) throw new Error(`Active MCP tool ${name} is not explicitly allowlisted.`);
@@ -5592,7 +5647,12 @@ export default {
           const result = isBuiltinTool(name)
             ? await runBuiltinCached(env, name, args)
             : await runBrokerTool(env, { tool: name, args, target: targets[0] || '', requestedAt: new Date().toISOString() });
-          return { result, via: isBuiltinTool(name) ? 'builtin' : 'broker', target: targets[0] || '' };
+          return {
+            result,
+            via: isBuiltinTool(name) ? 'builtin' : 'broker',
+            target: targets[0] || '',
+            evidence: toolEvidenceMetadata(selected, result),
+          };
         },
       });
     }
@@ -5699,12 +5759,15 @@ export default {
       let body; try { body = await readJsonBodyLimited(request); } catch (error) { return json({ ok: false, error: error.message }, 400); }
       const runtimeEnv = withRuntimeSettings(env, body.settings || {});
       const tool = String(body.tool || '').trim().toLowerCase();
-      const args = body.args && typeof body.args === 'object' ? body.args : {};
-      for (const k in args) { if (typeof args[k] === 'string') { const mm = args[k].match(/\]\((https?:\/\/[^)\s]+)\)/); if (mm) args[k] = mm[1]; args[k] = args[k].replace(/^[\[<("'\s]+|[\]>)"'\s]+$/g, '').trim(); } }
-      const targets = collectToolTargets(body.target, args);
-      const target = targets[0] || '';
       const policy = getToolPolicy(runtimeEnv);
       if (!tool) return json({ ok: false, error: 'tool is required' }, 400);
+      const checkedInput = validateDirectToolInput(tool, body.args, body.target);
+      if (!checkedInput.ok) return json(checkedInput, checkedInput.status || 400);
+      // From this point onward authorization and execution receive this exact
+      // validated, normalized string-only object. Never return to the raw body.
+      const args = checkedInput.args;
+      const targets = collectToolTargets(checkedInput.target, args, tool);
+      const target = targets[0] || '';
       if (policy.requireConfirm && body.confirm !== true) {
         return json({ ok: false, error: 'confirm=true is required in CTF safe mode' }, 400);
       }
@@ -5715,11 +5778,12 @@ export default {
         return json({ ok: false, error: 'dark-web/onion tools are disabled in settings' }, 403);
       }
 
+      if (!selected) return json({ ok: false, error: `Unknown tool: ${tool}` }, 404);
+      const directAccess = validateDirectToolPolicy(policy, selected, targets);
+      if (!directAccess.ok) return json(directAccess, directAccess.status || 403);
+
       const access = validateToolAccess(policy, tool, targets, body.confirm === true);
       if (!access.ok) return json(access, access.status || 403);
-
-      const known = toolCatalog(runtimeEnv).some(t => t.name === tool);
-      if (!known) return json({ ok: false, error: `Unknown tool: ${tool}` }, 404);
 
       try {
         const started = Date.now();
@@ -5748,7 +5812,7 @@ export default {
           elapsedMs: Date.now() - started,
         }));
 
-        return json({ ok: true, tool, via, target, result });
+        return json({ ok: true, tool, via, target, result, ...toolEvidenceMetadata(selected || getToolSpec(tool), result) });
       } catch (e) {
         return json({ ok: false, tool, target, error: e.message }, 500);
       }
@@ -5828,10 +5892,34 @@ export default {
       const runtimeEnv = withRuntimeSettings(env, body.settings || {});
       const q = body.message || '';
       const policy = getAgentPolicy(runtimeEnv);
-      const { cveIds, ips, domains, wantSearch } = analyseQuery(q);
+      const routePolicy = buildToolRoutePolicy(q, { kind: body.kind, corpusIntent: false, darkwebEnabled: body.settings?.darkweb !== false, env: runtimeEnv });
+      const persistenceOnly = routePolicy.reason === 'explicit-persistence-text-closed-world';
+      const { cveIds, ips, domains, wantSearch } = persistenceOnly
+        ? { cveIds: [], ips: [], domains: [], wantSearch: false }
+        : analyseQuery(q);
       const evidence = [];
       const toolContext = [];
-      await runToolBatch(runtimeEnv, evidence, toolContext, buildIntelPlan({ cveIds, ips, domains }, 'debug'));
+      const debugPlan = guardDeterministicToolPlan(
+        q,
+        buildIntelPlan({ cveIds, ips, domains }, 'debug'),
+        routePolicy.allowedTools,
+        { kind: body.kind }
+      );
+      await runToolBatch(runtimeEnv, evidence, toolContext, debugPlan);
+      if (persistenceOnly) {
+        return json({
+          cveIds, ips, domains, wantSearch,
+          closedWorldPersistence: true,
+          evidenceCount: evidence.length,
+          evidenceLedger: buildEvidenceLedger(evidence),
+          result: evidence[0]?.result || persistenceAnalyze(q),
+          retrieval: 'skipped',
+          chunkCount: 0,
+          chunks: [],
+          systemChars: 0,
+          systemPreview: '',
+        });
+      }
       const chunks = await retrieve(runtimeEnv, q, body.topK || TOP_K);
       let gap = null; try { gap = ndbAssess((_corpus && _corpus.scope) || 'corpus', q); } catch {}
       const sys = buildSystemPrompt(runtimeEnv, {
@@ -5840,7 +5928,7 @@ export default {
         policy,
       });
       return json({
-        cveIds, ips, domains, wantSearch, retrieval: 'neuron-db', gap,
+        cveIds, ips, domains, wantSearch, closedWorldPersistence: persistenceOnly, retrieval: 'neuron-db', gap,
         evidenceCount: evidence.length,
         evidenceLedger: buildEvidenceLedger(evidence),
         chunkCount: chunks.length,
@@ -5865,7 +5953,14 @@ export default {
       const objective = (body.objective || body.message || '').toString().slice(0, 12000);
       const context   = (body.context || '').toString().slice(0, 24000);
       const clientMemory = typeof body.memory === 'string' ? body.memory : '';
+      const taskInput = context ? `${objective}\n\n${context}` : objective;
+      const taskRoutePolicy = buildToolRoutePolicy(taskInput, { kind: body.kind, corpusIntent: false, darkwebEnabled: opts.darkweb !== false, env: runtimeEnv });
+      const persistenceOnly = taskRoutePolicy.reason === 'explicit-persistence-text-closed-world';
       try {
+        if (persistenceOnly) {
+          const text = await runBuiltinCached(runtimeEnv, 'persistence_analyze', { text: taskInput });
+          return json({ ok: true, text, meta: { closedWorldPersistence: true, evidenceCount: 1, tool: 'persistence_analyze' } });
+        }
         if (body.grounded === true) {
           const sysG = 'You are a precise intelligence-report writer. Write the report STRICTLY from the FINDINGS / CONTEXT supplied by the user below - those tool results are the ONLY permitted source. Do NOT use outside knowledge, training data, blog/corpus content, or prior reports. NEVER invent or borrow files, filenames, hashes, malware names/families, loaders, payloads, CVEs, IPs, emails, domains, or attributions that do not appear verbatim in the FINDINGS. If the findings contain no malware/exploit evidence, do NOT mention malware at all. Mark anything not present as UNKNOWN. Where practical, attribute each claim to the tool that produced it.';
           const baseUserG = objective + '\n\nFINDINGS / CONTEXT (the ONLY source you may use):\n' + context;
@@ -5900,7 +5995,13 @@ export default {
         const { cveIds, ips, domains, wantSearch } = analyseQuery(objective + ' ' + context);
         const evidence = [];
         const toolContext = [];
-        await runToolBatch(runtimeEnv, evidence, toolContext, buildIntelPlan({ cveIds, ips, domains }, 'full'));
+        const taskPlan = guardDeterministicToolPlan(
+          taskInput,
+          buildIntelPlan({ cveIds, ips, domains }, 'full'),
+          taskRoutePolicy.allowedTools,
+          { kind: body.kind }
+        );
+        await runToolBatch(runtimeEnv, evidence, toolContext, taskPlan);
         if (useSearch && wantSearch && searchPolicy.use) {
           const s = await webSearch(cveIds.length ? `${cveIds[0]} exploit PoC advisory` : objective, braveKey, runtimeEnv);
           const result = s ? formatSearch(s) : 'Search unavailable across all providers.';
@@ -5973,6 +6074,17 @@ export default {
       (async () => {
         const t0 = Date.now();
         try {
+          if (body.kind === 'persistence_text' || hasExplicitPersistenceAnalysisIntent(lastUser)) {
+            const direct = persistenceAnalyze(lastUser);
+            send(JSON.stringify({ response: direct }));
+            if (sess && direct.trim()) {
+              sess.turns.push({ role: 'assistant', content: direct });
+              await saveSession(env, sess);
+            }
+            send('[DONE]');
+            return;
+          }
+
           if (isCapabilityQuestion(lastUser)) {
             const cap = buildCapabilitiesAnswer(runtimeEnv, { darkwebEnabled });
             send(JSON.stringify({ response: cap }));
@@ -6002,8 +6114,11 @@ export default {
           }
           const corpusIntent = isCorpusIntent(lastUser);
           const searchPolicy = shouldUseWebSearch(lastUser, { corpusIntent });
-            const routePolicy = buildToolRoutePolicy(lastUser, { corpusIntent, darkwebEnabled, env: runtimeEnv });
-          const { cveIds, ips, domains, wantSearch } = analyseQuery(lastUser);
+          const routePolicy = buildToolRoutePolicy(lastUser, { kind: body.kind, corpusIntent, darkwebEnabled, env: runtimeEnv });
+          const persistenceOnly = routePolicy.reason === 'explicit-persistence-text-closed-world';
+          const { cveIds, ips, domains, wantSearch } = persistenceOnly
+            ? { cveIds: [], ips: [], domains: [], wantSearch: false }
+            : analyseQuery(lastUser);
           // Small talk (greetings, thanks, "how are you") with no real target → chat, don't research.
           const smallTalk = isSmallTalk(lastUser) && !cveIds.length && !ips.length && !domains.length;
           const evidence = [];
@@ -6069,7 +6184,7 @@ export default {
               initialPlan.push({ tool: 'onion_fetch', args: { onion: on, url: on, target: on }, via: 'builtin' });
             }
           }
-          const authorizedPlan = initialPlan.filter(call => {
+          const authorizedPlan = guardDeterministicToolPlan(lastUser, initialPlan, routePolicy.allowedTools, { kind: body.kind }).filter(call => {
             const spec = toolCatalog(runtimeEnv).find(item => item.name === call.tool);
             if (!spec) return false;
             const access = validateAutonomousToolAccess(runtimeEnv, policy, spec, call.args || {});
@@ -6083,7 +6198,7 @@ export default {
           }
 
           // Web search
-          if (useSearch && wantSearch && searchPolicy.use) {
+          if (!persistenceOnly && useSearch && wantSearch && searchPolicy.use) {
             const q = cveIds.length ? `${cveIds[0]} exploit PoC advisory` : lastUser;
             dbg('search_web', q);
             const s = await webSearch(q, braveKey, runtimeEnv);

@@ -1,3 +1,5 @@
+import { TOOL_INPUT_STRING_KEYS, validateToolArgumentObject } from './harness.mjs';
+
 const LEGACY_PROTOCOL = '2025-11-25';
 const CURRENT_PROTOCOL = '2026-07-28';
 const SUPPORTED_PROTOCOLS = new Set([
@@ -71,22 +73,13 @@ function validateModernHeaders(request, body, version) {
   return null;
 }
 
-const INPUT_PROPERTIES = Object.fromEntries([
-  'target', 'url', 'domain', 'ip', 'email', 'hash', 'query', 'vector', 'input', 'text',
-  'username', 'user', 'host', 'cveId', 'cve', 'address', 'addr', 'onion', 'profile',
-  'focus', 'path', 'image', 'sample', 'file', 'uri', 'endpoint', 'website', 'link',
-  'asn', 'password', 'pw', 'keyword', 'count',
-  'technique', 'id', 'name', 'term', 'phone', 'number', 'selector', 'cidr', 'mode',
-  'ports', 'timing',
-].map(name => [name, { type: 'string', maxLength: 12000 }]));
+const INPUT_PROPERTIES = Object.fromEntries(
+  TOOL_INPUT_STRING_KEYS.map(name => [name, { type: 'string', maxLength: 12000 }])
+);
 
 function validateArguments(args) {
-  for (const [name, value] of Object.entries(args)) {
-    if (!Object.hasOwn(INPUT_PROPERTIES, name)) return `Unknown tool argument: ${name}`;
-    if (typeof value !== 'string') return `Tool argument ${name} must be a string.`;
-    if (value.length > INPUT_PROPERTIES[name].maxLength) return `Tool argument ${name} is too long.`;
-  }
-  return null;
+  const checked = validateToolArgumentObject('', args, { allowAbsent: false, maxLength: 12000 });
+  return checked.ok ? null : checked.error;
 }
 
 export function mcpToolDefinition(spec) {
@@ -100,7 +93,7 @@ export function mcpToolDefinition(spec) {
       readOnlyHint: passive,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: spec.openWorld !== false,
     },
   };
 }
@@ -162,7 +155,12 @@ export async function handleMcpRequest(request, env, handlers) {
       const text = typeof called.result === 'string' ? called.result : JSON.stringify(called.result);
       return jsonResponse(rpc(body.id, {
         content: [{ type: 'text', text }],
-        structuredContent: { tool: name, via: called.via || 'builtin', target: called.target || '' },
+        structuredContent: {
+          tool: name,
+          via: called.via || 'builtin',
+          target: called.target || '',
+          ...(called.evidence && typeof called.evidence === 'object' ? called.evidence : {}),
+        },
         isError: false,
       }));
     } catch (error) {
