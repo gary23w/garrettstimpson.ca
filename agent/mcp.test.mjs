@@ -84,6 +84,26 @@ test('tools/call returns MCP content and structured evidence metadata', async ()
   assert.equal(body.result.structuredContent.target, 'CVE-2026-1');
 });
 
+test('tools/call preserves explicit operational failures as MCP tool errors', async () => {
+  const failedHandlers = {
+    ...handlers,
+    callTool: async () => ({
+      result: 'paste_search example.org: lookup failed (HTTP 530).',
+      via: 'builtin',
+      target: 'example.org',
+      isError: true,
+      evidence: { operationalStatus: 'error' },
+    }),
+  };
+  const response = await handleMcpRequest(post({
+    jsonrpc: '2.0', id: 11, method: 'tools/call',
+    params: { name: 'paste_search', arguments: { target: 'example.org' } },
+  }), env, failedHandlers);
+  const body = await response.json();
+  assert.equal(body.result.isError, true);
+  assert.equal(body.result.structuredContent.operationalStatus, 'error');
+});
+
 test('tools/call preserves persistence uncertainty metadata', async () => {
   const evidenceHandlers = {
     ...handlers,

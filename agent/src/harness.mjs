@@ -244,6 +244,107 @@ export function toolEvidenceMetadata(spec = {}, result = '') {
   };
 }
 
+const DIRECT_PROVIDER_FAILURES = Object.freeze({
+  stealer_check: /^stealer_check[^\r\n]*:\s*(?:lookup failed|an email, username, or domain is required|"[^"]+" is a placeholder)\b/im,
+  leakcheck: /^leakcheck[^\r\n]*:\s*(?!FOUND in\b|not found\b)(?:lookup failed|an email or username is required|no result\b|error\b)/im,
+  paste_search: /^paste_search[^\r\n]*:\s*(?:lookup failed|a term .* is required)\b/im,
+});
+const DIRECT_PROVIDER_NAMES = Object.freeze({
+  stealer_check: 'HudsonRock',
+  leakcheck: 'LeakCheck',
+  paste_search: 'psbdmp',
+});
+
+export function classifyToolOperationalStatus(toolName, result = '') {
+  const tool = String(toolName || '').trim().toLowerCase();
+  const text = String(result || '');
+  const directFailure = DIRECT_PROVIDER_FAILURES[tool];
+  if (directFailure?.test(text)) return { status: 'error', isError: true, failedProviders: [DIRECT_PROVIDER_NAMES[tool] || tool] };
+
+  if (tool === 'exposure_search') {
+    const failedProviders = [];
+    if (DIRECT_PROVIDER_FAILURES.stealer_check.test(text)) failedProviders.push('HudsonRock');
+    if (DIRECT_PROVIDER_FAILURES.leakcheck.test(text)) failedProviders.push('LeakCheck');
+    if (DIRECT_PROVIDER_FAILURES.paste_search.test(text)) failedProviders.push('psbdmp');
+    if (/^XposedOrNot:\s*lookup failed\b/im.test(text)) failedProviders.push('XposedOrNot');
+    if (/^HIBP:\s*lookup failed\b/im.test(text)) failedProviders.push('HIBP');
+    const allUnavailable = /^VERDICT:\s*INCONCLUSIVE\b/im.test(text);
+    return {
+      status: allUnavailable ? 'error' : (failedProviders.length ? 'degraded' : 'ok'),
+      isError: allUnavailable,
+      failedProviders: uniq(failedProviders),
+    };
+  }
+
+  if (tool === 'onion_search' && /Ahmia:\s*unavailable\b/i.test(text)) {
+    return { status: 'degraded', isError: false, failedProviders: ['Ahmia'] };
+  }
+
+  if (tool === 'ransomware_watch') {
+    const sources = text.match(/sources queried:\s*(\d+)\/2/i);
+    if (sources && Number(sources[1]) < 2) {
+      const count = Number(sources[1]);
+      return { status: count ? 'degraded' : 'error', isError: count === 0, failedProviders: ['ransomware feed'] };
+    }
+  }
+
+  return { status: 'ok', isError: false, failedProviders: [] };
+}
+
+export function summarizeExposureProviders(entries = []) {
+  const positiveSources = [];
+  const failedProviders = [];
+  const availableSources = [];
+  const positiveEvidence = [];
+  for (const entry of entries || []) {
+    const tool = String(entry?.tool || '').trim().toLowerCase();
+    const text = String(entry?.text || '');
+    const operational = classifyToolOperationalStatus(tool, text);
+    failedProviders.push(...operational.failedProviders);
+    if (operational.isError) continue;
+
+    if (tool === 'stealer_check' && /^EXPOSED in stealer-log data\./im.test(text)) {
+      positiveSources.push('HudsonRock');
+      availableSources.push('HudsonRock');
+      positiveEvidence.push(text);
+    } else if (tool === 'stealer_check') {
+      availableSources.push('HudsonRock');
+    } else if (tool === 'leakcheck') {
+      availableSources.push('LeakCheck');
+      const match = text.match(/^leakcheck[^\r\n]*:\s*FOUND in\s+(\d+)\s+breach record/im);
+      if (match && Number(match[1]) > 0) {
+        positiveSources.push('LeakCheck');
+        positiveEvidence.push(text);
+      }
+    } else if (tool === 'paste_search') {
+      availableSources.push('psbdmp');
+      const match = text.match(/^paste_search[^\r\n]*:\s*(\d+)\s+paste\(s\) reference/im);
+      if (match && Number(match[1]) > 0) {
+        positiveSources.push('psbdmp');
+        positiveEvidence.push(text);
+      }
+    } else if (tool === 'breach_check') {
+      const xon = text.match(/^XposedOrNot:\s*(\d+)\s+breach\(es\)/im);
+      const hibp = text.match(/^HIBP:\s*(\d+)\s+breach\(es\)/im);
+      const xonFailed = /^XposedOrNot:\s*lookup failed\b/im.test(text);
+      const hibpFailed = /^HIBP:\s*lookup failed\b/im.test(text);
+      if (xonFailed) failedProviders.push('XposedOrNot');
+      else if (/^XposedOrNot:\s*(?:\d+\s+breach\(es\)|no known breaches)/im.test(text)) availableSources.push('XposedOrNot');
+      if (hibpFailed) failedProviders.push('HIBP');
+      else if (/^HIBP:\s*(?:\d+\s+breach\(es\)|no breaches found)/im.test(text)) availableSources.push('HIBP');
+      if (xon && Number(xon[1]) > 0) positiveSources.push('XposedOrNot');
+      if (hibp && Number(hibp[1]) > 0) positiveSources.push('HIBP');
+      if ((xon && Number(xon[1]) > 0) || (hibp && Number(hibp[1]) > 0)) positiveEvidence.push(text);
+    }
+  }
+  return {
+    positiveSources: uniq(positiveSources),
+    failedProviders: uniq(failedProviders),
+    availableSources: uniq(availableSources),
+    positiveEvidenceText: positiveEvidence.join('\n'),
+  };
+}
+
 const NON_CACHEABLE_TOOL_RESULTS = new Set([
   'breach_check',
   'email_recon',

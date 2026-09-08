@@ -1,5 +1,5 @@
 /**
- * Agent Garrett - Security Research Agent  v5.2
+ * Agent Garrett - Security Research Agent  v5.2.1
  *
  * Memory engine: neuron-db (the Rust core compiled to WebAssembly, bundled in-Worker).
  *   - Corpus RAG  — the llms.txt corpus is ingested into a neuron scope and recalled
@@ -19,6 +19,7 @@ import { handleMcpRequest } from './mcp.mjs';
 import {
   buildIntelPlan,
   buildPowerShellIocEvidence,
+  classifyToolOperationalStatus,
   collectToolTargets,
   deobfuscatePowerShellArrayJoins,
   extractAiText,
@@ -39,6 +40,7 @@ import {
   selectPersistenceTextInput,
   shouldCacheToolResult,
   splitSseLines,
+  summarizeExposureProviders,
   toolEvidenceMetadata,
   toolCallKey,
   validateDerivedNetworkTarget,
@@ -49,7 +51,7 @@ import {
 const MODEL         = '@cf/zai-org/glm-4.7-flash'; // current, fast long-context default
 const ROUTER_MODEL  = '@cf/zai-org/glm-4.7-flash'; // deterministic JSON routing pass
 const OUTPUT_FALLBACK_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'; // active non-reasoning recovery path
-const BUILD_VERSION = '2026-09-08-forensics-darkweb-v5.2';  // bump per deploy; shown in header + /api/tools/catalog
+const BUILD_VERSION = '2026-09-08-forensics-darkweb-v5.2.1';  // bump per deploy; shown in header + /api/tools/catalog
 const EMBED_MODEL   = '@cf/baai/bge-base-en-v1.5'; // 768-dim (only used by the optional Vectorize path)
 const EMBED_DIM     = 768;
 
@@ -2420,7 +2422,7 @@ async function onionSearch(env, query) {
   } else {
     lines.push('Live .onion crawl: not available in-worker (Cloudflare Workers cannot open Tor circuits). Set TOOL_BROKER_URL to a Tor-capable broker to enable real onion crawling.');
   }
-  return `onion_search "${q}" (dark-web exposure monitoring)\n` + lines.join('\n\n') + '\n\nTip: use onion_fetch <address> to pull onion site text via a free clearnet gateway. Index references surfaced for defensive exposure assessment only.';
+  return `onion_search "${q}" (dark-web exposure monitoring)\n` + lines.join('\n\n') + '\n\nRetrieval note: do not fetch onion content unless an operator-controlled, isolated Tor broker and active-tool policy explicitly allow it. Index references surfaced for defensive exposure assessment only.';
 }
 
 // Surface-web ransomware claim monitoring. Both sources aggregate criminal leak-
@@ -2436,7 +2438,7 @@ async function ransomwareWatch(query) {
   const jobs = [
     (async () => {
       const r = await fetch('https://api.ransomware.live/recentvictims', {
-        headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/5.2' },
+        headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/5.2.1' },
         signal: AbortSignal.timeout(18000),
       });
       if (!r.ok) throw new Error(`ransomware.live HTTP ${r.status}`);
@@ -2453,7 +2455,7 @@ async function ransomwareWatch(query) {
     })(),
     (async () => {
       const r = await fetch('https://www.ransomlook.io/api/recent', {
-        headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/5.2' },
+        headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/5.2.1' },
         signal: AbortSignal.timeout(12000),
       });
       if (!r.ok) throw new Error(`ransomlook HTTP ${r.status}`);
@@ -3335,31 +3337,39 @@ async function exposureSearch(env, selector) {
   if (!/@/.test(t) && isPlaceholderIdentity(t)) return `exposure_search: "${t}" is not a valid selector. Provide a real email, username, or domain.`;
   const isEmail = /@/.test(t);
   const jobs = [
-    ['HudsonRock infostealer logs', stealerCheck(t)],
-    ['LeakCheck (public)', leakCheck(t)],
-    ['Paste / forum mentions', pasteSearch(t)],
+    ['stealer_check', 'HudsonRock infostealer logs', stealerCheck(t)],
+    ['leakcheck', 'LeakCheck (public)', leakCheck(t)],
+    ['paste_search', 'Paste / forum mentions', pasteSearch(t)],
   ];
   if (isEmail) {
-    jobs.push(['Breach databases (XposedOrNot/HIBP)', breachCheck(env, t)]);
-    jobs.push(['Gravatar profile', gravatarLookup(t)]);
+    jobs.push(['breach_check', 'Breach databases (XposedOrNot/HIBP)', breachCheck(env, t)]);
+    jobs.push(['gravatar', 'Gravatar profile', gravatarLookup(t)]);
   }
-  const settled = await Promise.all(jobs.map(async ([label, p]) => {
-    try { return [label, String(await p)]; } catch (e) { return [label, '(' + e.message + ')']; }
+  const settled = await Promise.all(jobs.map(async ([tool, label, promise]) => {
+    try { return { tool, label, text: String(await promise) }; }
+    catch (e) { return { tool, label, text: `${tool}: lookup failed (${e.message}).` }; }
   }));
-  const combined = settled.map(([l, v]) => `### ${l}\n${v}`).join('\n\n');
+  const combined = settled.map(({ label, text }) => `### ${label}\n${text}`).join('\n\n');
   const uq = a => [...new Set(a)];
-  let hits = 0;
-  if (/comput(er|ers)\b|infected|stealer (log|infection)/i.test(combined) && !/no .*(stealer|infection|comput)/i.test(combined)) hits++;
-  const lcm = combined.match(/(\d+)\s+(?:results?|breach(?:es)?|record|source)/i); if (lcm && +lcm[1] > 0) hits++;
-  if (/exposed in \d+ breach|breaches:\s*[1-9]|\bpwned\b/i.test(combined)) hits++;
-  if (/(onion site\(s\) referencing|paste|leaked)/i.test(combined) && !/no (indexed|paste|result)/i.test(combined)) hits++;
-  const verdict = hits >= 2 ? 'EXPOSED (corroborated by multiple sources)' : (hits === 1 ? 'LIKELY EXPOSED (single source)' : 'NO PUBLIC EXPOSURE FOUND in keyless sources (NOT exhaustive — absence is not proof of safety)');
-  const dates = uq(combined.match(/\b(?:20)\d{2}(?:-\d{2}(?:-\d{2})?)?\b/g) || []).filter(d => { const y = +d.slice(0, 4); return y >= 2007 && y <= 2026; }).sort();
+  const exposure = summarizeExposureProviders(settled);
+  const hits = exposure.positiveSources.length;
+  const verdict = !exposure.availableSources.length
+    ? 'INCONCLUSIVE (all configured exposure sources were unavailable)'
+    : hits >= 2
+      ? 'EXPOSED (corroborated by multiple sources)'
+      : hits === 1
+        ? 'LIKELY EXPOSED (single source)'
+        : `NO PUBLIC EXPOSURE FOUND in ${exposure.availableSources.length} available keyless source(s) (NOT exhaustive — absence is not proof of safety)`;
+  const positiveEvidence = exposure.positiveEvidenceText;
+  const dates = uq(positiveEvidence.match(/\b(?:20)\d{2}(?:-\d{2}(?:-\d{2})?)?\b/g) || []).filter(d => { const y = +d.slice(0, 4); return y >= 2007 && y <= 2026; }).sort();
   const tl = t.toLowerCase();
-  const pEmails = uq((combined.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || []).map(x => x.toLowerCase())).filter(e => e !== tl && !/noreply|@example\.|@hudsonrock|@leakcheck/.test(e)).slice(0, 8);
-  const pDomains = uq((combined.match(/\b(?:[a-z0-9\-]+\.)+[a-z]{2,}\b/ig) || []).map(x => x.toLowerCase())).filter(d => d !== tl && !/hudsonrock|leakcheck|xposedornot|gravatar|garrettstimpson|w3\.org|example\./.test(d) && !pEmails.some(e => e.endsWith('@' + d))).slice(0, 8);
-  const classes = ['password', 'email', 'username', 'phone', 'ip address', 'full name', 'address', 'date of birth', 'hash'].filter(c => new RegExp(c.replace(' ', '\\s*'), 'i').test(combined));
+  const pEmails = uq((positiveEvidence.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || []).map(x => x.toLowerCase())).filter(e => e !== tl && !/noreply|@example\.|@hudsonrock|@leakcheck/.test(e)).slice(0, 8);
+  const pDomains = uq((positiveEvidence.match(/\b(?:[a-z0-9\-]+\.)+[a-z]{2,}\b/ig) || []).map(x => x.toLowerCase())).filter(d => d !== tl && !/hudsonrock|leakcheck|xposedornot|gravatar|garrettstimpson|w3\.org|example\./.test(d) && !pEmails.some(e => e.endsWith('@' + d))).slice(0, 8);
+  const classes = ['password', 'email', 'username', 'phone', 'ip address', 'full name', 'address', 'date of birth', 'hash'].filter(c => new RegExp(c.replace(' ', '\\s*'), 'i').test(positiveEvidence));
   const out = [`exposure_search "${t}" — unified breach/darknet exposure (aggregated, defender APIs only)`, `VERDICT: ${verdict}`];
+  if (exposure.positiveSources.length) out.push(`positive sources: ${exposure.positiveSources.join(', ')}`);
+  if (exposure.availableSources.length) out.push(`sources checked: ${exposure.availableSources.join(', ')}`);
+  if (exposure.failedProviders.length) out.push(`provider health: DEGRADED — unavailable: ${exposure.failedProviders.join(', ')}. Unavailable sources do not count as exposure evidence.`);
   if (classes.length) out.push(`data classes seen: ${classes.join(', ')}`);
   if (dates.length) out.push(`exposure timeline: ${dates.join(' -> ')}`);
   if (pEmails.length || pDomains.length) out.push(`cross-source PIVOTS (run exposure_search on these next): ${[].concat(pEmails, pDomains).join(', ')}`);
@@ -3404,7 +3414,7 @@ async function leakCheck(target) {
       { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return `leakcheck ${t}: lookup failed (HTTP ${r.status}).`;
     const d = await r.json();
-    if (!d.success) return `leakcheck ${t}: ${d.error || 'no result'}.`;
+    if (!d.success) return `leakcheck ${t}: lookup failed (${String(d.error || 'no result').slice(0, 240)}).`;
     if (!d.found) return `leakcheck ${t}: not found in the public breach index.`;
     const fields = (d.fields || []).join(', ');
     const srcs = (d.sources || []).slice(0, 8).map(s => (s.name || '?') + (s.date ? ' (' + s.date + ')' : ''));
@@ -5829,11 +5839,17 @@ export default {
           const result = isBuiltinTool(name)
             ? await runBuiltinCached(env, name, args)
             : await runBrokerTool(env, { tool: name, args, target: targets[0] || '', requestedAt: new Date().toISOString() });
+          const operational = classifyToolOperationalStatus(name, result);
           return {
             result,
             via: isBuiltinTool(name) ? 'builtin' : 'broker',
             target: targets[0] || '',
-            evidence: toolEvidenceMetadata(selected, result),
+            isError: operational.isError,
+            evidence: {
+              ...toolEvidenceMetadata(selected, result),
+              operationalStatus: operational.status,
+              ...(operational.failedProviders.length ? { failedProviders: operational.failedProviders.join(', ') } : {}),
+            },
           };
         },
       });

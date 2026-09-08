@@ -5,6 +5,7 @@ import {
   assessToolEvidence,
   buildIntelPlan,
   buildPowerShellIocEvidence,
+  classifyToolOperationalStatus,
   collectToolTargets,
   constrainToolPlan,
   deobfuscatePowerShellArrayJoins,
@@ -28,6 +29,7 @@ import {
   selectPersistenceTextInput,
   shouldCacheToolResult,
   splitSseLines,
+  summarizeExposureProviders,
   toolEvidenceMetadata,
   toolCallKey,
   validateDerivedNetworkTarget,
@@ -83,6 +85,52 @@ test('onion intelligence extracts pivots but never reproduces credential-like li
   assert.doesNotMatch(result, /do-not-repeat-this/);
   assert.doesNotMatch(result, new RegExp('c{64}'));
   assert.match(result, /Claims are unverified/);
+});
+
+test('exposure correlation never treats unavailable providers as corroboration', () => {
+  const summary = summarizeExposureProviders([
+    { tool: 'leakcheck', text: 'leakcheck analyst@example.org: FOUND in 2 breach record(s)' },
+    { tool: 'paste_search', text: 'paste_search analyst@example.org: lookup failed (HTTP 530).' },
+    { tool: 'stealer_check', text: 'stealer_check analyst@example.org: lookup failed (timeout).' },
+  ]);
+  assert.deepEqual(summary.positiveSources, ['LeakCheck']);
+  assert.deepEqual(summary.failedProviders, ['psbdmp', 'HudsonRock']);
+  assert.deepEqual(summary.availableSources, ['LeakCheck']);
+  assert.doesNotMatch(summary.positiveEvidenceText, /lookup failed/);
+  assert.equal(classifyToolOperationalStatus('paste_search', 'paste_search example.org: lookup failed (HTTP 530).').isError, true);
+  assert.equal(classifyToolOperationalStatus('exposure_search', [
+    'VERDICT: LIKELY EXPOSED (single source)',
+    'paste_search example.org: lookup failed (HTTP 530).',
+  ].join('\n')).status, 'degraded');
+});
+
+test('exposure correlation requires explicit positive output from each provider', () => {
+  const summary = summarizeExposureProviders([
+    { tool: 'stealer_check', text: 'stealer_check example.org (HudsonRock)\nEXPOSED in stealer-log data.' },
+    { tool: 'leakcheck', text: 'leakcheck example.org: not found in the public breach index.' },
+    { tool: 'paste_search', text: 'paste_search example.org: 3 paste(s) reference the term' },
+    { tool: 'breach_check', text: 'XposedOrNot: 2 breach(es)\nHIBP: lookup failed (HTTP 503).' },
+  ]);
+  assert.deepEqual(summary.positiveSources, ['HudsonRock', 'psbdmp', 'XposedOrNot']);
+  assert.deepEqual(summary.failedProviders, ['HIBP']);
+  assert.deepEqual(summary.availableSources, ['HudsonRock', 'LeakCheck', 'psbdmp', 'XposedOrNot']);
+});
+
+test('exposure correlation reports all-provider failure as an MCP error', () => {
+  const summary = summarizeExposureProviders([
+    { tool: 'stealer_check', text: 'stealer_check example.org: lookup failed (timeout).' },
+    { tool: 'leakcheck', text: 'leakcheck example.org: lookup failed (HTTP 503).' },
+    { tool: 'paste_search', text: 'paste_search example.org: lookup failed (HTTP 530).' },
+  ]);
+  assert.deepEqual(summary.availableSources, []);
+  const status = classifyToolOperationalStatus('exposure_search', [
+    'VERDICT: INCONCLUSIVE (all configured exposure sources were unavailable)',
+    'stealer_check example.org: lookup failed (timeout).',
+    'leakcheck example.org: lookup failed (HTTP 503).',
+    'paste_search example.org: lookup failed (HTTP 530).',
+  ].join('\n'));
+  assert.equal(status.status, 'error');
+  assert.equal(status.isError, true);
 });
 
 test('closed-world forensic tools carry cautious evidence metadata and bypass result caching', () => {
