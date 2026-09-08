@@ -10,7 +10,7 @@ In-the-wild exploit analysis, CVE breakdowns, and offensive security research.
 ## What's in this repo
 
 - **`/` (Jekyll site)** — the blog: dark terminal theme, matrix rain, responsive nav, post cards, tags, full-text search, reading progress, code-copy, share buttons, Giscus comments, RSS, and an Open Graph card.
-- **`/agent`** — **Agent Garrett**, a Cloudflare Worker with a terminal chat UI, stateless HTTP MCP endpoint, evidence-aware routing, **83 tools**, and optional broker-backed Tor/RE tooling.
+- **`/agent`** — **Agent Garrett**, a Cloudflare Worker with a terminal chat UI, stateless HTTP MCP endpoint, evidence-aware routing, **94 tools**, and optional broker-backed Tor/forensics tooling.
 - **`llms.txt`** — a RAG corpus of every post, rebuilt daily by GitHub Actions.
 
 ---
@@ -46,23 +46,24 @@ Set these as Cloudflare Worker **Variables/Secrets** (dashboard → Settings →
 
 ### Tool execution safety
 
-Agentic chat automatically runs only passive, public-data lookups. Target-contacting, file-download, dark-web, custom, and broker tools require an explicit operator action and confirmation; safe-mode tool/target scope is checked independently of that confirmation. Autonomous active calls remain off unless `AGENT_ALLOW_ACTIVE_TOOLS=true` and both the tool and target are allowlisted. Tool results are treated as untrusted evidence and the answer cites its evidence ledger.
+Agentic chat automatically runs only passive, public-data lookups, including surface-web threat-intelligence aggregators. Target-contacting, file-download, live-onion, custom, and broker tools require an explicit operator action and confirmation; safe-mode tool/target scope is checked independently of that confirmation. Autonomous active calls remain off unless `AGENT_ALLOW_ACTIVE_TOOLS=true` and both the tool and target are allowlisted. Tool results are treated as untrusted evidence and the answer cites its evidence ledger.
 
-**Tool families (83 in-worker):**
+**Tool families (94 registered):**
 - **intel** — nvd_lookup, epss_lookup, kev_lookup, kev_recent, circl_cve, cve_search, cve_poc (public exploits), mitre (ATT&CK), cvss
 - **OSINT** — rdap_ip/domain, dns_lookup, dns_records, cert_ct, crtsh_subs, ip_geo, asn_info, shodan_internetdb, greynoise, reverse_dns, tor_exit, wayback, archive_urls, crypto_addr
 - **people** — username_enum, github_user, gravatar, email_recon, email_permutations, breach_check, pwned_password
 - **recon** — http_headers, tech_fingerprint, origin_ip, subdomain_takeover, subdomains, typosquat, email_security (SPF/DMARC), bucket_finder, cors_check, crawl (links+secrets), favicon_hash, disclosure_draft, jwt, cidr, hash_id, encode, timestamp
-- **dark-web** — stealer_check (HudsonRock infostealer logs), leakcheck, paste_search, onion_search, onion_fetch
+- **dark-web** — ransomware_watch (public victim-claim aggregators), onion_intel (closed-world text triage), stealer_check (HudsonRock infostealer logs), leakcheck, paste_search, onion_search, onion_fetch
+- **forensics** — evidence_manifest (SHA-256/SHA-1 content receipt), forensic_timeline, eventlog_triage, persistence_analyze, plus PCAP/memory/EVTX/disk/email/YARA/carving broker contracts
 - **malware** — file_analyze, hash_lookup (Cymru/VT/MalwareBazaar), decode (recursive), ioc_extract, dork
 - **image** — image_osint (EXIF/GPS + reverse-image links)
-- **broker (optional, real Tor + binaries)** — onion_fetch/onion_search over Tor, sherlock, holehe, re_analyze (radare2/capa), ole_macros, yara_scan, exif
+- **broker (optional, real Tor + binaries)** — onion_fetch/onion_search over Tor, nmap, PCAP, memory, EVTX, disk images, RFC822/MSG/EML, reverse engineering, YARA, and artifact carving
 
 Responsible disclosure: `disclosure_draft` composes an attributable blue-team email to a domain's security contact; an optional, off-by-default, human-confirmed send path (`/api/send-disclosure`) uses your own verified provider (never anonymous).
 
 ### MCP for Codex and other clients
 
-`POST /mcp` is a stateless Streamable HTTP MCP server. It uses a bearer token separate from browser login, rejects browser cross-origin requests by default, and exposes only passive tools unless the MCP active-tool flags and normal allowlists opt in more.
+`POST /mcp` is a stateless Streamable HTTP MCP server. It uses a bearer token separate from browser login, rejects browser cross-origin requests by default, and exposes only passive tools unless the MCP active-tool flags and normal allowlists opt in more. Dark-web tools are omitted from discovery and calls until the operator sets `MCP_ALLOW_DARKWEB=true`.
 
 ```powershell
 cd agent
