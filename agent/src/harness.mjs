@@ -26,6 +26,14 @@ const WINDOWS_PERSISTENCE_LIMITS = Object.freeze({
   snippetChars: 320,
 });
 
+const FORENSIC_TEXT_LIMITS = Object.freeze({
+  inputChars: 256 * 1024,
+  lines: 4096,
+  timelineEvents: 160,
+  snippetChars: 280,
+  indicatorsPerType: 24,
+});
+
 // One string-only argument vocabulary is shared by the direct HTTP and MCP
 // surfaces. Tool implementations may use several of these as aliases, but no
 // surface may silently discard an unexpected key or coerce a structured value.
@@ -35,9 +43,17 @@ export const TOOL_INPUT_STRING_KEYS = Object.freeze([
   'focus', 'path', 'image', 'sample', 'file', 'uri', 'endpoint', 'website', 'link',
   'asn', 'password', 'pw', 'keyword', 'count', 'technique', 'id', 'name', 'term',
   'phone', 'number', 'selector', 'cidr', 'mode', 'ports', 'timing', 'scope', 'token',
-  'braveKey',
+  'braveKey', 'format', 'timezone', 'caseId', 'source', 'artifactType', 'ruleset', 'label',
 ]);
 const TOOL_INPUT_STRING_KEY_SET = new Set(TOOL_INPUT_STRING_KEYS);
+
+const OPAQUE_EVIDENCE_TOOLS = new Set([
+  'evidence_manifest',
+  'eventlog_triage',
+  'forensic_timeline',
+  'onion_intel',
+  'persistence_analyze',
+]);
 
 const REGISTRY_WRITE_RE = /\b(?:reg(?:\.exe)?\s+add|Set-ItemProperty|New-ItemProperty|regini(?:\.exe)?|RegSetValue(?:Ex)?[AW]?\s*\()/i;
 const FILE_WRITE_RE = /\b(?:Set-Content|Add-Content|Out-File|Copy-Item|Move-Item|New-Item|WriteAll(?:Text|Bytes))\b/i;
@@ -201,10 +217,13 @@ export function assessToolEvidence(spec = {}, result = '') {
   if (text.length > 280) score += 0.03;
   score = Math.max(0.1, Math.min(0.95, score));
 
-  if (spec.name === 'persistence_analyze') {
+  if (spec.name === 'evidence_manifest') {
+    return { score: 0.9, label: 'high', uncertain: false, basis: 'user-supplied-content-digest' };
+  }
+  if (OPAQUE_EVIDENCE_TOOLS.has(spec.name)) {
     // Lexical matches can be useful leads, but never establish execution or a
     // boundary crossing. Keep that distinction in machine-readable metadata too.
-    score = Math.min(score, 0.55);
+    score = Math.min(score, spec.name === 'persistence_analyze' ? 0.55 : 0.58);
     return { score: +score.toFixed(2), label: confidenceLabel(score), uncertain: true, basis: 'textual-evidence-only' };
   }
   return {
@@ -228,9 +247,13 @@ export function toolEvidenceMetadata(spec = {}, result = '') {
 const NON_CACHEABLE_TOOL_RESULTS = new Set([
   'breach_check',
   'email_recon',
+  'evidence_manifest',
+  'eventlog_triage',
   'exposure_search',
+  'forensic_timeline',
   'holehe',
   'leakcheck',
+  'onion_intel',
   'persistence_analyze',
   'pwned_password',
   'stealer_check',
@@ -920,6 +943,252 @@ export function extractWindowsPersistenceEvidence(input) {
   };
 }
 
+const FORENSIC_SIGNAL_RULES = Object.freeze([
+  { severity: 'critical', category: 'defense-evasion', mitre: 'T1070.001', title: 'Audit or event-log clearing', re: /\b(?:event\s*(?:id\s*)?1102|wevtutil\s+cl|clear(?:ed|ing)?\s+(?:the\s+)?(?:audit|event|security)\s+log)\b/i },
+  { severity: 'critical', category: 'credential-access', mitre: 'T1003.001', title: 'LSASS credential-access lead', re: /\b(?:lsass(?:\.exe)?|sekurlsa|procdump(?:\.exe)?)\b.*\b(?:dump|memory|read|access|mini(?:dump)?)\b|\b(?:dump|read|access)\b.*\blsass(?:\.exe)?\b/i },
+  { severity: 'high', category: 'persistence', mitre: 'T1543.003', title: 'Service creation/change', re: /\b(?:event\s*(?:id\s*)?7045|sc(?:\.exe)?\s+(?:create|config)|new-service|service\s+(?:was\s+)?installed)\b/i },
+  { severity: 'high', category: 'persistence', mitre: 'T1053.005', title: 'Scheduled task creation', re: /\b(?:event\s*(?:id\s*)?4698|schtasks(?:\.exe)?\s+\/create|register-scheduledtask|scheduled\s+task\s+(?:was\s+)?created)\b/i },
+  { severity: 'high', category: 'execution', mitre: 'T1059.001', title: 'Encoded or download-capable PowerShell', re: /\b(?:powershell|pwsh)(?:\.exe)?\b.*(?:-(?:enc|encodedcommand)\b|frombase64string|downloadstring|invoke-webrequest|invoke-restmethod)/i },
+  { severity: 'high', category: 'defense-evasion', mitre: 'T1562.001', title: 'Security tooling disabled or excluded', re: /\b(?:set-mppreference\b.*(?:disable|exclusion)|disableantispyware|tamper\s+protection\s+(?:disabled|off)|defender\s+(?:disabled|stopped)|security\s+tool\s+(?:disabled|stopped))\b/i },
+  { severity: 'high', category: 'account-change', mitre: 'T1136 / T1098', title: 'Account creation or privileged-group change', re: /\b(?:event\s*(?:id\s*)?(?:4720|4728|4732|4756)|net\s+(?:user|localgroup)\b.*\/(?:add)|new-localuser|add-localgroupmember)\b/i },
+  { severity: 'high', category: 'injection', mitre: 'T1055', title: 'Remote-thread or suspicious process-access lead', re: /\b(?:event\s*(?:id\s*)?(?:8|10)|createremotethread|writeprocessmemory|virtualallocex)\b/i },
+  { severity: 'medium', category: 'authentication', mitre: 'T1110', title: 'Authentication failure', re: /\b(?:event\s*(?:id\s*)?4625|failed\s+(?:logon|login|authentication)|invalid\s+(?:password|credentials))\b/i },
+  { severity: 'medium', category: 'network', mitre: 'T1071', title: 'Network or DNS activity', re: /\b(?:event\s*(?:id\s*)?(?:3|22)|dns\s+(?:query|request)|connect(?:ion|ed)?\s+(?:to|from)|destination(?:ip|port|hostname))\b/i },
+  { severity: 'medium', category: 'registry', mitre: 'T1112', title: 'Registry modification', re: /\b(?:event\s*(?:id\s*)?13|reg(?:\.exe)?\s+(?:add|delete)|set-itemproperty|new-itemproperty|registry\s+value\s+set)\b/i },
+  { severity: 'info', category: 'process', mitre: 'T1059', title: 'Process creation', re: /\b(?:event\s*(?:id\s*)?(?:1|4688)|new\s+process\s+name|process\s+(?:create|start))\b/i },
+  { severity: 'info', category: 'file', mitre: 'T1105', title: 'File creation/write', re: /\b(?:event\s*(?:id\s*)?11|targetfilename|file\s+(?:create|write|download))\b/i },
+]);
+
+function parseForensicTimestamp(line) {
+  const text = String(line || '');
+  const candidates = [];
+  const iso = text.match(/\b(20\d{2}[-\/]\d{2}[-\/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+\-]\d{2}:?\d{2})?)/i);
+  if (iso) candidates.push({ raw: iso[1], naive: !/(?:Z|[+\-]\d{2}:?\d{2})$/i.test(iso[1]) });
+  const us = text.match(/\b(\d{1,2}\/\d{1,2}\/20\d{2}[ T]\d{1,2}:\d{2}:\d{2}(?:\.\d+)?(?:\s*(?:AM|PM))?)/i);
+  if (us) candidates.push({ raw: us[1], naive: true });
+  const apache = text.match(/\b(\d{1,2}\/[A-Z][a-z]{2}\/20\d{2}:\d{2}:\d{2}:\d{2}\s+[+\-]\d{4})\b/);
+  if (apache) {
+    const converted = apache[1].replace(/^(\d{1,2})\/([A-Z][a-z]{2})\/(20\d{2}):(\d{2}:\d{2}:\d{2})/, '$1 $2 $3 $4');
+    candidates.push({ raw: apache[1], normalized: converted, naive: false });
+  }
+  const epoch = text.match(/(?:^|[\s:=\[,])(1[5-9]\d{8}|2\d{9}|1[5-9]\d{11}|2\d{12})(?=$|[\s,\]])/);
+  if (epoch) {
+    const number = Number(epoch[1]);
+    const millis = epoch[1].length === 13 ? number : number * 1000;
+    if (Number.isFinite(millis)) return { raw: epoch[1], millis, iso: new Date(millis).toISOString(), naive: false };
+  }
+  for (const candidate of candidates) {
+    let normalized = candidate.normalized || candidate.raw.replace(/^(20\d{2})\/(\d{2})\/(\d{2})/, '$1-$2-$3');
+    if (candidate.naive && /^20\d{2}-\d{2}-\d{2}/.test(normalized)) normalized += 'Z';
+    const millis = Date.parse(normalized);
+    if (Number.isFinite(millis)) return { raw: candidate.raw, millis, iso: new Date(millis).toISOString(), naive: candidate.naive };
+  }
+  return null;
+}
+
+function lineSignals(line) {
+  return FORENSIC_SIGNAL_RULES.filter(rule => rule.re.test(line));
+}
+
+function clippedEvidenceInput(input) {
+  const raw = String(input || '');
+  return {
+    raw,
+    text: raw.slice(0, FORENSIC_TEXT_LIMITS.inputChars),
+    truncated: raw.length > FORENSIC_TEXT_LIMITS.inputChars,
+  };
+}
+
+function formatIndicatorSummary(text) {
+  const targets = extractSecurityTargets(text);
+  const groups = [
+    ['IPs', targets.ips],
+    ['domains', targets.domains],
+    ['URLs', targets.urls],
+    ['emails', targets.emails],
+    ['hashes', targets.hashes],
+    ['CVEs', targets.cveIds],
+    ['onions', targets.onions],
+    ['crypto', targets.crypto],
+  ];
+  return groups
+    .filter(([, values]) => values && values.length)
+    .map(([label, values]) => `${label}: ${values.slice(0, FORENSIC_TEXT_LIMITS.indicatorsPerType).join(', ')}`);
+}
+
+export function formatForensicTimeline(input) {
+  const clipped = clippedEvidenceInput(input);
+  if (!clipped.text.trim()) return 'forensic_timeline: paste timestamped logs, CSV/JSON events, or a forensic timeline export.';
+  const allLines = clipped.text.split(/\r?\n/);
+  const lines = allLines.slice(0, FORENSIC_TEXT_LIMITS.lines);
+  const events = [];
+  let previousMillis = null;
+  let clockReversals = 0;
+  let naiveTimestamps = 0;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const timestamp = parseForensicTimestamp(line);
+    if (!timestamp) continue;
+    if (timestamp.naive) naiveTimestamps++;
+    if (previousMillis != null && timestamp.millis < previousMillis - 300000) clockReversals++;
+    previousMillis = timestamp.millis;
+    const signals = lineSignals(line);
+    events.push({
+      sourceLine: index + 1,
+      timestamp,
+      signals,
+      text: line.replace(/\s+/g, ' ').trim().slice(0, FORENSIC_TEXT_LIMITS.snippetChars),
+    });
+  }
+  events.sort((a, b) => a.timestamp.millis - b.timestamp.millis || a.sourceLine - b.sourceLine);
+  const linesOut = [
+    'forensic_timeline — passive analysis of user-supplied text',
+    'No file was opened, command executed, host contacted, or timestamp provenance independently verified.',
+    `coverage: ${lines.length}/${allLines.length} line(s); ${events.length} timestamped event(s) parsed`,
+  ];
+  if (!events.length) {
+    linesOut.push('', 'No supported timestamp was found. Supported shapes include ISO/RFC3339, common US event-log time, Apache time, and 10/13-digit Unix epochs.');
+  } else {
+    const start = events[0].timestamp.iso;
+    const end = events[events.length - 1].timestamp.iso;
+    linesOut.push(`range: ${start} -> ${end}`);
+    if (naiveTimestamps) linesOut.push(`timestamp caveat: ${naiveTimestamps} timestamp(s) lacked an offset and were normalized as UTC; confirm the source timezone before correlating systems.`);
+    if (clockReversals) linesOut.push(`source-order anomaly: ${clockReversals} backward jump(s) greater than five minutes; investigate clock skew, merged sources, or tampering.`);
+    const findings = events.flatMap(event => event.signals.map(signal => ({ event, signal })));
+    if (findings.length) {
+      linesOut.push('', 'High-signal leads (lexical; validate against the original artifact):');
+      findings.slice(0, 24).forEach(({ event, signal }, index) => {
+        linesOut.push(`${index + 1}. [${signal.severity.toUpperCase()}] ${signal.title} — ${signal.mitre} — ${event.timestamp.iso} — line ${event.sourceLine}`);
+      });
+    }
+    linesOut.push('', 'Normalized timeline:');
+    events.slice(0, FORENSIC_TEXT_LIMITS.timelineEvents).forEach(event => {
+      const tag = event.signals[0] ? `${event.signals[0].severity}/${event.signals[0].category}` : 'unclassified';
+      linesOut.push(`${event.timestamp.iso} | ${tag} | L${event.sourceLine} | ${event.text}`);
+    });
+    if (events.length > FORENSIC_TEXT_LIMITS.timelineEvents) linesOut.push(`... ${events.length - FORENSIC_TEXT_LIMITS.timelineEvents} additional timestamped event(s) omitted.`);
+  }
+  const indicators = formatIndicatorSummary(clipped.text);
+  if (indicators.length) linesOut.push('', 'Indicators observed in supplied text:', ...indicators);
+  if (clipped.truncated || allLines.length > FORENSIC_TEXT_LIMITS.lines) linesOut.push('', 'LIMIT WARNING: input coverage caps were reached; the result is incomplete.');
+  linesOut.push('', 'Analyst rule: preserve the original artifact, source timezone, collection method, and cryptographic digest before relying on this derived timeline.');
+  return linesOut.join('\n');
+}
+
+const EVENTLOG_RULES = Object.freeze([
+  { ids: ['1102'], severity: 'critical', meaning: 'Security audit log cleared', mitre: 'T1070.001' },
+  { ids: ['7045'], severity: 'high', meaning: 'A service was installed', mitre: 'T1543.003' },
+  { ids: ['4698'], severity: 'high', meaning: 'A scheduled task was created', mitre: 'T1053.005' },
+  { ids: ['4720'], severity: 'high', meaning: 'A user account was created', mitre: 'T1136.001' },
+  { ids: ['4728', '4732', '4756'], severity: 'high', meaning: 'Member added to a security-enabled group', mitre: 'T1098' },
+  { ids: ['4104'], severity: 'medium', meaning: 'PowerShell script-block logging', mitre: 'T1059.001' },
+  { ids: ['4625'], severity: 'medium', meaning: 'Failed account logon', mitre: 'T1110' },
+  { ids: ['4624'], severity: 'info', meaning: 'Successful account logon', mitre: 'T1078' },
+  { ids: ['4688'], severity: 'info', meaning: 'New process created', mitre: 'T1059' },
+  { ids: ['1'], severity: 'info', meaning: 'Sysmon process creation (provider-dependent)', mitre: 'T1059' },
+  { ids: ['3'], severity: 'medium', meaning: 'Sysmon network connection (provider-dependent)', mitre: 'T1071' },
+  { ids: ['8', '10'], severity: 'high', meaning: 'Sysmon remote-thread/process-access lead (provider-dependent)', mitre: 'T1055' },
+  { ids: ['11'], severity: 'info', meaning: 'Sysmon file creation (provider-dependent)', mitre: 'T1105' },
+  { ids: ['13'], severity: 'medium', meaning: 'Sysmon registry value set (provider-dependent)', mitre: 'T1112' },
+  { ids: ['22'], severity: 'medium', meaning: 'Sysmon DNS query (provider-dependent)', mitre: 'T1071.004' },
+]);
+
+export function formatEventLogTriage(input) {
+  const clipped = clippedEvidenceInput(input);
+  if (!clipped.text.trim()) return 'eventlog_triage: paste Windows Event Log, Sysmon, or exported EVTX text/JSON/XML.';
+  const allLines = clipped.text.split(/\r?\n/);
+  const lines = allLines.slice(0, FORENSIC_TEXT_LIMITS.lines);
+  const idCounts = new Map();
+  const users = new Set();
+  const computers = new Set();
+  const leads = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    for (const match of line.matchAll(/\b(?:event\s*(?:id)?|event_id|eventid)\s*[:=]?\s*(\d{1,5})\b/gi)) {
+      idCounts.set(match[1], (idCounts.get(match[1]) || 0) + 1);
+    }
+    for (const match of line.matchAll(/\b(?:Account\s+Name|TargetUserName|SubjectUserName|User)\s*[:=]\s*["']?([^\s,"';<]+)/gi)) users.add(match[1]);
+    for (const match of line.matchAll(/\b(?:Computer|ComputerName|Hostname)\s*[:=]\s*["']?([^\s,"';<]+)/gi)) computers.add(match[1]);
+    const signals = lineSignals(line).filter(signal => signal.severity !== 'info');
+    for (const signal of signals) leads.push({ line: index + 1, signal, text: line.replace(/\s+/g, ' ').trim().slice(0, FORENSIC_TEXT_LIMITS.snippetChars) });
+  }
+  const out = [
+    'eventlog_triage — passive Windows/Sysmon text triage',
+    'Input was treated as untrusted text; no EVTX parser, command execution, or host contact occurred.',
+    `coverage: ${lines.length}/${allLines.length} line(s)`,
+  ];
+  const recognized = [];
+  for (const rule of EVENTLOG_RULES) {
+    const count = rule.ids.reduce((sum, id) => sum + (idCounts.get(id) || 0), 0);
+    if (count) recognized.push({ ...rule, count });
+  }
+  if (recognized.length) {
+    out.push('', 'Recognized event IDs (provider/channel must be verified):');
+    recognized.sort((a, b) => b.count - a.count).forEach(rule => out.push(`- [${rule.severity.toUpperCase()}] ${rule.ids.join('/')} x${rule.count}: ${rule.meaning} — ${rule.mitre}`));
+  } else out.push('', 'No supported EventID fields were recognized. Plain-language detections below may still apply.');
+  if (users.size) out.push(`accounts observed: ${[...users].slice(0, 24).join(', ')}`);
+  if (computers.size) out.push(`hosts observed: ${[...computers].slice(0, 24).join(', ')}`);
+  if (leads.length) {
+    out.push('', 'Behavioral leads:');
+    leads.slice(0, 32).forEach((lead, index) => out.push(`${index + 1}. [${lead.signal.severity.toUpperCase()}] ${lead.signal.title} — ${lead.signal.mitre} — line ${lead.line}\n   ${JSON.stringify(lead.text)}`));
+  }
+  const indicators = formatIndicatorSummary(clipped.text);
+  if (indicators.length) out.push('', 'Indicators observed:', ...indicators);
+  if (clipped.truncated || allLines.length > FORENSIC_TEXT_LIMITS.lines) out.push('', 'LIMIT WARNING: input coverage caps were reached; results may be incomplete.');
+  out.push('', 'Caveat: event IDs are provider/channel dependent. Confirm ProviderName, Channel, RecordID, host clock, and raw XML before escalating a lead.');
+  return out.join('\n');
+}
+
+export function formatOnionIntel(input) {
+  const clipped = clippedEvidenceInput(input);
+  if (!clipped.text.trim()) return 'onion_intel: paste text or HTML already collected from an onion index, leak-site notice, forum post, or broker result.';
+  const text = clipped.text;
+  const sourceLines = text.split(/\r?\n/);
+  const credentialLine = line => /\b(?:password|passwd|pwd|credential|session\s*cookie|auth\s*token)\b\s*[:=]/i.test(line);
+  const credentialLike = sourceLines.filter(credentialLine).length;
+  const safeText = sourceLines.filter(line => !credentialLine(line)).join('\n');
+  const unique = values => [...new Set(values || [])];
+  const onions = unique((safeText.match(/\b(?:[a-z2-7]{56}|[a-z2-7]{16})\.onion\b/gi) || []).map(value => value.toLowerCase()));
+  const emails = unique((safeText.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || []).map(value => value.toLowerCase()));
+  const hashes = unique((safeText.match(/\b[a-f0-9]{64}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{32}\b/gi) || []).map(value => value.toLowerCase()));
+  const cves = unique((safeText.match(/\bCVE-\d{4}-\d{4,}\b/gi) || []).map(value => value.toUpperCase()));
+  const btc = unique(safeText.match(/\b(?:bc1[a-z0-9]{20,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,39})\b/g) || []);
+  const eth = unique((safeText.match(/\b0x[a-fA-F0-9]{40}\b/g) || []).map(value => value.toLowerCase()));
+  const pgp = unique((safeText.match(/\b(?:[A-F0-9]{4}[ -]?){9}[A-F0-9]{4}\b/gi) || []).map(value => value.replace(/[ -]/g, '').toUpperCase()));
+  const riskRules = [
+    ['ransomware/extortion claim', /\b(?:ransom|extortion|leak\s+site|victim|publish(?:ed|ing)?\s+data)\b/i],
+    ['credential or access-broker language', /\b(?:initial\s+access|rdp\s+access|vpn\s+access|credentials?\s+(?:sale|dump)|stealer\s+log)\b/i],
+    ['data-sale or auction language', /\b(?:database\s+(?:sale|dump)|auction|exclusive\s+data|full\s+dump)\b/i],
+    ['cryptocurrency payment indicator', /\b(?:bitcoin|btc|monero|xmr|ethereum|wallet|payment\s+address)\b/i],
+    ['deadline/pressure language', /\b(?:deadline|countdown|before\s+we\s+publish|pay\s+within|hours?\s+remaining)\b/i],
+  ];
+  const risks = riskRules.filter(([, re]) => re.test(safeText)).map(([label]) => label);
+  const out = [
+    'onion_intel — closed-world triage of user-supplied dark-web text',
+    'No onion service, gateway, victim, account, or wallet was contacted. Claims are unverified until independently corroborated.',
+    `coverage: ${text.length} character(s)${clipped.truncated ? ' (input truncated)' : ''}`,
+  ];
+  if (risks.length) out.push(`content signals: ${risks.join('; ')}`);
+  if (credentialLike) out.push(`sensitive-line warning: ${credentialLike} credential-like line(s) detected and intentionally not reproduced; isolate and rotate affected secrets.`);
+  const add = (label, values, note = '') => {
+    if (values.length) out.push(`${label} (${values.length}): ${values.slice(0, FORENSIC_TEXT_LIMITS.indicatorsPerType).join(', ')}${note}`);
+  };
+  const v3 = onions.filter(value => value.split('.')[0].length === 56);
+  const v2 = onions.filter(value => value.split('.')[0].length === 16);
+  add('onion v3 services', v3);
+  add('legacy onion v2 references', v2, ' (v2 is retired; treat as historical or malformed until proven otherwise)');
+  add('emails', emails);
+  add('file hashes', hashes);
+  add('CVE references', cves);
+  add('BTC addresses', btc);
+  add('ETH addresses', eth);
+  add('PGP fingerprint candidates', pgp);
+  if (!(onions.length || emails.length || hashes.length || cves.length || btc.length || eth.length || pgp.length)) out.push('No supported pivot identifiers were extracted.');
+  out.push('', 'Recommended pivots: hash the source artifact with evidence_manifest; correlate timestamps with forensic_timeline; verify selectors with ransomware_watch/exposure_search; use onion_fetch only through an operator-controlled, isolated Tor broker.');
+  out.push('Safety: do not authenticate, purchase data, download victim material, contact threat actors, or treat a criminal claim as confirmation of compromise.');
+  return out.join('\n');
+}
+
 export function formatWindowsPersistenceEvidence(input) {
   const raw = String(input || '');
   if (!raw.trim()) return 'persistence_analyze: paste a Windows report, log, command, process trace, or strings output.';
@@ -976,7 +1245,7 @@ export function normalizeToolArgumentString(toolName, value) {
   const source = String(value ?? '');
   // Persistence evidence is opaque compute input. In particular, a Markdown URL
   // inside a pasted report must not replace the report that contains it.
-  if (String(toolName || '').toLowerCase() === 'persistence_analyze') return source;
+  if (OPAQUE_EVIDENCE_TOOLS.has(String(toolName || '').toLowerCase())) return source;
   const markdownUrl = source.match(/\]\((https?:\/\/[^)\s]+)\)/);
   const selected = markdownUrl ? markdownUrl[1] : source;
   return selected.replace(/^[\[<("'\s]+|[\]>)"'\s]+$/g, '').trim();
@@ -1020,7 +1289,7 @@ export function validateDirectToolInput(toolName, args, bodyTarget) {
   if (!checked.ok) return checked;
   const normalizedTarget = bodyTarget === undefined ? '' : normalizeToolArgumentString(toolName, bodyTarget);
   const normalizedArgs = checked.args;
-  if (String(toolName || '').toLowerCase() === 'persistence_analyze' &&
+  if (OPAQUE_EVIDENCE_TOOLS.has(String(toolName || '').toLowerCase()) &&
       !selectPersistenceTextInput(normalizedArgs) && normalizedTarget) {
     normalizedArgs.target = normalizedTarget;
   }
@@ -1039,7 +1308,7 @@ export function collectToolTargets(bodyTarget, args = {}, toolName = '') {
   // Text passed to passive compute-only tools is evidence, not a host or account to
   // authorize. Treating a full report as a target makes safe local analysis fail
   // whenever a deployment also has a target allowlist configured.
-  if (String(toolName || '').toLowerCase() === 'persistence_analyze') return [];
+  if (OPAQUE_EVIDENCE_TOOLS.has(String(toolName || '').toLowerCase())) return [];
   const optionNames = new Set(['braveKey', 'profile', 'focus', 'mode', 'ports', 'timing', 'scope']);
   const raw = [
     bodyTarget,

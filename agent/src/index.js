@@ -1,5 +1,5 @@
 /**
- * Agent Garrett - Security Research Agent  v5.0
+ * Agent Garrett - Security Research Agent  v5.2
  *
  * Memory engine: neuron-db (the Rust core compiled to WebAssembly, bundled in-Worker).
  *   - Corpus RAG  — the llms.txt corpus is ingested into a neuron scope and recalled
@@ -23,6 +23,9 @@ import {
   deobfuscatePowerShellArrayJoins,
   extractAiText,
   extractSecurityTargets,
+  formatEventLogTriage,
+  formatForensicTimeline,
+  formatOnionIntel,
   formatWindowsPersistenceEvidence,
   guardDeterministicToolPlan,
   hasExplicitPersistenceAnalysisIntent,
@@ -46,7 +49,7 @@ import {
 const MODEL         = '@cf/zai-org/glm-4.7-flash'; // current, fast long-context default
 const ROUTER_MODEL  = '@cf/zai-org/glm-4.7-flash'; // deterministic JSON routing pass
 const OUTPUT_FALLBACK_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'; // active non-reasoning recovery path
-const BUILD_VERSION = '2026-09-04-persistence-static5';  // bump per deploy; shown in header + /api/tools/catalog
+const BUILD_VERSION = '2026-09-08-forensics-darkweb-v5.2';  // bump per deploy; shown in header + /api/tools/catalog
 const EMBED_MODEL   = '@cf/baai/bge-base-en-v1.5'; // 768-dim (only used by the optional Vectorize path)
 const EMBED_DIM     = 768;
 
@@ -737,7 +740,11 @@ function buildToolRoutePolicy(query, opts = {}) {
   }
   if (targets.onions.length && darkwebEnabled) {
     classes.push('darkweb');
-    allow(['onion_fetch', 'onion_search']);
+    allow(['onion_fetch', 'onion_search', 'onion_intel']);
+  }
+  if (darkwebEnabled && /\b(?:dark[ -]?web|onion|ransomware|extortion|leak\s+site|stealer\s+log|initial\s+access\s+broker)\b/.test(q)) {
+    if (!classes.includes('darkweb')) classes.push('darkweb');
+    allow(['ransomware_watch', 'onion_search', 'onion_intel', 'exposure_search', 'stealer_check', 'leakcheck', 'paste_search']);
   }
   if (/\bcvss:[0-9.]+\//i.test(q)) {
     classes.push('cvss');
@@ -764,7 +771,7 @@ function buildToolRoutePolicy(query, opts = {}) {
   // Forensics / RE / memory / pcap workflows (broker-delegated, heavy).
   if (/\b(memory (dump|image|forensics)|volatility|reverse[\s-]?engineer|disassemble|malware analysis|pcap|packet capture|triage|forensic)\b/.test(q)) {
     classes.push('forensics');
-    allow(['reverse_analyze', 'memory_forensics', 'pcap_analyze', 'file_analyze', 'ioc_extract', 'hash_lookup']);
+    allow(['reverse_analyze', 'memory_forensics', 'pcap_analyze', 'file_analyze', 'ioc_extract', 'hash_lookup', 'evidence_manifest', 'forensic_timeline', 'eventlog_triage', 'evtx_analyze', 'disk_forensics', 'email_forensics', 'yara_scan', 'artifact_carve']);
   }
   // Password exposure check.
   if (/\bpassword\b/.test(q) && /\b(pwned|breach|leaked|exposed|compromis|safe|hibp)\b/.test(q)) {
@@ -1269,6 +1276,8 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'origin_ip', category: 'recon', passive: true, description: 'Find possible origin IP behind Cloudflare via passive subdomain DNS probing' },
   { name: 'image_osint', category: 'osint', passive: false, description: 'Download an image for hash/type/EXIF triage (contacts target)' },
   { name: 'onion_search', category: 'darkweb', passive: true, description: 'Dark-web exposure: Ahmia onion index (+ Tor broker if TOOL_BROKER_URL set)' },
+  { name: 'ransomware_watch', category: 'darkweb', passive: true, description: 'Search current public ransomware victim-claim aggregators without contacting criminal infrastructure' },
+  { name: 'onion_intel', category: 'darkweb', passive: true, openWorld: false, description: 'Closed-world onion/leak-site text triage: pivots, wallets, hashes, pressure language, and secret redaction' },
   { name: 'email_security', category: 'recon', passive: true, description: 'SPF / DMARC / MX / DNSSEC posture for a domain (spoofability check)' },
   { name: 'typosquat', category: 'recon', passive: true, description: 'Generate lookalike domains and flag registered ones (phishing / brand abuse)' },
   { name: 'crypto_addr', category: 'osint', passive: true, description: 'BTC/ETH address balance + transaction activity (threat-intel)' },
@@ -1299,6 +1308,14 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'reverse_analyze', category: 'malware', passive: false, description: 'Reverse-engineering via broker: unpacking/disassembly strings/imports/CFG + behavior notes' },
   { name: 'forensics_triage', category: 'forensics', passive: false, description: 'Host/file triage via broker: timeline, persistence clues, suspicious executables and artifacts' },
   { name: 'memory_forensics', category: 'forensics', passive: false, description: 'Memory forensics via broker (Volatility-style): process tree, network sockets, injected code clues' },
+  { name: 'evidence_manifest', category: 'forensics', passive: true, openWorld: false, description: 'Hash supplied text/base64 evidence and issue a content receipt without reproducing the artifact' },
+  { name: 'forensic_timeline', category: 'forensics', passive: true, openWorld: false, description: 'Normalize timestamped text/JSON/CSV logs, flag clock anomalies, and surface MITRE-mapped leads' },
+  { name: 'eventlog_triage', category: 'forensics', passive: true, openWorld: false, description: 'Closed-world Windows Event Log and Sysmon text triage with provider-aware caveats' },
+  { name: 'evtx_analyze', category: 'forensics', passive: false, description: 'EVTX parsing and hunting through an operator broker (chainsaw/evtx-style)' },
+  { name: 'disk_forensics', category: 'forensics', passive: false, description: 'Disk-image/filesystem forensics through an operator broker: partitions, deleted files, persistence, and timeline' },
+  { name: 'email_forensics', category: 'forensics', passive: false, description: 'RFC822/MSG/EML forensic parsing through an operator broker: headers, hops, attachments, URLs, and auth results' },
+  { name: 'yara_scan', category: 'forensics', passive: false, description: 'YARA scan of an operator-supplied artifact through a scoped broker ruleset' },
+  { name: 'artifact_carve', category: 'forensics', passive: false, description: 'File and network artifact carving through an operator broker with hashes and provenance' },
   { name: 'crypto_ctf', category: 'crypto', passive: true, description: 'CTF crypto helper: IOC/frequency, base64/hex/rot13 decode candidates, single-byte XOR hints' },
   { name: 'keybase', category: 'people', passive: true, description: 'Keybase cryptographically-VERIFIED identity: proven Twitter/GitHub/Reddit/web links, PGP key, crypto addresses' },
   { name: 'devto_user', category: 'people', passive: true, description: 'Dev.to profile (real name, location, linked GitHub/Twitter/site) — corroborates identity' },
@@ -1577,6 +1594,8 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'origin_ip')    return originIp(String(args.domain || args.target || ''));
   if (name === 'image_osint')  return imageOsint(String(args.url || args.image || args.target || ''));
   if (name === 'onion_search') return onionSearch(env, String(args.query || args.target || args.domain || args.email || ''));
+  if (name === 'ransomware_watch') return ransomwareWatch(String(args.query || args.target || args.domain || args.name || ''));
+  if (name === 'onion_intel') return formatOnionIntel(String(args.text || args.input || args.target || ''));
   if (name === 'email_security') return emailSecurity(String(args.domain || args.target || ''));
   if (name === 'typosquat')    return typosquat(String(args.domain || args.target || ''));
   if (name === 'crypto_addr')  return cryptoAddr(String(args.address || args.addr || args.target || ''));
@@ -1622,6 +1641,9 @@ async function runBuiltinTool(env, name, args = {}) {
   if (name === 'decode')       return decodeTool(String(args.input || args.text || args.target || ''));
   if (name === 'ioc_extract')  return iocExtract(String(args.text || args.input || args.target || ''));
   if (name === 'persistence_analyze') return persistenceAnalyze(selectPersistenceTextInput(args));
+  if (name === 'evidence_manifest') return evidenceManifest(args);
+  if (name === 'forensic_timeline') return formatForensicTimeline(String(args.text || args.input || args.target || ''));
+  if (name === 'eventlog_triage') return formatEventLogTriage(String(args.text || args.input || args.target || ''));
   if (name === 'cvss')         return cvssCalc(String(args.vector || args.target || ''));
   if (name === 'unshorten')    return unshorten(String(args.url || args.target || ''));
   if (name === 'crypto_ctf')   return cryptoCtf(String(args.input || args.text || args.target || ''));
@@ -1654,6 +1676,39 @@ async function runBuiltinTool(env, name, args = {}) {
     profile: String(args.profile || ''),
     focus: String(args.focus || ''),
   }, String(args.target || args.path || args.url || ''));
+  if (name === 'evtx_analyze') return runBrokerDelegatedTool(env, 'evtx_analyze', {
+    target: String(args.target || args.path || args.url || ''),
+    path: String(args.path || ''),
+    url: String(args.url || ''),
+    focus: String(args.focus || ''),
+    timezone: String(args.timezone || ''),
+  }, String(args.target || args.path || args.url || ''));
+  if (name === 'disk_forensics') return runBrokerDelegatedTool(env, 'disk_forensics', {
+    target: String(args.target || args.path || args.url || args.image || ''),
+    path: String(args.path || ''),
+    url: String(args.url || ''),
+    image: String(args.image || ''),
+    scope: String(args.scope || 'triage'),
+  }, String(args.target || args.path || args.url || args.image || ''));
+  if (name === 'email_forensics') return runBrokerDelegatedTool(env, 'email_forensics', {
+    target: String(args.target || args.path || args.url || args.file || ''),
+    path: String(args.path || ''),
+    url: String(args.url || ''),
+    focus: String(args.focus || ''),
+  }, String(args.target || args.path || args.url || args.file || ''));
+  if (name === 'yara_scan') return runBrokerDelegatedTool(env, 'yara_scan', {
+    target: String(args.target || args.path || args.url || args.file || ''),
+    path: String(args.path || ''),
+    url: String(args.url || ''),
+    ruleset: String(args.ruleset || 'default'),
+  }, String(args.target || args.path || args.url || args.file || ''));
+  if (name === 'artifact_carve') return runBrokerDelegatedTool(env, 'artifact_carve', {
+    target: String(args.target || args.path || args.url || args.image || ''),
+    path: String(args.path || ''),
+    url: String(args.url || ''),
+    profile: String(args.profile || 'safe'),
+    artifactType: String(args.artifactType || ''),
+  }, String(args.target || args.path || args.url || args.image || ''));
   throw new Error(`Unknown builtin tool: ${name}`);
 }
 
@@ -1733,6 +1788,47 @@ function isValidSessionId(value) {
 async function sha256hex(s) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function evidenceManifest(args = {}) {
+  const supplied = String(args.text || args.input || args.target || '');
+  if (!supplied) return 'evidence_manifest: supply text, or set format=base64 and supply a base64-encoded artifact.';
+  const format = String(args.format || '').trim().toLowerCase();
+  let bytes;
+  let representation;
+  if (format === 'base64' || /^base64:/i.test(supplied)) {
+    const encoded = supplied.replace(/^base64:/i, '').replace(/\s+/g, '');
+    if (!encoded || encoded.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return 'evidence_manifest: invalid base64 input.';
+    try {
+      const binary = atob(encoded);
+      bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+      representation = 'decoded base64 bytes';
+    } catch {
+      return 'evidence_manifest: invalid base64 input.';
+    }
+  } else {
+    bytes = new TextEncoder().encode(supplied);
+    representation = 'exact UTF-8 bytes of supplied text';
+  }
+  if (bytes.byteLength > BINARY_RESPONSE_LIMIT) return `evidence_manifest: artifact exceeds the ${BINARY_RESPONSE_LIMIT}-byte hashing limit.`;
+  const sha256 = await sha256hexBytes(bytes);
+  const sha1Buffer = await crypto.subtle.digest('SHA-1', bytes);
+  const sha1 = [...new Uint8Array(sha1Buffer)].map(value => value.toString(16).padStart(2, '0')).join('');
+  const label = String(args.label || args.source || 'user-supplied artifact').replace(/[\r\n\t]+/g, ' ').slice(0, 160);
+  const caseId = String(args.caseId || '').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 80);
+  const lines = [
+    'evidence_manifest — content receipt',
+    `observed_at: ${new Date().toISOString()}`,
+    `label: ${label}`,
+    ...(caseId ? [`case_id: ${caseId}`] : []),
+    `digest_scope: ${representation}`,
+    `size_bytes: ${bytes.byteLength}`,
+    `sha256: ${sha256}`,
+    `sha1: ${sha1}`,
+  ];
+  if (representation.includes('text')) lines.push(`text_lines: ${supplied.split(/\r?\n/).length}`);
+  lines.push('custody_caveat: this proves only the bytes supplied to this call; it does not prove acquisition source, device state, collector identity, or prior custody. Preserve the original separately.');
+  return lines.join('\n');
 }
 
 // crt.sh — subdomain/host enumeration via certificate transparency (passive).
@@ -2325,6 +2421,88 @@ async function onionSearch(env, query) {
     lines.push('Live .onion crawl: not available in-worker (Cloudflare Workers cannot open Tor circuits). Set TOOL_BROKER_URL to a Tor-capable broker to enable real onion crawling.');
   }
   return `onion_search "${q}" (dark-web exposure monitoring)\n` + lines.join('\n\n') + '\n\nTip: use onion_fetch <address> to pull onion site text via a free clearnet gateway. Index references surfaced for defensive exposure assessment only.';
+}
+
+// Surface-web ransomware claim monitoring. Both sources aggregate criminal leak-
+// site claims, so this never contacts or authenticates to criminal infrastructure.
+// A listing is an allegation and must not be represented as a confirmed breach.
+async function ransomwareWatch(query) {
+  const q = String(query || '').trim();
+  if (!q) return 'ransomware_watch: provide an organization, domain, group, country, sector, or the word recent.';
+  if (q.length > 160) return 'ransomware_watch: query is too long (160 characters maximum).';
+  const recentMode = /^(?:recent|latest|\*)$/i.test(q);
+  const needle = q.toLowerCase();
+  const clean = value => String(value == null ? '' : value).replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const jobs = [
+    (async () => {
+      const r = await fetch('https://api.ransomware.live/recentvictims', {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/5.2' },
+        signal: AbortSignal.timeout(18000),
+      });
+      if (!r.ok) throw new Error(`ransomware.live HTTP ${r.status}`);
+      const rows = await readResponseJson(r);
+      return (Array.isArray(rows) ? rows : []).map(row => ({
+        source: 'ransomware.live',
+        group: clean(row.group_name || row.group || row.ransomware_group),
+        victim: clean(row.victim || row.post_title || row.name),
+        domain: clean(row.website || row.domain),
+        discovered: clean(row.discovered || row.date || row.published),
+        country: clean(row.country),
+        sector: clean(row.activity || row.sector),
+      }));
+    })(),
+    (async () => {
+      const r = await fetch('https://www.ransomlook.io/api/recent', {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/5.2' },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) throw new Error(`ransomlook HTTP ${r.status}`);
+      const rows = await readResponseJson(r);
+      return (Array.isArray(rows) ? rows : []).map(row => ({
+        source: 'ransomlook.io',
+        group: clean(row.group_name || row.group || row.ransomware_group),
+        victim: clean(row.post_title || row.victim || row.name),
+        domain: clean(row.website || row.domain),
+        discovered: clean(row.discovered || row.date || row.published),
+        country: clean(row.country),
+        sector: clean(row.activity || row.sector),
+      }));
+    })(),
+  ];
+  const settled = await Promise.allSettled(jobs);
+  const errors = [];
+  const combined = [];
+  settled.forEach((result, index) => {
+    if (result.status === 'fulfilled') combined.push(...result.value);
+    else errors.push(`${index === 0 ? 'ransomware.live' : 'ransomlook.io'}: ${result.reason?.message || result.reason}`);
+  });
+  const filtered = combined.filter(row => {
+    if (recentMode) return true;
+    return [row.group, row.victim, row.domain, row.country, row.sector].some(value => value.toLowerCase().includes(needle));
+  });
+  const seen = new Set();
+  const unique = filtered.filter(row => {
+    const key = `${row.group}|${row.victim}|${row.domain}|${row.discovered}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((a, b) => Date.parse(b.discovered) - Date.parse(a.discovered));
+  const out = [
+    `ransomware_watch "${q}" — public ransomware claim aggregators`,
+    'No criminal infrastructure was contacted. Listings are unverified threat-actor claims, not confirmation that compromise or data theft occurred.',
+    `sources queried: ${settled.length - errors.length}/2 | indexed rows inspected: ${combined.length} | matches: ${unique.length}`,
+  ];
+  if (unique.length) {
+    out.push('', 'Matches:');
+    unique.slice(0, 20).forEach((row, index) => {
+      const details = [row.domain, row.country, row.sector].filter(Boolean).join(' | ');
+      out.push(`${index + 1}. ${row.discovered || 'date unknown'} | ${row.group || 'group unknown'} | ${row.victim || 'victim unknown'}${details ? ' | ' + details : ''} | source=${row.source}`);
+    });
+    if (unique.length > 20) out.push(`... ${unique.length - 20} additional match(es) omitted.`);
+  } else out.push('', 'No matching current claim was found in the two public feeds. Absence is not proof that no incident or private claim exists.');
+  if (errors.length) out.push('', 'Source errors:', ...errors.map(error => `- ${error}`));
+  out.push('', 'Defensive next steps: corroborate with the organization, incident-response telemetry, regulatory filings, reputable reporting, and known-good forensic evidence before attribution or notification.');
+  return out.join('\n');
 }
 
 // Email-security posture — SPF / DMARC / MX / DNSSEC (spoofability assessment).
@@ -5435,7 +5613,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
-var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', post_malware_pipeline:'url', decode:'input', ioc_extract:'text', persistence_analyze:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', nmap_scan:'target', pcap_analyze:'target', reverse_analyze:'target', forensics_triage:'target', memory_forensics:'target', crypto_ctf:'input', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email', exposure_search:'selector' };
+var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', ransomware_watch:'query', onion_intel:'text', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', post_malware_pipeline:'url', decode:'input', ioc_extract:'text', persistence_analyze:'text', evidence_manifest:'text', forensic_timeline:'text', eventlog_triage:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', nmap_scan:'target', pcap_analyze:'target', reverse_analyze:'target', forensics_triage:'target', memory_forensics:'target', evtx_analyze:'target', disk_forensics:'target', email_forensics:'target', yara_scan:'target', artifact_carve:'target', crypto_ctf:'input', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email', exposure_search:'selector' };
 async function loadCatalog(){
   try{
     var broker=(el('s-broker-url')?el('s-broker-url').value.trim():'');
@@ -5629,7 +5807,11 @@ export default {
         listTools: async () => {
           const policy = getToolPolicy(env);
           const activeEnabled = isTruthy(env.MCP_ALLOW_ACTIVE_TOOLS, false);
-          return toolCatalog(env).filter(spec => spec.passive || (activeEnabled && policy.toolAllowlist.has(spec.name)));
+          const darkwebEnabled = isTruthy(env.MCP_ALLOW_DARKWEB, false);
+          return toolCatalog(env).filter(spec =>
+            (spec.category !== 'darkweb' || darkwebEnabled) &&
+            (spec.passive || (activeEnabled && policy.toolAllowlist.has(spec.name)))
+          );
         },
         callTool: async (name, args) => {
           const policy = getToolPolicy(env);
