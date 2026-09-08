@@ -34,7 +34,6 @@ Set these as Cloudflare Worker **Variables/Secrets** (dashboard → Settings →
 | `ACCESS_SESSION_SECRET` | Independent random secret used with one-day, server-revocable login sessions (recommended) |
 | `MCP_API_TOKEN` | Independent random 24+ character bearer secret enabling `POST /mcp` |
 | `GITHUB_TOKEN` | Read-only PAT — enables `github_osint` code search (anonymous is impossible) and raises GitHub rate limits |
-| `HIBP_API_KEY` | Enables HaveIBeenPwned results in `breach_check` (XposedOrNot works without it) |
 | `GOOGLE_CSE_KEY` + `GOOGLE_CSE_CX`, or `BING_API_KEY` | Reliable `web_search` (keyless SearXNG/DuckDuckGo/Wikipedia fallback otherwise) |
 | `TOOL_BROKER_URL` + `TOOL_BROKER_TOKEN` | Optional Tor/Python broker for live `.onion` crawling + Sherlock/Holehe/radare2/capa/yara (see `broker/`) |
 | `CTF_SAFE_MODE`, `TOOL_ALLOWLIST`, `CTF_TARGET_ALLOWLIST` | Tool and target policy. Active/target-contacting calls should be explicitly allowlisted and scoped. |
@@ -51,7 +50,7 @@ Agentic chat automatically runs only passive, public-data lookups, including sur
 **Tool families (94 registered):**
 - **intel** — nvd_lookup, epss_lookup, kev_lookup, kev_recent, circl_cve, cve_search, cve_poc (public exploits), mitre (ATT&CK), cvss
 - **OSINT** — rdap_ip/domain, dns_lookup, dns_records, cert_ct, crtsh_subs, ip_geo, asn_info, shodan_internetdb, greynoise, reverse_dns, tor_exit, wayback, archive_urls, crypto_addr
-- **people** — username_enum, github_user, gravatar, email_recon, email_permutations, breach_check, pwned_password
+- **people** — username_enum, github_user, gravatar, email_recon, email_permutations, breach_check (free/keyless XposedOrNot), pwned_password (free HIBP k-anonymity range API)
 - **recon** — http_headers, tech_fingerprint, origin_ip, subdomain_takeover, subdomains, typosquat, email_security (SPF/DMARC), bucket_finder, cors_check, crawl (links+secrets), favicon_hash, disclosure_draft, jwt, cidr, hash_id, encode, timestamp
 - **dark-web** — ransomware_watch (public victim-claim aggregators), onion_intel (closed-world text triage), stealer_check (HudsonRock infostealer logs), leakcheck, paste_search, onion_search, onion_fetch
 - **forensics** — evidence_manifest (SHA-256/SHA-1 content receipt), forensic_timeline, eventlog_triage, persistence_analyze, plus PCAP/memory/EVTX/disk/email/YARA/carving broker contracts
