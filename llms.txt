@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-09-08T06:27:08Z
+GENERATED    : 2026-09-08T10:30:44Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 63
+TOTAL POSTS  : 64
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,203 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away
+DATE       : 2026-09-08
+URL        : https://garrettstimpson.ca/posts/2026/09/08/most-malware-same-machine-persistence/
+CVE        : none
+CATEGORIES : malware, analysis, defense
+TAGS       : persistence, windows-11, clickfix, scheduled-tasks, run-keys, browser-extensions, rmm, c2, byovd, detection-engineering
+WORD_COUNT : 3428
+EXCERPT    : Modern malware hides behind signed binaries, cloud traffic, browser runtimes, and legitimate support tools. The thing that gives it away is what brings it back.
+</FRONTMATTER>
+<BODY>
+Three Microsoft malware reports landed in five days. One started with a fake Cloudflare check. One with a counterfeit installer. One with a Teams call from "IT." Different doors. Same machine underneath.
+
+[TerminalFix](https://www.microsoft.com/en-us/security/blog/2026/08/28/terminalfix-campaign-deploys-reverse-tunnel-through-multistage-intrusion/) borrowed a signed Windows executable, side-loaded a DLL, rebuilt later stages from PNG pixels, then planted both a Run value and an hourly task. [The installer campaign](https://www.microsoft.com/en-us/security/blog/2026/09/01/counterfeit-installers-system-compromise-tracking-deceptive-software-download-campaign/) changed names and hashes constantly but kept relaunching from writable directories. [The fake-helpdesk operator](https://www.microsoft.com/en-us/security/blog/2026/09/02/impersonating-it-support-threat-actors-turn-remote-session-into-enterprise-wide-access/) brought an official Node.js runtime and hid an encrypted JavaScript implant behind an update-themed Startup entry.
+
+Strip off the brand names and the pattern is almost boring: borrow trust, get execution, create re-entry, steal identity, hide control traffic.
+
+## About that 98 percent
+
+I like the instinct. I do not trust the number. Nobody has a denominator for all malware, and a stolen session cookie can compromise a company without dropping malware at all.
+
+But the pattern is real. In [Mandiant's 2025 ransomware cases](https://cloud.google.com/blog/topics/threat-intelligence/ransomware-ttps-shifting-threat-landscape/), the names changed while the same machinery kept turning up: credentials, RMM tools, tunnels, scheduled tasks, services, RDP, PowerShell, and cloud storage. The useful claim is not "this catches 98 percent." It is that there are far fewer jobs in an intrusion than there are malware families.
+
+The recurring machine looks like this:
+
+```text
+borrow trust -> gain execution -> stage tools -> create re-entry
+             -> steal identity -> hide control traffic -> complete the job
+```
+
+An attack can skip a box or reorder two of them. If an operator needs durable access, it needs a way back in after a process dies, a laptop reboots, a password changes, or the first domain gets blocked. That is why persistence is the best place to stop staring at family names and start seeing the system.
+
+## Persistence is a relationship, not a registry path
+
+The useful model from my earlier Windows research was only one line:
+
+```text
+who wrote it -> what survived -> what launches it later -> who it runs as
+```
+
+That line prevents a lot of bad analysis.
+
+A retry loop is not persistence. A WebSocket heartbeat proves that a process wants to stay connected while it is alive. A Run value, Startup item, scheduled task, service, browser extension, remote-management agent, refresh token, or device registration can cause future execution or future access after the original process is gone. That is persistence.
+
+That last box matters. An `HKCU` Run value normally brings malware back as the same user; it does not prove privilege escalation. It becomes a Windows security-boundary bug only when someone can plant launch state across a boundary they were not authorised to cross. That distinction tracks [Microsoft's own Windows security-servicing criteria](https://www.microsoft.com/en-us/msrc/windows-security-servicing-criteria).
+
+Microsoft documents the individual security models for [Run and RunOnce](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys), [scheduled-task principals](https://learn.microsoft.com/en-us/windows/win32/taskschd/security-contexts-for-running-tasks), and [service access rights](https://learn.microsoft.com/en-us/windows/win32/services/service-security-and-access-rights). The malware is often using those mechanisms exactly as designed. The defensive failure is treating each mechanism as a separate checklist instead of one durable-execution graph.
+
+## Start with the boring scheduled task
+
+Forget the fake CAPTCHA. The useful end of this infection is the boring bit: an update-themed scheduled task.
+
+The temptation is to delete it, scan the target, and call the machine clean. That is exactly how persistence survives an investigation.
+
+Start with Microsoft's published TerminalFix chain, but begin in the middle. The task launches `LockScreenContentServer.exe` from below `ProgramData`. The file is signed by Microsoft. The name belongs to a real Windows component. If the triage question is "does this executable look legitimate?", the malware wins three times before breakfast.
+
+The location breaks the illusion. The real component belongs under the Windows system application tree, not beside random files in a writable staging directory. Before deleting anything, export the action, arguments, working directory, trigger, principal, security descriptor, and registration time. Hash every target and record its owner and ACL. The task name is decoration.
+
+The mechanism graph reconstructed from Microsoft's report looks like this:
+
+```text
+scheduled task action
+└── LockScreenContentServer.exe     signed Microsoft file, wrong directory
+    └── loads .\dui70.dll           attacker-controlled DLL beside the EXE
+        └── starts PowerShell        decoding and second-stage retrieval
+            └── reconstructs files  payload split across PNG pixel data
+                └── pythonw.exe      portable runtime, no console window
+                    └── WSS :443     reverse tunnel to the operator
+```
+
+Now inspect the signed executable rather than admiring its signature. Its import table expects `dui70.dll`. The Windows loader resolves that dependency from the application's directory before falling back to the protected system copy in this scenario. The attacker did not modify Microsoft's EXE. They placed an unsigned DLL with the expected name beside it. The clean file becomes the launcher for the dirty one. That is DLL side-loading in one sentence.
+
+This is why signature-only allowlisting is weak. A signature answers who published one file. It does not answer who chose its working directory, who supplied its dependencies, or what it will load next.
+
+The malicious DLL then unwraps an embedded stage and launches PowerShell. That stage retrieves files that look like PNG images. A proxy or type-based filter may classify the transfers as PNG images. The useful bytes are spread through pixel channels and, in the observed chain, parts of a DLL were split across separate images. Only the endpoint script knows how to reconstruct them. By the time a recognisable payload exists, it is downstream of a signed Windows process, an allowed scripting engine, and network traffic that looked like ordinary media.
+
+Next comes the part I care about most: the malware registers both a Run value and a scheduled task. Two cheap recovery paths beat one clever one. Remove only the task and the Run value revives the loader at sign-in. Remove only the Run value and the hourly task waits for the clock. Delete the wrong half and the infection grows back.
+
+The final observed stage brings a legitimate portable Python runtime and launches the tunnel with `pythonw.exe`, which has no visible console. The connection goes outbound over an encrypted WebSocket on port 443. No inbound firewall hole is required. A network device sees TLS leaving a workstation. The implant gives its operator a potential path back into the internal network.
+
+Now walk backward from the task-registration time:
+
+1. Which process registered the task and Run value, and under which token?
+2. When was the staging directory created, and which process wrote the signed EXE and adjacent DLL?
+3. What launched the first PowerShell instance, and which browser, terminal, clipboard event, and referring URL preceded it?
+4. Which credentials, tokens, browser stores, network shares, and domain resources were reachable before containment?
+
+That reconstruction turns harmless-looking facts into one malicious graph. It also tells you what the evidence actually proves. Task registration proves a configured future-execution path. Run registration proves a configured logon trigger. The side-loaded DLL proves the signed host was abused. The tunnel proves remote-control capability. None of those facts, by itself, proves that ransomware ran or that Windows privilege boundaries failed.
+
+Microsoft saw the tunnel, not what eventually came through it. That is where the reconstruction stops. Containment does not: dual persistence, domain reconnaissance, and an outbound proxy make this an identity and network incident, not a task-deletion job.
+
+## Why this is hard to detect
+
+Many controls still score individual files. Modern persistence is a graph. Every node can be legitimate while the edge between two nodes is malicious.
+
+**Execution begins as an authorised-looking act.** ClickFix and fake-helpdesk campaigns do not need a browser exploit when a person will open Terminal, approve remote control, or run an installer. The process tree begins with genuine user intent, which weakens rules that expect an obviously malicious parent.
+
+**The malicious part is thin, fragmented, and short-lived.** `msiexec`, Task Scheduler, PowerShell, WScript, a Microsoft-signed EXE, portable Node.js, portable Python, Edge, and commercial RMM agents all have legitimate reasons to run. Attackers supply the small layer between them: a script, adjacent DLL, extension, task, or stolen token. A static scanner may see only fragments before assembly, while source images may be deleted afterward. Hashing the clean runtime tells you almost nothing about what it consumed.
+
+**Names are disposable; behaviour is not.** The September counterfeit-installer campaign generated different archive hashes per request and randomised its directories and filenames. A repeated launch cadence, a user-writable staging root, a signed launcher in the wrong location, and an unexpected child process survive that churn. Persistence is also redundant and asynchronous: one mechanism fires at sign-in, another every hour, another when a service starts. A five-minute sandbox can miss all three, and deleting the artifact that fired first can leave the others asleep until the investigator goes home.
+
+**Control and identity can outlive the file.** HTTPS, WebSockets, CDNs, and remote-support infrastructure are difficult to block categorically. In one Microsoft case, portable Node.js in `LocalAppData` was paired with Run or Startup persistence and HTTPS polling. In another, portable Python below `ProgramData` appeared in the same chain as dual persistence and a WebSocket tunnel. Browser sessions, refresh tokens, SSH keys, VPN credentials, service accounts, RMM enrolment, and device registrations can remain useful after the loader is removed. [Microsoft's Entra response guidance](https://learn.microsoft.com/en-us/entra/identity/users/users-revoke-access) separates account disabling, refresh-token revocation, device disabling, and application-session revocation for exactly this reason. A clean antivirus scan is not proof of clean identity.
+
+The common failure is evaluating each event alone. Browser opened Terminal: plausible. PowerShell downloaded a ZIP: maybe administration. Signed EXE loaded: trusted. Task created: routine. Python connected over 443: development work. Put them on one timeline with writer identity, path ownership, and trigger state, and the answer changes completely.
+
+## The persistence mechanisms getting interesting now
+
+Run keys and services never disappeared. They acquired company.
+
+### The browser is becoming an implant host
+
+GTIG's April 2026 investigation of UNC6692 is one of the best examples. The attacker installed a malicious Chromium extension called SNOWBELT, then created a Startup shortcut and two scheduled tasks. One task launched a windowless Edge process with a separate user-data directory and the extension loaded. Another cleaned up unwanted headless Edge processes. The browser was no longer the place that delivered the malware. It was the long-lived runtime that kept the malware alive. [GTIG documented the complete SNOWBELT chain](https://cloud.google.com/blog/topics/threat-intelligence/unc6692-social-engineering-custom-malware).
+
+That changes the detection question. "Is Edge signed?" is useless. Of course it is. Ask why Edge is starting headless at logon, why it has a nonstandard profile, which extension path it loaded, who wrote that path, and which scheduled task keeps bringing it back.
+
+### Remote administration is persistence with a support contract
+
+AnyDesk, ScreenConnect, Splashtop, Atera, Chrome Remote Desktop, MeshAgent, and similar products are built to survive reboots, traverse awkward networks, and give an operator reliable control. Those are excellent product requirements for IT and excellent persistence requirements for an intruder.
+
+The binary may be legitimate. The service may be correctly signed. The traffic may go to infrastructure with a good reputation. The question is not whether AnyDesk is legitimate. It is whether this copy, installed by this account, on this machine, at this time, was expected. If the answer is "we allow RMM," the allowlist is too broad to mean anything.
+
+The same applies to tunnelers. TerminalFix brought a portable Python runtime and opened a reverse WebSocket over TLS. Other incidents in GTIG's ransomware set used `cloudflared`, Chisel, reverse SOCKS tools, or OpenSSH. A reverse tunnel does not create reboot persistence by itself, but once a task, service, or RMM agent relaunches it, the two mechanisms become one durable access path.
+
+### Persistence can live in identity
+
+Deleting a Run key does nothing to an access token, an attacker-created account, a registered device, an OAuth grant, or a stolen browser session. Password reset alone does not revoke every application-issued session. This is why an apparently clean endpoint can be followed by another successful login from the same actor.
+
+Modern stealers target browser state, password managers, cloud credentials, VPN material, SSH keys, and developer tokens because those objects outlive the loader that stole them. In GTIG's ransomware investigations, actors repeatedly went after Windows credential stores, Chromium data, password managers, Veeam credentials, and privileged accounts. The payload can disappear and the access can remain.
+
+Endpoint persistence review therefore has to include the identity plane: recent device registrations, refresh-token use, new MFA methods, OAuth consent, mailbox rules, account privilege changes, VPN sessions, and service-account activity. If incident response ends at the filesystem, the attacker may already be waiting outside it.
+
+## EDR killers protect the persistence layer
+
+Once an operator has a foothold worth keeping, the next problem is the thing watching it.
+
+ESET's March 2026 survey tracked almost 90 EDR killers in active use. By its [July threat report](https://www.welivesecurity.com/en/eset-research/eset-threat-report-h1-2026/), the number documented in the wild had passed 100. Most were not brilliant new rootkits. They were interchangeable products and scripts: vulnerable signed drivers, legitimate anti-rootkit utilities, service-control commands, Safe Mode tricks, and driverless tools that block an EDR's network reporting or freeze its process. Affiliates swap the user-mode component, the packer, or the driver while preserving the same job. [ESET's technical analysis](https://www.welivesecurity.com/en/eset-research/edr-killers-explained-beyond-the-drivers/) is practically a case study in why family-level attribution can mislead defenders.
+
+This is post-compromise activity. An EDR killer is not the initial exploit and a vulnerable driver is not automatically a new Windows zero-day. It only needs to open a short gap before encryption or exfiltration. Some killers terminate protected processes through drivers; others suspend a sensor or block its backend traffic. Silence can look like a healthy absence of alerts unless telemetry health is monitored as its own signal. The sequence—new driver or service, telemetry loss, security-product tampering, then mass file activity—is more useful than the final encryptor's name.
+
+## What Windows is missing: a persistence ledger
+
+Windows has excellent pieces of the evidence. Task Scheduler knows the trigger and principal. The Service Control Manager knows the service identity and binary path. The registry can expose autoruns. Code Integrity knows signatures. Defender and Sysmon can record process, file, driver, registry, and network activity.
+
+What I want is one OS-owned, provenance-aware view of durable execution.
+
+For every persistence registration, the ledger would record:
+
+- the writer's SID and integrity level;
+- the writer's signer and source provenance;
+- the exact durable mechanism and trigger;
+- the resolved target, arguments, hash, owner, and ACL;
+- the principal that will consume it;
+- the principal under which the target will run;
+- every later change to the target or its dependencies.
+
+At trigger time, Windows would re-resolve the path and compare the target with what was registered. A signed executable loading an adjacent DLL from a user-writable directory would not inherit trust merely because the EXE is signed. A task created by one principal that produces execution as another would be visible as a cross-principal edge. A target replaced after registration would lose the trust decision attached to the original hash. One revoke action would remove the launch point and quarantine its dependent artifacts instead of making responders hunt through twelve management consoles.
+
+The ledger should cover at least Run and RunOnce, Startup folders, scheduled tasks, services, permanent WMI subscriptions, BITS jobs, Winlogon extensions, IFEO and SilentProcessExit, AppInit and AppCert DLLs, COM activation overrides, PowerShell profiles and module paths, browser extensions, and registered remote-management tools. Enterprise products could link identity-provider events rather than pretending the endpoint is the whole world.
+
+That is future-build hardening, not a zero-day. The public cases above mostly show same-user persistence or administrator-authorised system changes; none demonstrates an unauthorised Windows boundary crossing that belongs in MSRC's vulnerability queue. Fragmented visibility is the design problem—not a broken Task Scheduler or `HKCU\Run` boundary.
+
+## What defenders can do today
+
+We do not have to wait for a new Windows primitive to use the model.
+
+First, build the ledger yourself. Snapshot every durable mechanism you care about, then diff it continuously. Do not store only the task name or registry value. Resolve the final executable and its dependencies, record the writer, hash the target, capture its owner and ACL, and calculate the eventual execution identity. A task called `Microsoft Update` earns no trust from its name. A Microsoft-signed binary outside its normal directory is high-priority for review and must not be trusted by signature alone. A signed executable resolving an unsigned DLL beside itself in `ProgramData` deserves the same treatment.
+
+Second, put application control at the user-writable boundary. Microsoft's [App Control for Windows](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/appcontrol) can govern executables, DLLs, MSI files, scripts, batch files, and PowerShell. Start in audit mode, find the real business exceptions, then enforce. Alert on portable Node.js or Python running from `AppData`, `ProgramData`, or `Users\Public`; `msiexec` launching a child into a writable directory; `rundll32` loading a nonstandard DLL; and a signed program loading an adjacent unsigned DLL outside its expected installation path.
+
+Third, make persistence consumers high-signal:
+
+| Durable transition | The question worth alerting on |
+|---|---|
+| Run, Startup, task, or service -> writable path | Who wrote both objects, what identity will execute, and did the target change after registration? |
+| Scheduled task -> browser or portable runtime | Why is it headless, which profile/extension/script is loaded, and is that combination approved? |
+| Remote-assistance session -> shell or MSI | Did `cmd`, PowerShell, WScript, or `msiexec` start immediately after control was granted? |
+| New RMM, VPN, SSH, or tunneler -> outbound session | Is the product, tenant, installer, account, destination, and maintenance window allowlisted? |
+| Driver/service creation -> EDR silence | Did a vulnerable driver load, did telemetry stop, or were protection settings changed? |
+| Token or account change -> new login path | Were sessions, refresh tokens, device registrations, and privileges revoked—not just the password? |
+
+Fourth, protect the protection layer. Verify that tamper protection, compatible memory-integrity settings, and Microsoft's vulnerable-driver blocklist are enabled and current. Add the ASR rule that blocks abuse of exploited vulnerable signed drivers. Microsoft's [driver-blocking guidance](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/design/microsoft-recommended-driver-block-rules) explains the split: ASR can stop an application writing a vulnerable driver, while the blocklist or App Control can stop an existing one loading. Test App Control and new driver blocks in audit mode first; Microsoft warns that incompatible blocks can break software and, rarely, crash a device.
+
+Fifth, treat egress as part of persistence. Domain reputation alone is finished as a security model. Current campaigns hide inside HTTPS, WebSockets, CDNs, public code hosting, and remote-support infrastructure. Correlate the destination with the process, identity, and reason for the connection. `cloudflared` on a developer laptop may be normal. [GTIG saw it installed through `msiexec` immediately after SharePoint exploitation](https://cloud.google.com/blog/topics/threat-intelligence/ransomware-ttps-shifting-threat-landscape/) to establish outbound-only C2. That is not.
+
+## The family name is the least durable indicator
+
+Hashes die first. Domains disappear next. Family names last a little longer. But every durable implant still needs something trusted to bring it back: logon, a task, a service, a browser, an RMM agent, or an identity token.
+
+I do not know if watching those handoffs gets us 98 percent. I know it gives defenders fewer places to watch and attackers fewer places to hide.
+
+The costume changes. The thing that brings it back does not.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Five Security Threats Almost Nobody Is Watching Yet
 DATE       : 2026-09-03
@@ -228,7 +425,7 @@ The practical review question is simple: when one layer authenticates a fact, wh
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Perfex CRM 3.4.x and Earlier: Unauthenticated to RCE in Three Quiet Steps
 DATE       : 2026-08-18
@@ -565,7 +762,7 @@ The boring bugs are the ones that kill you. Patch your Perfex, turn off the migr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-33185 Got Patched, But the Test-Email SSRF Path Is Only Half-Fixed
 DATE       : 2026-08-17
@@ -713,12 +910,12 @@ Each one is a small change. Together they close the gap that the CVE-2026-33185 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-99501: When pip install Steals Every SSH Key in Your Agent Through Docker BuildKit
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-99501-docker-buildkit-ssh-agent-hijack/
-CVE        : cve-2026-99501, CVE-2026-99501
+CVE        : CVE-2026-99501, cve-2026-99501
 CATEGORIES : exploits, supply-chain, devops
 TAGS       : cve-2026-99501, docker, buildkit, ssh-agent, supply-chain, pip, hijack
 WORD_COUNT : 1501
@@ -834,7 +1031,7 @@ Until then, treat `--mount=type=ssh` the way you would treat pasting your privat
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-66066: Reading a Rails Server's Environment Through an Uploaded 'Image'
 DATE       : 2026-08-04
@@ -951,7 +1148,7 @@ Upgrading to 8.1.3.1 closes it. The part worth remembering is the shape of the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : shellDojo is live — train like they're already inside
 DATE       : 2026-08-03
@@ -1021,7 +1218,7 @@ If any of that sounds like your kind of Friday, the range is live at [shell-dojo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : the veil — v1.0.0-alpha.10
 DATE       : 2026-08-03
@@ -1110,7 +1307,7 @@ This is the final alpha, which means the road to beta starts now. If you run me,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CXL Memory — Disaggregated RAM with No Security Model
 DATE       : 2026-08-02
@@ -1416,7 +1613,7 @@ CXL is the future of data center memory. It's also a future where your data live
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Three Obscure Hardware Attack Vectors You've Never Heard Of
 DATE       : 2026-07-30
@@ -1474,7 +1671,7 @@ Each of these is obscure in its own way — but all three are real, weaponizable
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RowPress — When Leaving a DRAM Row Open Longer Causes Bit Flips (The Rowhammer Evolution Nobody Patched)
 DATE       : 2026-07-30
@@ -1707,7 +1904,7 @@ RowPress is that root cause exposed. And as of DDR5's third generation, it remai
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Platypus — Recovering AES Keys by Reading a Linux File (The RAPL Power Side Channel Nobody Knows About)
 DATE       : 2026-07-29
@@ -1945,7 +2142,7 @@ The Platypus attack is not the last power side channel. It is the first of a gen
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost Disk — NVMe SSD Controller Firmware Rootkits and the Persistent Implant Nobody Is Auditing
 DATE       : 2026-07-28
@@ -2214,7 +2411,7 @@ Until then, the most persistent, forensic-resistant implant isn't hiding in your
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GhostTouch — Injecting Fake Taps into Capacitive Touchscreens Using Electromagnetic Fields
 DATE       : 2026-07-27
@@ -2394,7 +2591,7 @@ A GhostTouch-class attack could be deployed today and no existing enterprise mob
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Light Commands — Laser-Based Audio Injection on Voice-Controllable Systems
 DATE       : 2026-07-26
@@ -2526,7 +2723,7 @@ The Light Commands team published their full paper, video demonstrations, and de
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows 11 DirectWrite Font Fuzzing — System Service Exception via Kernel Font Driver
 DATE       : 2026-07-26
@@ -2783,7 +2980,7 @@ The difference between a BSOD and a working remote code execution exploit is con
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows Kernel Object Namespace — Zero Isolation, Zero Audit, Zero Visibility
 DATE       : 2026-07-25
@@ -2957,7 +3154,7 @@ There is no built-in audit tool, no security baseline, no Group Policy, and no W
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop
 DATE       : 2026-07-18
@@ -3177,7 +3374,7 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
@@ -3378,7 +3575,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
@@ -3461,7 +3658,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
@@ -3573,12 +3770,12 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : CVE-2026-23111, cve-2026-23111
+CVE        : cve-2026-23111, CVE-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -3638,7 +3835,7 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
@@ -3725,7 +3922,7 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing
 DATE       : 2026-06-18
@@ -3873,12 +4070,12 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag
 DATE       : 2026-06-16
 URL        : https://garrettstimpson.ca/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/
-CVE        : CVE-2026-20182, cve-2026-20245, CVE-2026-20245, CVE-2026-20262, cve-2026-20262
+CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, CVE-2026-20262, cve-2026-20262
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, cve-2026-20262, cve-2026-20245, path-traversal, root, vmanage, zero-day
 WORD_COUNT : 1449
@@ -3947,7 +4144,7 @@ I expect we will find out. Probably sooner than anyone wants.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
@@ -4073,7 +4270,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -4138,7 +4335,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -4201,7 +4398,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
@@ -4281,7 +4478,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
@@ -4354,12 +4551,12 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
 URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
-CVE        : CVE-2022-0492, cve-2022-0492
+CVE        : cve-2022-0492, CVE-2022-0492
 CATEGORIES : exploits, linux
 TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
 WORD_COUNT : 1248
@@ -4448,7 +4645,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
@@ -4512,7 +4709,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -4609,7 +4806,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -4691,7 +4888,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -4826,12 +5023,12 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -4912,7 +5109,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
@@ -4989,7 +5186,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -5085,7 +5282,7 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
@@ -5158,7 +5355,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -5240,7 +5437,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -5379,12 +5576,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -5469,12 +5666,12 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : cve-2026-34926, CVE-2026-34926
+CVE        : CVE-2026-34926, cve-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -5534,7 +5731,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
@@ -5644,7 +5841,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="044" type="security-research-post">
+<DOCUMENT id="045" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -5756,7 +5953,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="045" type="security-research-post">
+<DOCUMENT id="046" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -5826,7 +6023,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="046" type="security-research-post">
+<DOCUMENT id="047" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -6003,7 +6200,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="047" type="security-research-post">
+<DOCUMENT id="048" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -6097,7 +6294,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="048" type="security-research-post">
+<DOCUMENT id="049" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -6260,7 +6457,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="049" type="security-research-post">
+<DOCUMENT id="050" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -6418,7 +6615,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="050" type="security-research-post">
+<DOCUMENT id="051" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -6552,7 +6749,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="051" type="security-research-post">
+<DOCUMENT id="052" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -6774,7 +6971,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="052" type="security-research-post">
+<DOCUMENT id="053" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -6902,7 +7099,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="053" type="security-research-post">
+<DOCUMENT id="054" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -7109,12 +7306,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="054" type="security-research-post">
+<DOCUMENT id="055" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -7223,7 +7420,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="055" type="security-research-post">
+<DOCUMENT id="056" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -7407,12 +7604,12 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="056" type="security-research-post">
+<DOCUMENT id="057" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
+CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -7563,7 +7760,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="057" type="security-research-post">
+<DOCUMENT id="058" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -7716,7 +7913,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="058" type="security-research-post">
+<DOCUMENT id="059" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -7816,7 +8013,7 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="059" type="security-research-post">
+<DOCUMENT id="060" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
@@ -7967,12 +8164,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="060" type="security-research-post">
+<DOCUMENT id="061" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431
+CVE        : cve-2026-31431, CVE-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -8175,12 +8372,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="061" type="security-research-post">
+<DOCUMENT id="062" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -8290,12 +8487,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="062" type="security-research-post">
+<DOCUMENT id="063" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -8387,7 +8584,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="063" type="security-research-post">
+<DOCUMENT id="064" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -8534,5 +8731,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 63 documents — 2026-09-08T06:27:08Z
+END OF CORPUS — 64 documents — 2026-09-08T10:30:44Z
 ================================================================================
