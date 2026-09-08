@@ -1,5 +1,5 @@
 /**
- * Agent Garrett - Security Research Agent  v5.2.1
+ * Agent Garrett - Security Research Agent  v5.2.2
  *
  * Memory engine: neuron-db (the Rust core compiled to WebAssembly, bundled in-Worker).
  *   - Corpus RAG  — the llms.txt corpus is ingested into a neuron scope and recalled
@@ -33,6 +33,8 @@ import {
   hasExplicitWebSearchIntent,
   isPublicIpv4,
   normalizeTarget,
+  parseLeakCheckPublicResponse,
+  parseXposedOrNotEmailResponse,
   removeSessionIndexEntry,
   renderBalancedContext,
   resolveScopedRedirect,
@@ -51,7 +53,7 @@ import {
 const MODEL         = '@cf/zai-org/glm-4.7-flash'; // current, fast long-context default
 const ROUTER_MODEL  = '@cf/zai-org/glm-4.7-flash'; // deterministic JSON routing pass
 const OUTPUT_FALLBACK_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'; // active non-reasoning recovery path
-const BUILD_VERSION = '2026-09-08-forensics-darkweb-v5.2.1';  // bump per deploy; shown in header + /api/tools/catalog
+const BUILD_VERSION = '2026-09-08-free-breach-v5.2.2';  // bump per deploy; shown in header + /api/tools/catalog
 const EMBED_MODEL   = '@cf/baai/bge-base-en-v1.5'; // 768-dim (only used by the optional Vectorize path)
 const EMBED_DIM     = 768;
 
@@ -1273,7 +1275,7 @@ const BUILTIN_TOOL_SPECS = [
   { name: 'github_user', category: 'people', passive: true, description: 'GitHub public user profile (name/company/location/links)' },
   { name: 'gravatar', category: 'people', passive: true, description: 'Gravatar profile + avatar existence by email (sha256)' },
   { name: 'email_recon', category: 'people', passive: true, description: 'Email format + MX (DoH) + gravatar presence' },
-  { name: 'breach_check', category: 'people', passive: true, description: 'Email breach exposure (XposedOrNot keyless; HIBP if HIBP_API_KEY set)' },
+  { name: 'breach_check', category: 'people', passive: true, description: 'Email breach exposure via the free, keyless XposedOrNot public API (the email is sent to that provider)' },
   { name: 'tech_fingerprint', category: 'recon', passive: false, description: 'Fetch site and fingerprint CMS/framework/server (Discourse, WordPress, ...) — contacts target' },
   { name: 'origin_ip', category: 'recon', passive: true, description: 'Find possible origin IP behind Cloudflare via passive subdomain DNS probing' },
   { name: 'image_osint', category: 'osint', passive: false, description: 'Download an image for hash/type/EXIF triage (contacts target)' },
@@ -2198,42 +2200,56 @@ function isCloudflareIp(ip) {
   return false;
 }
 
-// Email breach exposure — XposedOrNot (keyless) + HaveIBeenPwned (if HIBP_API_KEY set).
-async function breachCheck(env, email) {
+// Email breach exposure — free, keyless XposedOrNot endpoints only.
+async function breachCheck(_env, email) {
   const e = String(email || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return 'breach_check: a valid email is required.';
-  const out = [];
-  try {
-    const r = await fetch(`https://api.xposedornot.com/v1/breach-analytics?email=${encodeURIComponent(e)}`,
-      { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(10000) });
-    if (r.status === 404) out.push('XposedOrNot: no known breaches for this email.');
-    else if (r.ok) {
-      const d = await r.json();
-      const eb = (d.ExposedBreaches && d.ExposedBreaches.breaches_details) || [];
-      if (!eb.length) out.push('XposedOrNot: no known breaches.');
-      else {
-        const risk = d.BreachMetrics && d.BreachMetrics.risk && d.BreachMetrics.risk[0];
-        const classes = new Set();
-        eb.forEach(b => String(b.xposed_data || '').split(';').forEach(c => { const t = c.trim(); if (t) classes.add(t); }));
-        const named = eb.slice(0, 8).map(b => b.breach + (b.xposed_date ? ' (' + b.xposed_date + ')' : ''));
-        let line = `XposedOrNot: ${eb.length} breach(es)` + (risk ? ` | risk: ${risk.risk_label} (${risk.risk_score}/100)` : '');
-        line += `\nexposed data types: ${[...classes].slice(0, 14).join(', ') || 'unknown'}`;
-        line += `\nbreaches: ${named.join(', ')}${eb.length > 8 ? ', +' + (eb.length - 8) + ' more' : ''}`;
-        out.push(line);
-      }
-    } else out.push(`XposedOrNot: lookup failed (HTTP ${r.status}).`);
-  } catch (ex) { out.push(`XposedOrNot: lookup failed (${ex.message}).`); }
-  const hibpKey = String((env && env.HIBP_API_KEY) || '');
-  if (hibpKey) {
+
+  const rateHint = headers => {
+    const retryAfter = String(headers.get('retry-after') || '').trim();
+    const remaining = String(headers.get('x-ratelimit-remaining') || headers.get('x-rate-limit-remaining') || '').trim();
+    const parts = [];
+    if (/^\d{1,7}$/.test(retryAfter)) parts.push(`retry after ${retryAfter}s`);
+    if (/^\d{1,7}$/.test(remaining)) parts.push(`${remaining} request(s) remaining`);
+    return parts.length ? `; ${parts.join('; ')}` : '';
+  };
+  const query = async url => {
     try {
-      const r = await fetch(`https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(e)}?truncateResponse=true`,
-        { headers: { 'hibp-api-key': hibpKey, 'User-Agent': 'garrettstimpson-agent', 'Accept': 'application/json' }, signal: AbortSignal.timeout(9000) });
-      if (r.status === 404) out.push('HIBP: no breaches found.');
-      else if (r.ok) { const d = await r.json(); out.push(`HIBP: ${d.length} breach(es) — ${d.map(x => x.Name).join(', ')}`); }
-      else out.push(`HIBP: lookup failed (HTTP ${r.status}).`);
-    } catch (ex) { out.push(`HIBP: lookup failed (${ex.message}).`); }
-  } else out.push('HIBP: skipped (set HIBP_API_KEY on deploy to enable).');
-  return `breach_check ${e}\n` + out.join('\n');
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'garrettstimpson-agent/5.2.2', 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (response.status === 404) return { status: 'clean', count: 0, breaches: [], dataClasses: [] };
+      if (!response.ok) return { status: 'error', reason: `HTTP ${response.status}${rateHint(response.headers)}` };
+      let payload;
+      try { payload = await response.json(); }
+      catch { return { status: 'error', reason: 'malformed JSON response' }; }
+      return parseXposedOrNotEmailResponse(payload);
+    } catch (error) {
+      return { status: 'error', reason: String(error?.message || error).slice(0, 160) };
+    }
+  };
+
+  const primary = await query(`https://api.xposedornot.com/v1/check-email/${encodeURIComponent(e)}?details=true`);
+  let result = primary;
+  let fallbackNote = '';
+  if (primary.status === 'error') {
+    const fallback = await query(`https://api.xposedornot.com/v1/breach-analytics?email=${encodeURIComponent(e)}`);
+    if (fallback.status === 'error') {
+      return `breach_check ${e} — free public breach index\nXposedOrNot: lookup failed (primary: ${primary.reason}; fallback: ${fallback.reason}).\nNo paid API or key was used; this is an availability failure, not a clean result.`;
+    }
+    result = fallback;
+    fallbackNote = `\nendpoint note: free analytics fallback used because the primary endpoint was unavailable (${primary.reason}).`;
+  }
+
+  let providerLine = 'XposedOrNot: no known breaches for this email.';
+  if (result.status === 'exposed') {
+    const named = result.breaches.slice(0, 8).map(item => item.name + (item.date ? ` (${item.date})` : ''));
+    providerLine = `XposedOrNot: ${result.count} breach(es)`
+      + `\nexposed data types: ${result.dataClasses.slice(0, 14).join(', ') || 'unknown'}`
+      + `\nbreaches: ${named.join(', ') || 'provider returned unnamed breach records'}${result.count > 8 ? `, +${result.count - 8} more` : ''}`;
+  }
+  return `breach_check ${e} — free public breach index\n${providerLine}${fallbackNote}\ncoverage: XposedOrNot public API; no paid API or key used.\nmanual cross-check: https://haveibeenpwned.com/ (not queried by Garrett)`;
 }
 
 // Web tech fingerprint — fetch the site and detect CMS/framework/server. Contacts target.
@@ -2438,7 +2454,7 @@ async function ransomwareWatch(query) {
   const jobs = [
     (async () => {
       const r = await fetch('https://api.ransomware.live/recentvictims', {
-        headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/5.2.1' },
+        headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/5.2.2' },
         signal: AbortSignal.timeout(18000),
       });
       if (!r.ok) throw new Error(`ransomware.live HTTP ${r.status}`);
@@ -2455,7 +2471,7 @@ async function ransomwareWatch(query) {
     })(),
     (async () => {
       const r = await fetch('https://www.ransomlook.io/api/recent', {
-        headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/5.2.1' },
+        headers: { 'Accept': 'application/json', 'User-Agent': 'garrettstimpson-agent/5.2.2' },
         signal: AbortSignal.timeout(12000),
       });
       if (!r.ok) throw new Error(`ransomlook HTTP ${r.status}`);
@@ -3342,7 +3358,7 @@ async function exposureSearch(env, selector) {
     ['paste_search', 'Paste / forum mentions', pasteSearch(t)],
   ];
   if (isEmail) {
-    jobs.push(['breach_check', 'Breach databases (XposedOrNot/HIBP)', breachCheck(env, t)]);
+    jobs.push(['breach_check', 'XposedOrNot (free public breach index)', breachCheck(env, t)]);
     jobs.push(['gravatar', 'Gravatar profile', gravatarLookup(t)]);
   }
   const settled = await Promise.all(jobs.map(async ([tool, label, promise]) => {
@@ -3373,7 +3389,7 @@ async function exposureSearch(env, selector) {
   if (classes.length) out.push(`data classes seen: ${classes.join(', ')}`);
   if (dates.length) out.push(`exposure timeline: ${dates.join(' -> ')}`);
   if (pEmails.length || pDomains.length) out.push(`cross-source PIVOTS (run exposure_search on these next): ${[].concat(pEmails, pDomains).join(', ')}`);
-  out.push('', combined, '\nNOTE: aggregated from defender-oriented keyless sources (HudsonRock, LeakCheck public, XposedOrNot, paste). Not exhaustive vs. a paid breach DB; this tool reports WHETHER/WHERE a selector is exposed, never raw stolen credentials. Rotate any exposed secrets.');
+  out.push('', combined, '\nNOTE: aggregated only from defender-oriented free/keyless sources (HudsonRock, LeakCheck public, XposedOrNot, paste). Coverage differs by source and an unavailable provider never counts as a clean result. The tool reports WHETHER/WHERE a selector is exposed, never raw stolen credentials. Rotate any exposed secrets.');
   return out.join('\n');
 }
 
@@ -3413,12 +3429,11 @@ async function leakCheck(target) {
     const r = await fetch(`https://leakcheck.io/api/public?check=${encodeURIComponent(t)}`,
       { headers: { 'User-Agent': 'garrettstimpson-agent/4.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return `leakcheck ${t}: lookup failed (HTTP ${r.status}).`;
-    const d = await r.json();
-    if (!d.success) return `leakcheck ${t}: lookup failed (${String(d.error || 'no result').slice(0, 240)}).`;
-    if (!d.found) return `leakcheck ${t}: not found in the public breach index.`;
-    const fields = (d.fields || []).join(', ');
-    const srcs = (d.sources || []).slice(0, 8).map(s => (s.name || '?') + (s.date ? ' (' + s.date + ')' : ''));
-    return `leakcheck ${t}: FOUND in ${d.found} breach record(s)\nexposed data types: ${fields || '?'}` + (srcs.length ? '\nsources:\n' + srcs.join('\n') : '');
+    const parsed = parseLeakCheckPublicResponse(await r.json());
+    if (parsed.status === 'error') return `leakcheck ${t}: lookup failed (${parsed.reason}).`;
+    if (parsed.status === 'clean') return `leakcheck ${t}: not found in the public breach index.`;
+    const srcs = parsed.sources.map(s => s.name + (s.date ? ' (' + s.date + ')' : ''));
+    return `leakcheck ${t}: FOUND in ${parsed.count} breach record(s)\nexposed data types: ${parsed.fields.join(', ') || '?'}` + (srcs.length ? '\nsources:\n' + srcs.join('\n') : '');
   } catch (e) { return `leakcheck ${t}: lookup failed (${e.message}).`; }
 }
 

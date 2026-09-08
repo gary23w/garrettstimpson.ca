@@ -1,6 +1,6 @@
 {
   "name": "garrettstimpson-agent",
-  "version": "5.2.1",
+  "version": "5.2.2",
   "private": true,
   "scripts": {
     "test": "node validate.js && node --test *.test.mjs",
@@ -51,11 +51,6 @@
         "type": "secret_text",
         "name": "GITHUB_TOKEN",
         "description": "Optional read-only GitHub PAT — enables github_osint code search (anonymous is impossible)."
-      },
-      {
-        "type": "secret_text",
-        "name": "HIBP_API_KEY",
-        "description": "Optional HaveIBeenPwned API key — enables HIBP results in breach_check (XposedOrNot works without it)."
       },
       {
         "type": "secret_text",

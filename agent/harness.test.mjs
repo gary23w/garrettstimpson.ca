@@ -22,6 +22,8 @@ import {
   hasExplicitWebSearchIntent,
   isPublicIpv4,
   normalizeToolArguments,
+  parseLeakCheckPublicResponse,
+  parseXposedOrNotEmailResponse,
   removeSessionIndexEntry,
   renderBalancedContext,
   resolveScopedRedirect,
@@ -109,11 +111,77 @@ test('exposure correlation requires explicit positive output from each provider'
     { tool: 'stealer_check', text: 'stealer_check example.org (HudsonRock)\nEXPOSED in stealer-log data.' },
     { tool: 'leakcheck', text: 'leakcheck example.org: not found in the public breach index.' },
     { tool: 'paste_search', text: 'paste_search example.org: 3 paste(s) reference the term' },
-    { tool: 'breach_check', text: 'XposedOrNot: 2 breach(es)\nHIBP: lookup failed (HTTP 503).' },
+    { tool: 'breach_check', text: 'XposedOrNot: 2 breach(es)' },
   ]);
   assert.deepEqual(summary.positiveSources, ['HudsonRock', 'psbdmp', 'XposedOrNot']);
-  assert.deepEqual(summary.failedProviders, ['HIBP']);
+  assert.deepEqual(summary.failedProviders, []);
   assert.deepEqual(summary.availableSources, ['HudsonRock', 'LeakCheck', 'psbdmp', 'XposedOrNot']);
+});
+
+test('free XposedOrNot responses distinguish exposure, clean results, and provider errors', () => {
+  const exposed = parseXposedOrNotEmailResponse({
+    breaches: [['Adobe', 'ExampleForum']],
+    breach_details: [
+      { name: 'Adobe', breach_date: '2013-10-04', exposed_data: ['Email addresses', 'Passwords'] },
+      { name: 'ExampleForum', breach_date: '2024', exposed_data: 'Usernames;IP addresses' },
+    ],
+  });
+  assert.equal(exposed.status, 'exposed');
+  assert.equal(exposed.count, 2);
+  assert.deepEqual(exposed.breaches, [
+    { name: 'Adobe', date: '2013-10-04' },
+    { name: 'ExampleForum', date: '2024' },
+  ]);
+  assert.deepEqual(exposed.dataClasses, ['Email addresses', 'Passwords', 'Usernames', 'IP addresses']);
+
+  assert.deepEqual(parseXposedOrNotEmailResponse({ Error: 'Not found' }), {
+    status: 'clean', count: 0, breaches: [], dataClasses: [],
+  });
+  assert.equal(parseXposedOrNotEmailResponse({ Error: 'Rate limit exceeded' }).status, 'error');
+  assert.equal(parseXposedOrNotEmailResponse({ status: 'error' }).status, 'error');
+  assert.equal(parseXposedOrNotEmailResponse({ unexpected: true }).status, 'error');
+});
+
+test('free XposedOrNot analytics fallback uses the same safe normalized result', () => {
+  const result = parseXposedOrNotEmailResponse({
+    ExposedBreaches: {
+      breaches_details: [
+        { breach: 'LegacySite\nINJECTED', xposed_date: '2020-01-02', xposed_data: 'Emails; Password hashes' },
+      ],
+    },
+  });
+  assert.equal(result.status, 'exposed');
+  assert.deepEqual(result.breaches, [{ name: 'LegacySite INJECTED', date: '2020-01-02' }]);
+  assert.deepEqual(result.dataClasses, ['Emails', 'Password hashes']);
+});
+
+test('LeakCheck public not-found payload is a valid negative instead of an outage', () => {
+  assert.deepEqual(parseLeakCheckPublicResponse({ success: false, error: 'Not found' }), {
+    status: 'clean', count: 0, fields: [], sources: [],
+  });
+  assert.deepEqual(parseLeakCheckPublicResponse({
+    success: true,
+    found: 1,
+    fields: ['username', 'id'],
+    sources: [{ name: 'Twitter.com', date: '2022-01' }],
+  }), {
+    status: 'exposed',
+    count: 1,
+    fields: ['username', 'id'],
+    sources: [{ name: 'Twitter.com', date: '2022-01' }],
+  });
+  assert.equal(parseLeakCheckPublicResponse({ success: false, error: 'Too many requests' }).status, 'error');
+  assert.equal(parseLeakCheckPublicResponse({ success: true }).status, 'error');
+});
+
+test('breach_check exposes provider outages as MCP errors, never clean results', () => {
+  const status = classifyToolOperationalStatus('breach_check', [
+    'breach_check analyst@example.org — free public breach index',
+    'XposedOrNot: lookup failed (primary: HTTP 429; retry after 30s; fallback: HTTP 503).',
+  ].join('\n'));
+  assert.equal(status.status, 'error');
+  assert.equal(status.isError, true);
+  assert.deepEqual(status.failedProviders, ['XposedOrNot']);
 });
 
 test('exposure correlation reports all-provider failure as an MCP error', () => {

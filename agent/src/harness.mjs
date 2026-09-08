@@ -198,6 +198,111 @@ function startupArtifactLocation(snippet, artifactMatch) {
 
 const uniq = values => [...new Set(values || [])];
 
+function safeProviderValue(value, maxLength = 160) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function providerDataClasses(value) {
+  const values = Array.isArray(value) ? value : String(value ?? '').split(/[;,]/);
+  return values.map(item => safeProviderValue(item, 80)).filter(Boolean);
+}
+
+// Normalize both documented keyless XposedOrNot response shapes. Provider data
+// is reduced to breach names, dates, and data-class labels; raw records are never
+// accepted or returned by this parser.
+export function parseXposedOrNotEmailResponse(payload) {
+  const empty = { status: 'error', count: 0, breaches: [], dataClasses: [] };
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ...empty, reason: 'malformed response' };
+  }
+
+  const providerError = safeProviderValue(payload.Error ?? payload.error);
+  if (providerError) {
+    if (/^(?:not found|no (?:known )?breaches?(?: found)?)\.?$/i.test(providerError)) {
+      return { status: 'clean', count: 0, breaches: [], dataClasses: [] };
+    }
+    return { ...empty, reason: providerError };
+  }
+
+  const analytics = payload.ExposedBreaches;
+  const detailRows = Array.isArray(payload.breach_details)
+    ? payload.breach_details
+    : Array.isArray(analytics?.breaches_details)
+      ? analytics.breaches_details
+      : [];
+  const namedBreaches = Array.isArray(payload.breaches)
+    ? payload.breaches.flat(2).filter(item => typeof item === 'string').map(item => safeProviderValue(item, 120)).filter(Boolean)
+    : [];
+  const breachByName = new Map();
+  const dataClasses = [];
+
+  for (const row of detailRows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const name = safeProviderValue(row.name ?? row.breach, 120);
+    const rawDate = safeProviderValue(row.breach_date ?? row.xposed_date, 32);
+    const date = /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/.test(rawDate) ? rawDate : '';
+    if (name) breachByName.set(name, { name, date });
+    dataClasses.push(...providerDataClasses(row.exposed_data ?? row.xposed_data));
+  }
+  for (const name of namedBreaches) {
+    if (!breachByName.has(name)) breachByName.set(name, { name, date: '' });
+  }
+
+  const breaches = [...breachByName.values()];
+  if (breaches.length || detailRows.length) {
+    return {
+      status: 'exposed',
+      count: Math.max(breaches.length, detailRows.length),
+      breaches,
+      dataClasses: uniq(dataClasses),
+    };
+  }
+
+  const recognized = Object.hasOwn(payload, 'breaches')
+    || Object.hasOwn(payload, 'breach_details')
+    || (analytics && typeof analytics === 'object');
+  return recognized
+    ? { status: 'clean', count: 0, breaches: [], dataClasses: [] }
+    : { ...empty, reason: 'malformed response' };
+}
+
+export function parseLeakCheckPublicResponse(payload) {
+  const empty = { status: 'error', count: 0, fields: [], sources: [] };
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ...empty, reason: 'malformed response' };
+  }
+
+  const providerError = safeProviderValue(payload.error);
+  if (payload.success === false) {
+    if (/^(?:not found|no results?(?: found)?)\.?$/i.test(providerError)) {
+      return { status: 'clean', count: 0, fields: [], sources: [] };
+    }
+    return { ...empty, reason: providerError || 'provider returned an error' };
+  }
+
+  const hasCount = Object.hasOwn(payload, 'found') && payload.found !== null && payload.found !== '';
+  const count = hasCount ? Number(payload.found) : Number.NaN;
+  if (Number.isFinite(count) && count > 0) {
+    const fields = (Array.isArray(payload.fields) ? payload.fields : [])
+      .map(item => safeProviderValue(item, 80)).filter(Boolean);
+    const sources = (Array.isArray(payload.sources) ? payload.sources : []).slice(0, 8).map(source => ({
+      name: safeProviderValue(source?.name, 120) || 'unknown',
+      date: /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/.test(safeProviderValue(source?.date, 32))
+        ? safeProviderValue(source?.date, 32)
+        : '',
+    }));
+    return { status: 'exposed', count, fields: uniq(fields), sources };
+  }
+  if (count === 0 || payload.found === false) {
+    return { status: 'clean', count: 0, fields: [], sources: [] };
+  }
+  return { ...empty, reason: providerError || 'malformed response' };
+}
+
 function confidenceLabel(score) {
   if (score >= 0.8) return 'high';
   if (score >= 0.6) return 'medium';
@@ -248,11 +353,13 @@ const DIRECT_PROVIDER_FAILURES = Object.freeze({
   stealer_check: /^stealer_check[^\r\n]*:\s*(?:lookup failed|an email, username, or domain is required|"[^"]+" is a placeholder)\b/im,
   leakcheck: /^leakcheck[^\r\n]*:\s*(?!FOUND in\b|not found\b)(?:lookup failed|an email or username is required|no result\b|error\b)/im,
   paste_search: /^paste_search[^\r\n]*:\s*(?:lookup failed|a term .* is required)\b/im,
+  breach_check: /^(?:breach_check:\s*a valid email is required|XposedOrNot:\s*lookup failed)\b/im,
 });
 const DIRECT_PROVIDER_NAMES = Object.freeze({
   stealer_check: 'HudsonRock',
   leakcheck: 'LeakCheck',
   paste_search: 'psbdmp',
+  breach_check: 'XposedOrNot',
 });
 
 export function classifyToolOperationalStatus(toolName, result = '') {
@@ -267,7 +374,6 @@ export function classifyToolOperationalStatus(toolName, result = '') {
     if (DIRECT_PROVIDER_FAILURES.leakcheck.test(text)) failedProviders.push('LeakCheck');
     if (DIRECT_PROVIDER_FAILURES.paste_search.test(text)) failedProviders.push('psbdmp');
     if (/^XposedOrNot:\s*lookup failed\b/im.test(text)) failedProviders.push('XposedOrNot');
-    if (/^HIBP:\s*lookup failed\b/im.test(text)) failedProviders.push('HIBP');
     const allUnavailable = /^VERDICT:\s*INCONCLUSIVE\b/im.test(text);
     return {
       status: allUnavailable ? 'error' : (failedProviders.length ? 'degraded' : 'ok'),
@@ -325,16 +431,9 @@ export function summarizeExposureProviders(entries = []) {
       }
     } else if (tool === 'breach_check') {
       const xon = text.match(/^XposedOrNot:\s*(\d+)\s+breach\(es\)/im);
-      const hibp = text.match(/^HIBP:\s*(\d+)\s+breach\(es\)/im);
-      const xonFailed = /^XposedOrNot:\s*lookup failed\b/im.test(text);
-      const hibpFailed = /^HIBP:\s*lookup failed\b/im.test(text);
-      if (xonFailed) failedProviders.push('XposedOrNot');
-      else if (/^XposedOrNot:\s*(?:\d+\s+breach\(es\)|no known breaches)/im.test(text)) availableSources.push('XposedOrNot');
-      if (hibpFailed) failedProviders.push('HIBP');
-      else if (/^HIBP:\s*(?:\d+\s+breach\(es\)|no breaches found)/im.test(text)) availableSources.push('HIBP');
+      if (/^XposedOrNot:\s*(?:\d+\s+breach\(es\)|no known breaches)/im.test(text)) availableSources.push('XposedOrNot');
       if (xon && Number(xon[1]) > 0) positiveSources.push('XposedOrNot');
-      if (hibp && Number(hibp[1]) > 0) positiveSources.push('HIBP');
-      if ((xon && Number(xon[1]) > 0) || (hibp && Number(hibp[1]) > 0)) positiveEvidence.push(text);
+      if (xon && Number(xon[1]) > 0) positiveEvidence.push(text);
     }
   }
   return {
