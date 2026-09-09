@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-09-08T10:30:44Z
+GENERATED    : 2026-09-09T06:27:41Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
@@ -915,7 +915,7 @@ Each one is a small change. Together they close the gap that the CVE-2026-33185 
 TITLE      : CVE-2026-99501: When pip install Steals Every SSH Key in Your Agent Through Docker BuildKit
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-99501-docker-buildkit-ssh-agent-hijack/
-CVE        : CVE-2026-99501, cve-2026-99501
+CVE        : cve-2026-99501, CVE-2026-99501
 CATEGORIES : exploits, supply-chain, devops
 TAGS       : cve-2026-99501, docker, buildkit, ssh-agent, supply-chain, pip, hijack
 WORD_COUNT : 1501
@@ -3663,7 +3663,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : cve-2026-31429, CVE-2026-31429
+CVE        : CVE-2026-31429, cve-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1277
@@ -4556,7 +4556,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
 URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
-CVE        : cve-2022-0492, CVE-2022-0492
+CVE        : CVE-2022-0492, cve-2022-0492
 CATEGORIES : exploits, linux
 TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
 WORD_COUNT : 1248
@@ -4650,7 +4650,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/yellowkey-cve-2026-45585-bitlocker-winre-txf-bypass/
-CVE        : CVE-2026-45585, cve-2026-45585
+CVE        : cve-2026-45585, CVE-2026-45585
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-45585, bitlocker, winre, transactional-ntfs, physical-access
 WORD_COUNT : 1166
@@ -5114,7 +5114,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : CVE-2026-35616, cve-2026-35616
+CVE        : cve-2026-35616, CVE-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1182
@@ -5581,7 +5581,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : CVE-2026-43121, cve-2026-43121
+CVE        : cve-2026-43121, CVE-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -7311,7 +7311,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : cve-2026-40369, CVE-2026-40369
+CVE        : CVE-2026-40369, cve-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -7918,7 +7918,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : cve-2026-46333, CVE-2026-46333
+CVE        : CVE-2026-46333, cve-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -8492,7 +8492,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, CVE-2026-43500, cve-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -8731,5 +8731,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 64 documents — 2026-09-08T10:30:44Z
+END OF CORPUS — 64 documents — 2026-09-09T06:27:41Z
 ================================================================================
