@@ -8,7 +8,7 @@
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
-    "wrangler": "4.129.0"
+    "wrangler": "4.131.0"
   },
   "description": "Security research agent \u2014 neuron-db WASM memory, evidence-aware routing, defensive dark-web monitoring, incident forensics, passive OSINT, and a stateless MCP server.",
   "cloudflare": {
