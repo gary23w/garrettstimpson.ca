@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-09-13T15:21:03Z
+GENERATED    : 2026-09-13T16:24:45Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 65
+TOTAL POSTS  : 66
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -20,7 +20,7 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 TITLE      : PaperCut's Pre-Auth RCE Hit Hundreds. Patching Is Not Recovery
 DATE       : 2026-09-13
 URL        : https://garrettstimpson.ca/posts/2026/09/13/papercut-preauth-rce-81578-82078/
-CVE        : CVE-2026-81578, cve-2026-81578, cve-2026-82078, CVE-2026-82078
+CVE        : cve-2026-81578, CVE-2026-81578, CVE-2026-82078, cve-2026-82078
 CATEGORIES : exploits, web, rce
 TAGS       : papercut, papercut-ng, papercut-mf, cve-2026-81578, cve-2026-82078, pre-auth-rce, java, database-driver, active-exploitation, greynoise, incident-response
 WORD_COUNT : 2819
@@ -316,6 +316,233 @@ The September 10 update fixes PaperCut. It does not fix the seven minutes before
 
 <DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
+TITLE      : Agent Tesla Doesn't Need VBA to Be Unpatchable. It Needs One Exception
+DATE       : 2026-09-13
+URL        : https://garrettstimpson.ca/posts/2026/09/13/agent-tesla-vba-email-macros/
+CVE        : none
+CATEGORIES : malware, email, defense
+TAGS       : agent-tesla, vba, macros, malspam, phishing, microsoft-office, powershell, amsi, obfuscation, vba-stomping, mark-of-the-web, attack-surface-reduction
+WORD_COUNT : 4129
+EXCERPT    : An unpaid-invoice attachment, one permitted macro, and an obfuscated script chain were designed to install Agent Tesla in an APAC campaign. Obfuscation can beat literal signatures, but it does not make VBA invisible once reconstructed behavior reaches Office, AMSI, or the operating system.
+</FRONTMATTER>
+<BODY>
+An unpaid invoice arrives as a Word document or Excel spreadsheet. If the recipient opens it and active content is permitted, an image asks them to enable macros. Minimal VBA is designed to download a PowerShell script, write it to a temporary directory, and run it. The loader then delivers Agent Tesla, configured to communicate through Telegram and collect email contacts from the machine.
+
+That is not a reconstructed hypothetical. It is the single infection chain HP documented in its [March 2026 Threat Insights Report](https://threatresearch.ext.hp.com/wp-content/uploads/2026/03/HP_Wolf_Security_Threat_Insights_Report_March_2026.pdf), based on threats observed in Q4 2025. HP saw both Word and Excel variants targeting the Asia-Pacific region. The lure was ordinary, the macros were minimal, and the final payload was a malware family old enough to have survived several generations of Office security guidance. HP Sure Click isolated and stopped the threats that reached its protected endpoints; the report does not claim those customers were compromised.
+
+The tempting conclusion is that email macros are an unpatchable and undetectable hole in Office. That conclusion is wrong in two different ways.
+
+VBA is a legitimate automation language, not a CVE. It can be disabled. The Office-for-Windows applications and versions covered by Microsoft's rollout now block internet-origin macros carrying Mark of the Web by default. Proofpoint later measured a sharp decline in macro-enabled email attachments as actors adapted to the announced controls. The residual problem is everything organizations build around that default: trusted locations, trusted publishers, old policy, missing provenance, and users whose real work still depends on active documents.
+
+The macro is not the durable weakness. The trust handoff is. Obfuscation matters after that handoff because it can hide the words a static scanner expects to find, but it does not make the resulting behavior disappear.
+
+One evidence boundary before going further: no Agent Tesla sample, malicious attachment, or source code was supplied for this post, and I did not execute one. This is a report-only assessment of HP's published analysis, scoped to that campaign. The harmless macro below was not run and is not a malware reproducer. It exists only to show where Office's trust decision sits and how a benign string can be reconstructed at runtime.
+
+## The chain at a glance
+
+The Word and Excel lures differed, but HP says both reached the same chain:
+
+```text
+UNPAID-INVOICE EMAIL
+        |
+        v
+Word document or Excel spreadsheet
+        |
+        v
+Social engineering asks the recipient to enable VBA
+        |
+        v
+Minimal macro downloads a PowerShell script,
+writes it to a temporary directory, and executes it
+        |
+        v
+PowerShell decrypts and starts an intermediate loader
+        |
+        v
+Loader places Agent Tesla in a legitimate .NET process
+        |
+        v
+Telegram command-and-control
+        |
+        v
+Local email-contact collection in the analyzed configuration
+```
+
+There is no CVSS score for this chain because there is no single software vulnerability to score. The attacker needs the message to arrive, the document to retain or acquire a path where active content is allowed, and the recipient or policy to permit the macro. HP's analysis established a chain capable of malware execution in the user's context. It did not report a privilege escalation or a successful compromise of a protected customer endpoint.
+
+On the permitted-macro path HP analyzed, the VBA did not need to be clever. It was a delivery stub. HP says it retrieved a PowerShell stage, saved it under a temporary path, and launched it. The PowerShell code used RC4 to decrypt a preloaded array, replacing an XOR routine HP had seen in related loader chains. That operation produced another sequence of PowerShell code, which passed Agent Tesla through a known intermediate loader and into a legitimate .NET Framework process.
+
+That distinction is important. HP called the VBA macros minimal. It did not say that the macros contained an RC4-encrypted Agent Tesla payload, and it did not attribute the RC4 routine to VBA. The encrypted array and RC4 implementation were in the PowerShell stage. I am not going to retrofit common macro-obfuscation techniques onto a sample whose source I have not inspected.
+
+Every important boundary in that chain appears before the final malware family matters. The attachment crosses Office's macro trust decision. The document becomes code. Office becomes the parent of PowerShell. PowerShell becomes a loader. The loader makes a normal framework process carry the payload.
+
+## What this sample did, and what it did not
+
+Agent Tesla is not new. A [joint CISA and ACSC advisory](https://www.cisa.gov/sites/default/files/publications/aa22-216a-2021-top-malware-strains.pdf) listed it among the top malware strains of 2021, said malicious actors had used it for at least five years, and documented mass-phishing campaigns carrying it. The family can steal information from mail clients, browsers, and FTP applications and can capture screenshots.
+
+Those are family capabilities. They are not all observations from this HP sample.
+
+HP inspected the campaign's Agent Tesla configuration and found email-contact harvesting enabled while keylogging and screen capture were disabled. The malware was configured to scan a compromised machine for local contacts and send them through its command-and-control channel. Those addresses could become inputs to later phishing, but the report does not establish contact theft from a protected customer or that any collected contact received another message.
+
+That narrower result matters. Saying “Agent Tesla can take screenshots” describes the product. Saying “this victim was screen-captured” would overstate the evidence. The same applies to credential theft, persistence, lateral movement, and administrator access: plausible family or operator activity is not observed campaign activity until the telemetry shows it.
+
+The supported conclusion is still serious: the attachment was built for malware execution as the recipient, followed by a payload configured to extract a useful map of that person's email relationships. HP's isolation prevented the report from becoming a victim-impact account. A contact list is not just address data. It is a set of names, organizations, and trusted correspondents for writing the next unpaid invoice.
+
+## Email is still the road. Spreadsheets are four percent
+
+Email remains a leading malware route, but the denominator matters.
+
+In HP's [June 2026 Threat Insights Report](https://threatresearch.ext.hp.com/wp-content/uploads/2026/06/HP_Wolf_Security_Threat_Insights_Report_June_2026.pdf), email delivered 57% of the endpoint malware threats caught by HP Sure Click in Q1 2026. At least 11% of those email threats had bypassed one or more gateway scanners. Those numbers come from opted-in HP customer telemetry and malware that reached protected endpoints. They are not measurements of all email, all endpoints, or the entire internet.
+
+The file-type split is just as useful. Executables were 39% of threats in that corpus and archives were 38%. Malicious spreadsheets were 4%. Word-family documents accounted for another 7%, and the report does not say every one of those documents used VBA.
+
+So two claims can be true at once: email is still the largest delivery vector in this current dataset, and malicious spreadsheets are a small minority of the files HP stopped. The Agent Tesla campaign is worth studying because a reduced technique remains viable wherever macros can run, not because macros dominate malware again.
+
+The historical change is measurable. After Microsoft announced stronger default macro blocking, [Proofpoint observed macro-enabled attachments in its campaign data fall by roughly 66%](https://www.proofpoint.com/uk/blog/threat-insight/how-threat-actors-are-adapting-post-macro-world) between October 2021 and June 2022 and assessed that actors were adapting to the announced controls. Over the same period, actors increased their use of containers such as ISO and RAR files and Windows shortcuts.
+
+Attackers moved because the control hurt them. That is what a successful mitigation looks like. It does not erase a technique from history; it changes the economics until another route becomes easier.
+
+## VBA is not the unpatchable part
+
+[Microsoft's current macro guidance](https://learn.microsoft.com/en-us/microsoft-365-apps/security/internet-macros-blocked) describes the decision made by the Office-for-Windows applications and versions covered by its macro-blocking rollout when a macro-enabled file arrives from the internet.
+
+Windows marks files from untrusted zones with Mark of the Web. Office checks whether the file came from a trusted location, whether its macro is signed by a trusted publisher, what policy says, and whether the document was already trusted. For the Office-for-Windows releases covered by the rollout, an ordinary internet-origin file carrying that mark reaches a hard block instead of the old one-click “Enable Content” path.
+
+That is a real fix for the default email-attachment case. It is also a decision tree with exceptions:
+
+- A file in a Trusted Location opens with macros enabled.
+- A correctly signed macro can run when its publisher is trusted.
+- Administrators can set policy to allow or block active content.
+- A document trusted before the default changed can retain that trust.
+- Some collaboration and synchronization paths do not attach Mark of the Web in the same way as a browser or mail download.
+
+None of those behaviors is automatically a bypass. Businesses use signed macros and controlled locations because spreadsheets and documents still run payroll exports, inventory workflows, finance models, and internal reporting. The security problem appears when a broad exception stops representing the narrow workflow that justified it.
+
+Mark of the Web is provenance, not a malware verdict. It says how Windows classified the file's origin. If the provenance is missing, removed through an approved workflow, or overridden by a trusted location, Office has less reason to treat the document as foreign. If a publisher certificate is trusted too broadly, the signature decision can authorize more code than the business process intended.
+
+This is why “patch VBA” is the wrong remediation. No patch can perfectly classify the intent of arbitrary VBA while preserving every permitted automation. Policy can still refuse to execute it. The answer is to remove VBA where it is unnecessary and make every remaining exception small, signed, owned, and observable.
+
+## What obfuscation actually hides
+
+“The payload is obfuscated inside a VBA command” can describe three different things: a command argument assembled at the call site, an encoded blob carried and decoded by the macro, or a small macro launching a separately obfuscated stage. Those paths have different evidence. HP documented the third one here: minimal VBA launched PowerShell, and the RC4-protected array appeared in that PowerShell stage.
+
+The practical strength of VBA obfuscation is much narrower than “undetectable.” It changes the representation a scanner or analyst sees before execution. A signature looking for one complete command, URL, filename, or object name can miss that value when the macro stores it as fragments and rebuilds it only in memory. The same idea can force a sandbox or analyst to spend more time reaching the meaningful branch.
+
+These are recurring patterns in malicious VBA, not a universal ranking of what attackers use most often:
+
+- **String fragmentation and character construction.** Instead of storing a suspicious value as one literal, the macro joins short fragments, reverses pieces, substitutes characters, or builds text from character codes. The parser sees the recipe. The complete string exists only after VBA evaluates it.
+
+- **Encoded or encrypted data decoded at runtime.** A macro can carry a long blob as hexadecimal, Base64-like text, or numeric data and pass it through a decoder before use. Encoding changes representation; encryption additionally requires a key or derivation step. Neither tells us what the decoded data does until we inspect the result.
+
+- **Data hidden outside the obvious module.** Fragments or blobs can live in worksheet cells, document variables, custom properties, form controls, labels, or VBA arrays. The visible procedure then looks small because it retrieves its real input from another stream or object in the Office file.
+
+- **Junk, dead branches, comments, and random names.** Meaningless arithmetic, unused functions, copied legitimate-looking comments, and disposable identifiers increase the amount of code a scanner or analyst must normalize. This is camouflage, not a new execution primitive.
+
+- **Invocation indirection.** A macro can create objects late, resolve a method only at runtime, or hand execution to COM, WMI, a Win32 API, or a legitimate Windows utility. This can remove an obvious literal from the source or change the process ancestry defenders expect. It does not remove the underlying file, process, API, memory, or network behavior.
+
+- **VBA stomping.** This is a distinct and more advanced file-format trick. An Office VBA project can contain readable source streams and a separate compiled representation called p-code. [MITRE ATT&CK documents VBA stomping](https://attack.mitre.org/techniques/T1564/007/) as replacing the source with benign, empty, or random data while leaving malicious p-code to execute on a compatible Office version. A source-only extractor can therefore report something different from what Office runs. Version compatibility also constrains the technique, and source-versus-p-code discrepancies are themselves detection material.
+
+A separate 2026 campaign shows how several of those ideas combine. [Unit 42's Boggy Serpens assessment](https://unit42.paloaltonetworks.com/boggy-serpens-threat-assessment/) describes VBA builders that stored hexadecimal payload data in a UserForm text-box property, decoded it with custom routines, wrote and renamed the result, and invoked it through APIs. Later variants used WMI or a Win32 process-creation call as indirection and added a very long CPU loop intended to outlast automated analysis. That is not evidence about HP's Agent Tesla macros. It is a current, independent example of the obfuscation categories above.
+
+The limitation is unavoidable for the attacker: eventually, hidden data must become useful data. A downloader must produce a destination and request; a process launcher must produce a target and parameters; an API must receive actual arguments. [Microsoft's Office VBA and AMSI analysis](https://www.microsoft.com/en-us/security/blog/2018/09/12/office-vba-amsi-parting-the-veil-on-malicious-macros/) explains that Office instruments relevant VBA transitions into COM methods and Win32 APIs. At the dangerous call, those parameters have been resolved into plaintext, so Office can log the behavior and request a synchronous AMSI verdict.
+
+That does not make every obfuscated macro detectable, and AMSI should never be treated as a perfect boundary. Coverage depends on supported Office and security-product integration, configuration, the behavior reached, and the quality of the verdict. Microsoft's documentation also describes policy scopes in which trusted documents, locations, publishers, or an enable-all setting can be excluded unless runtime scanning is configured more broadly. Obfuscation can still beat literal matching, mutate faster than signatures, complicate emulation, and delay human analysis. “Undetectable” is the part the evidence does not support.
+
+## The PoC, honestly
+
+This is the entire proof of concept:
+
+```vb
+Private Sub Workbook_Open()
+    Dim firstPart As String
+    Dim secondPart As String
+
+    firstPart = "macro "
+    secondPart = Chr$(114) & Chr$(97) & Chr$(110)
+    ThisWorkbook.Worksheets(1).Range("A1").Value = firstPart & secondPart
+End Sub
+```
+
+It is a harmless Excel event handler. If placed manually into a macro-enabled workbook and if Office decides that the macro is trusted and permitted, opening the workbook is expected to write `macro ran` into cell A1. The exact phrase does not appear as a contiguous literal in the VBA: the last word is reconstructed from character codes, then concatenated with the first fragment. A scanner limited to exact literal matching for `macro ran` would miss that phrase. A scanner can still flag the auto-open event or the reconstruction pattern, and Excel receives the resolved value when it performs the assignment.
+
+I did not create the workbook or execute this macro. There is no observed output to report. It opens no shell, starts no process, writes no file, makes no network request, establishes no persistence, calls no operating-system API, and bypasses nothing. It proves nothing about Agent Tesla and cannot reproduce HP's campaign.
+
+What it models is both the trust gate and one narrow static-analysis failure. `Workbook_Open` is dormant text until Office permits VBA execution. Before execution, a naive literal signature cannot see the complete phrase. At runtime, VBA must reconstruct it before Excel can use it. In a malicious macro, the same representational trick may hide a command or destination from literal matching, but the eventual COM, Win32, process, file, or network operation receives a resolved value. That runtime choke point is what Office instrumentation, AMSI, endpoint behavior monitoring, and process telemetry are designed to inspect.
+
+The useful controls would be simple. With internet-origin macros blocked, the event should not run. With trusted-location, publisher, and per-application exceptions removed or tightly controlled, disabling all macros without notification should stop it regardless of the lure. In a deliberately managed trusted workflow, the marker may run, and that exception should be attributable to a specific location, publisher, policy, owner, and business purpose.
+
+## The exception is the attack surface
+
+The HP campaign was designed to persuade a person to enable VBA, but “the user clicked” is not a root cause. A user can only make that choice inside the policy and provenance environment the organization gives them.
+
+If nobody in a role needs VBA, there should be no choice. After removing or tightly controlling Trusted Locations, trusted publishers, and per-application exceptions, Microsoft recommends **Disable all without notification** for those users. That turns the remaining macro path into a technical control instead of an awareness prompt.
+
+Where macros are genuinely required, Microsoft's stronger recommendation is to allow only digitally signed macros and require a trusted publisher. The certificate must be deliberately deployed and governed. Trusted Locations should be rare, local where possible, and mapped to a named workflow rather than a department-wide dumping ground. A network share becoming “trusted” because blocking it generated support tickets is not a control; it is a second inbox with fewer warnings.
+
+Then test the actual path. Send a known macro-enabled file through the same mail gateway, archive handling, browser, synchronization client, SharePoint flow, and file share employees use. Check whether Mark of the Web exists at every handoff and whether Office enforces the intended policy. A policy screenshot from an administration console does not prove that the file reaching a user's desktop carries the provenance that activates it.
+
+The unpaid-invoice lure is designed to succeed in the space between configured policy and effective policy. That space is where exceptions accumulate.
+
+## Detect reconstruction and the handoff, not the invoice
+
+Invoice names, attachment hashes, sender domains, and Telegram infrastructure all change. The execution relationships are harder to replace.
+
+For this campaign, the useful graph is:
+
+```text
+mail client -> Word or Excel -> PowerShell -> .NET process -> Telegram
+```
+
+Office spawning PowerShell is the sharpest edge in HP's chain. A macro writing script content under a temporary directory is another. A legitimate .NET Framework process receiving code from that chain deserves review even if the process itself is signed. Outbound Telegram traffic is not malicious by definition, but it becomes meaningful when it begins from a host immediately after that process tree.
+
+[Microsoft's current Defender architecture](https://learn.microsoft.com/en-us/defender-endpoint/adv-tech-of-mdav) does not rely on one view of the file. It describes pre-execution file classification and heuristics, Office VBA and script visibility through AMSI, memory scanning, command-line scanning, emulation, and post-execution behavior monitoring across process sequences. Any one layer can miss. The point is that string mutation has to survive several different representations of the same action.
+
+Microsoft's [Attack Surface Reduction rule reference](https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction-rules-reference) adds four useful controls here: block potentially obfuscated scripts; block Office applications from creating child processes; block Office from creating executable content; and block Win32 API calls from Office macros. Microsoft currently documents PowerShell support for the obfuscated-script rule, so that rule is relevant to a later stage such as HP's PowerShell loader rather than a direct scanner for VBA source. The child-process and executable-content rules map directly to HP's observed handoff. The Win32 rule constrains macros that call operating-system APIs even when they do not write a next stage to disk.
+
+These controls can affect legitimate automation, so audit the real dependencies before enforcement. But do not stop at counting blocks. Record the parent Office process, document provenance, macro policy result, path written, child command line, network destination, and user identity on one timeline.
+
+Static analysis still has a role. Normalize concatenated strings and character construction; decode inert blobs in an isolated analysis pipeline; inspect cells, custom properties, form controls, labels, and arrays; compare readable VBA source with compiled p-code; and score auto-open handlers alongside late-bound object creation and API declarations. Those are leads, not verdicts. Legitimate macro authors also split strings, protect intellectual property, and call approved automation interfaces.
+
+Behavior analysis must cover the indirect path too. WMI or API-mediated process creation can make a simple `Excel -> child` alert incomplete, as the separate Boggy Serpens campaign demonstrates. Correlate the Office document and macro event with WMI provider activity, newly written content, subsequent script or executable launches, resolved command lines, memory behavior, and outbound connections. Obfuscation changes what is visible at each layer; correlation reconnects the layers.
+
+The 11% of HP-observed email threats that passed at least one gateway scanner included many file types, not just Office documents. The number still demonstrates why endpoint controls remain necessary after mail filtering. For a macro document, the endpoint must decide whether the attachment becomes code.
+
+## What to do about it
+
+Start by separating people who need VBA from people who merely have it.
+
+1. **Disable it completely where it has no business owner.** Remove or tightly control trust exceptions, then use the no-notification policy Microsoft recommends for users who do not need macros. A security prompt is an invitation; a block is a control.
+
+2. **Make required macros signed-only.** Manage trusted publishers centrally, protect signing keys, inventory what each certificate signs, and revoke trust when ownership changes.
+
+3. **Shrink Trusted Locations.** Give every location an owner, a specific workflow, and write permissions narrow enough that an email attachment cannot casually land there. Avoid trusted network locations unless there is no safer design.
+
+4. **Verify provenance end to end.** Test whether email, archives, browsers, cloud synchronization, collaboration tools, and file shares preserve the origin information your Office policy expects.
+
+5. **Scan the runtime, not only the file.** Confirm that supported Office builds and the endpoint security provider inspect VBA through AMSI, and configure runtime scan scope deliberately instead of assuming trusted documents are harmless. Evaluate the ASR rule for potentially obfuscated scripts for later script stages.
+
+6. **Break the Office-to-process edge.** Evaluate ASR controls for Office child processes, executable content, injection, and macro Win32 calls. Move legitimate automations that need shells or downloads into managed services rather than granting every spreadsheet that capability.
+
+7. **Hunt the reconstructed behavior as a chain.** Alert on suspicious Office-to-script or Office-to-executable transitions, including WMI-mediated creation, and on Office writing executable or script content to temporary paths. Preserve the original attachment, provenance metadata, VBA source and p-code, decoded analysis artefacts, process events, and network events.
+
+8. **Investigate a successful run as potential credential exposure.** Isolate the endpoint, preserve process and network evidence, inspect the user's mail and browser secrets, and rotate credentials supported by the evidence. In this HP sample, also determine whether local email contacts were accessed and whether those correspondents received follow-on lures.
+
+Do not solve this by banning every spreadsheet attachment at the gateway and declaring victory. HP's own numbers show attackers favor executables and archives, and Proofpoint's history shows they change containers when one route gets expensive. The durable control is preventing an untrusted business object from becoming an unobserved execution chain.
+
+## The unpaid invoice
+
+This Agent Tesla delivery pattern does not need a new vulnerability. It needs one believable reason for somebody to cross an existing trust boundary. The malware family's broader longevity also comes from continued development, reuse, and multiple delivery routes; VBA is only the route examined here.
+
+Microsoft made that crossing much harder, and attackers measurably moved away from macros. Obfuscation keeps the residue useful because exact-string detection is brittle, not because VBA has become invisible. The Q4 2025 campaign is the residue: environments where VBA still has a business-shaped exception, provenance is weaker than policy assumes, runtime scanning is narrower than assumed, or Office can hand execution to a child process without being stopped.
+
+The invoice is the story the attacker tells. The Office-to-process handoff is the part defenders can end.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="003" type="security-research-post">
+<FRONTMATTER>
 TITLE      : Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away
 DATE       : 2026-09-08
 URL        : https://garrettstimpson.ca/posts/2026/09/08/most-malware-same-machine-persistence/
@@ -511,7 +738,7 @@ The costume changes. The thing that brings it back does not.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Five Security Threats Almost Nobody Is Watching Yet
 DATE       : 2026-09-03
@@ -724,7 +951,7 @@ The practical review question is simple: when one layer authenticates a fact, wh
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Perfex CRM 3.4.x and Earlier: Unauthenticated to RCE in Three Quiet Steps
 DATE       : 2026-08-18
@@ -1061,7 +1288,7 @@ The boring bugs are the ones that kill you. Patch your Perfex, turn off the migr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-33185 Got Patched, But the Test-Email SSRF Path Is Only Half-Fixed
 DATE       : 2026-08-17
@@ -1209,12 +1436,12 @@ Each one is a small change. Together they close the gap that the CVE-2026-33185 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-99501: When pip install Steals Every SSH Key in Your Agent Through Docker BuildKit
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-99501-docker-buildkit-ssh-agent-hijack/
-CVE        : cve-2026-99501, CVE-2026-99501
+CVE        : CVE-2026-99501, cve-2026-99501
 CATEGORIES : exploits, supply-chain, devops
 TAGS       : cve-2026-99501, docker, buildkit, ssh-agent, supply-chain, pip, hijack
 WORD_COUNT : 1501
@@ -1330,7 +1557,7 @@ Until then, treat `--mount=type=ssh` the way you would treat pasting your privat
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-66066: Reading a Rails Server's Environment Through an Uploaded 'Image'
 DATE       : 2026-08-04
@@ -1447,7 +1674,7 @@ Upgrading to 8.1.3.1 closes it. The part worth remembering is the shape of the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : shellDojo is live — train like they're already inside
 DATE       : 2026-08-03
@@ -1517,7 +1744,7 @@ If any of that sounds like your kind of Friday, the range is live at [shell-dojo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : the veil — v1.0.0-alpha.10
 DATE       : 2026-08-03
@@ -1606,7 +1833,7 @@ This is the final alpha, which means the road to beta starts now. If you run me,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CXL Memory — Disaggregated RAM with No Security Model
 DATE       : 2026-08-02
@@ -1912,7 +2139,7 @@ CXL is the future of data center memory. It's also a future where your data live
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Three Obscure Hardware Attack Vectors You've Never Heard Of
 DATE       : 2026-07-30
@@ -1970,7 +2197,7 @@ Each of these is obscure in its own way — but all three are real, weaponizable
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RowPress — When Leaving a DRAM Row Open Longer Causes Bit Flips (The Rowhammer Evolution Nobody Patched)
 DATE       : 2026-07-30
@@ -2203,7 +2430,7 @@ RowPress is that root cause exposed. And as of DDR5's third generation, it remai
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Platypus — Recovering AES Keys by Reading a Linux File (The RAPL Power Side Channel Nobody Knows About)
 DATE       : 2026-07-29
@@ -2441,7 +2668,7 @@ The Platypus attack is not the last power side channel. It is the first of a gen
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost Disk — NVMe SSD Controller Firmware Rootkits and the Persistent Implant Nobody Is Auditing
 DATE       : 2026-07-28
@@ -2710,7 +2937,7 @@ Until then, the most persistent, forensic-resistant implant isn't hiding in your
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GhostTouch — Injecting Fake Taps into Capacitive Touchscreens Using Electromagnetic Fields
 DATE       : 2026-07-27
@@ -2890,7 +3117,7 @@ A GhostTouch-class attack could be deployed today and no existing enterprise mob
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Light Commands — Laser-Based Audio Injection on Voice-Controllable Systems
 DATE       : 2026-07-26
@@ -3022,7 +3249,7 @@ The Light Commands team published their full paper, video demonstrations, and de
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows 11 DirectWrite Font Fuzzing — System Service Exception via Kernel Font Driver
 DATE       : 2026-07-26
@@ -3279,7 +3506,7 @@ The difference between a BSOD and a working remote code execution exploit is con
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows Kernel Object Namespace — Zero Isolation, Zero Audit, Zero Visibility
 DATE       : 2026-07-25
@@ -3453,7 +3680,7 @@ There is no built-in audit tool, no security baseline, no Group Policy, and no W
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop
 DATE       : 2026-07-18
@@ -3673,12 +3900,12 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
 URL        : https://garrettstimpson.ca/posts/2026/07/15/coldfusion-apsb26-68-cvss10-bonanza/
-CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48282, cve-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
+CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, cve-2026-48282, CVE-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
 CATEGORIES : exploits, web, vuln-research
 TAGS       : CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286, adobe, coldfusion, RCE, path-traversal, unrestricted-upload, CISA-KEV, watchtowr
 WORD_COUNT : 1843
@@ -3874,12 +4101,12 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
 URL        : https://garrettstimpson.ca/posts/2026/07/01/cve-2026-55200-libssh2-transport-read-oob-write/
-CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, cve-2026-55200, CVE-2026-55200
+CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, CVE-2026-55200, cve-2026-55200
 CATEGORIES : exploits, supply-chain
 TAGS       : cve-2026-55200, libssh2, ssh, integer-overflow, rce, curl, supply-chain
 WORD_COUNT : 1276
@@ -3957,12 +4184,12 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : cve-2026-31429, CVE-2026-31429
+CVE        : CVE-2026-31429, cve-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1277
@@ -4069,12 +4296,12 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : CVE-2026-23111, cve-2026-23111
+CVE        : cve-2026-23111, CVE-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -4134,12 +4361,12 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
 URL        : https://garrettstimpson.ca/posts/2026/06/19/rogueplanet-cve-2026-50656-defender-toctou-lpe/
-CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, cve-2026-50656, CVE-2026-50656
+CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, CVE-2026-50656, cve-2026-50656
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-50656, windows-defender, lpe, toctou, oplock, ntfs-junction, nightmare-eclipse
 WORD_COUNT : 1305
@@ -4221,7 +4448,7 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing
 DATE       : 2026-06-18
@@ -4369,12 +4596,12 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag
 DATE       : 2026-06-16
 URL        : https://garrettstimpson.ca/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/
-CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, cve-2026-20262, CVE-2026-20262
+CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, CVE-2026-20262, cve-2026-20262
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, cve-2026-20262, cve-2026-20245, path-traversal, root, vmanage, zero-day
 WORD_COUNT : 1449
@@ -4443,7 +4670,7 @@ I expect we will find out. Probably sooner than anyone wants.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
@@ -4569,7 +4796,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -4634,7 +4861,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -4697,7 +4924,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
@@ -4777,7 +5004,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
@@ -4850,12 +5077,12 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
 URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
-CVE        : CVE-2022-0492, cve-2022-0492
+CVE        : cve-2022-0492, CVE-2022-0492
 CATEGORIES : exploits, linux
 TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
 WORD_COUNT : 1248
@@ -4944,7 +5171,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
@@ -5008,7 +5235,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -5105,7 +5332,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -5187,7 +5414,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -5322,12 +5549,12 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : CVE-2026-41089, cve-2026-41089
+CVE        : cve-2026-41089, CVE-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -5408,7 +5635,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
@@ -5485,7 +5712,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -5581,7 +5808,7 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
@@ -5654,7 +5881,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -5736,7 +5963,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -5875,12 +6102,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : CVE-2026-43121, cve-2026-43121
+CVE        : cve-2026-43121, CVE-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -5965,7 +6192,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="044" type="security-research-post">
+<DOCUMENT id="045" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
@@ -6030,12 +6257,12 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="045" type="security-research-post">
+<DOCUMENT id="046" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : CVE-2026-46300, cve-2026-46300
+CVE        : cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -6140,7 +6367,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="046" type="security-research-post">
+<DOCUMENT id="047" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -6252,7 +6479,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="047" type="security-research-post">
+<DOCUMENT id="048" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -6322,7 +6549,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="048" type="security-research-post">
+<DOCUMENT id="049" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -6499,7 +6726,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="049" type="security-research-post">
+<DOCUMENT id="050" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -6593,7 +6820,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="050" type="security-research-post">
+<DOCUMENT id="051" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -6756,7 +6983,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="051" type="security-research-post">
+<DOCUMENT id="052" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -6914,7 +7141,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="052" type="security-research-post">
+<DOCUMENT id="053" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -7048,7 +7275,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="053" type="security-research-post">
+<DOCUMENT id="054" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -7270,7 +7497,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="054" type="security-research-post">
+<DOCUMENT id="055" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -7398,7 +7625,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="055" type="security-research-post">
+<DOCUMENT id="056" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -7605,7 +7832,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="056" type="security-research-post">
+<DOCUMENT id="057" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -7719,7 +7946,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="057" type="security-research-post">
+<DOCUMENT id="058" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -7903,12 +8130,12 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="058" type="security-research-post">
+<DOCUMENT id="059" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
+CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -8059,7 +8286,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="059" type="security-research-post">
+<DOCUMENT id="060" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -8212,7 +8439,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="060" type="security-research-post">
+<DOCUMENT id="061" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -8312,12 +8539,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="061" type="security-research-post">
+<DOCUMENT id="062" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : CVE-2026-42945, cve-2026-42945
+CVE        : cve-2026-42945, CVE-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -8463,12 +8690,12 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="062" type="security-research-post">
+<DOCUMENT id="063" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1284
@@ -8671,12 +8898,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="063" type="security-research-post">
+<DOCUMENT id="064" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -8786,12 +9013,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="064" type="security-research-post">
+<DOCUMENT id="065" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -8883,7 +9110,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="065" type="security-research-post">
+<DOCUMENT id="066" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -9030,5 +9257,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 65 documents — 2026-09-13T15:21:03Z
+END OF CORPUS — 66 documents — 2026-09-13T16:24:45Z
 ================================================================================
