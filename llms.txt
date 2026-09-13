@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-09-13T06:28:48Z
+GENERATED    : 2026-09-13T15:21:03Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 64
+TOTAL POSTS  : 65
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,305 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : PaperCut's Pre-Auth RCE Hit Hundreds. Patching Is Not Recovery
+DATE       : 2026-09-13
+URL        : https://garrettstimpson.ca/posts/2026/09/13/papercut-preauth-rce-81578-82078/
+CVE        : CVE-2026-81578, cve-2026-81578, cve-2026-82078, CVE-2026-82078
+CATEGORIES : exploits, web, rce
+TAGS       : papercut, papercut-ng, papercut-mf, cve-2026-81578, cve-2026-82078, pre-auth-rce, java, database-driver, active-exploitation, greynoise, incident-response
+WORD_COUNT : 2819
+EXCERPT    : A wrong-object authorization check and an unrestricted Java driver loader gave unauthenticated attackers code execution as the PaperCut service. GreyNoise saw at least 440 systems hit. AI collapsed exploitation into seconds; the September 10 patches close the chain, but they cannot make a compromised host clean again.
+</FRONTMATTER>
+<BODY>
+On September 10, PaperCut published maintenance releases 26.0.5, 25.0.13, and 24.1.10 to close a pre-authentication remote code execution chain in PaperCut NG and MF.
+
+That should be the comforting part of this story. It is not.
+
+A day earlier, [GreyNoise reported](https://www.greynoise.io/blog/ai-orchestrated-campaign-against-papercut-ng-mf) that one actor had already compromised at least 440 PaperCut instances belonging to 395 identified organizations across 48 countries. Among those observed instances, it recorded credential harvesting in 280, operating-system or domain-secret access in 147, and domain-administrator access in 12 victim environments. During the full campaign, 11 organizations were compromised in 26 seconds. One American high school went from initial access to domain admin in seven minutes.
+
+The two bugs are ordinary in the worst possible way. CVE-2026-81578 asks the wrong object whether a request is authorized. CVE-2026-82078 lets configuration choose a Java driver class without an allowlist. The first bug gives an unauthenticated attacker the configuration access required by the second. Together they turn a public management interface into code execution inside the PaperCut server process.
+
+AI did not create either mistake. It changed the clock around them.
+
+One boundary before going further: PaperCut is proprietary, and I do not have its source. I did not reproduce this exploit against PaperCut. This is a report-only assessment based on [PaperCut's advisory](https://www.papercut.com/kb/Main/security-bulletin-27-aug-2026-urgent-security-advisory/) and incident account, plus the independent work published by GreyNoise, Huntress, and Rapid7. The Python below is a harmless local control-flow model. It contains no PaperCut endpoints, SQL, class bytes, or deployable exploit logic.
+
+## The chain at a glance
+
+The chain is easier to understand as two trust failures handing control to each other:
+
+```text
+ATTACKER (no account)
+        |
+        v
+1. Request displays a public page
+   while dispatching an administrative component
+        |
+        v
+2. Authorization follows the displayed page,
+   not the component performing the action
+        |
+        v
+3. Attacker changes trusted database-lookup configuration
+        |
+        v
+4. Configuration selects a Java driver class
+   with no approved-driver allowlist
+        |
+        v
+5. Attacker-controlled Java bytecode is instantiated
+        |
+        v
+6. Code execution as the PaperCut server process
+```
+
+PaperCut assigns [CVE-2026-81578](https://www.papercut.com/kb/Main/security-bulletin-27-aug-2026-urgent-security-advisory/) a CVSS v4.0 score of 8.8, High, and classifies it as CWE-306: missing authentication for a critical function. Its direct impact is unauthorized modification of system configuration.
+
+CVE-2026-82078 scores 9.4, Critical, under CWE-470: externally controlled input selecting code or classes. Its direct impact is arbitrary Java bytecode executing under the PaperCut server process when an attacker can already manipulate the relevant configuration.
+
+There is no honest composite CVSS score to invent for the pair. The important fact is simpler: the first CVE supplies the privilege required by the second, producing pre-authentication RCE. [CISA added both vulnerabilities to its Known Exploited Vulnerabilities catalog](https://www.cisa.gov/news-events/alerts/2026/08/31/cisa-adds-two-known-exploited-vulnerabilities-catalog) on August 31.
+
+PaperCut initially treated all versions of PaperCut NG and MF as potentially affected. The fixed branch floors are 24.1.10, 25.0.13, and 26.0.5. No fixed build is available for version 23 or earlier, so those installations need a major-version upgrade.
+
+The vendor explicitly excludes PaperCut Hive and Pocket, Mobility Print, Print Deploy server components, and client software from the affected scope. Site Servers and secondary or print servers do require the relevant update.
+
+## Bug one: the public page lends its trust to an admin action
+
+The first bug is an authorization check attached to the wrong side of a request.
+
+Huntress describes a PaperCut request as being able to identify one page for the response and a different page that owns the component being executed. Those should be separate security decisions. A public page may be safe to render anonymously. An administrative component that changes server configuration is not safe to invoke anonymously merely because its output appears inside that page.
+
+In the vulnerable path, PaperCut could validate access to the rendered page and miss the stricter permission required by the dispatched component. An attacker selected a public page for the first object and an administrative configuration action for the second. The check saw something public. The server executed something privileged.
+
+That is CVE-2026-81578 in plain language: the application asked the public wrapper whether the request was allowed instead of asking the administrative action that was actually about to run.
+
+[Huntress reproduced a complete pre-authentication configuration takeover and RCE chain](https://www.huntress.com/blog/papercut-actively-exploited) against a stock PaperCut NG 25.0.11.75758 installation. [Rapid7's reconstruction](https://www.rapid7.com/blog/post/etr-papercut-ng-mf-critical-zero-day-exploited-in-the-wild/) independently describes the same wrong-object authorization problem and reports that an alternate public page could bypass the first emergency mitigation.
+
+On its own, this bug changes trusted configuration. That is already serious, but it is the next feature that turns configuration control into process control.
+
+## Bug two: "database driver" means attacker-chosen Java
+
+PaperCut supports looking up card or identity numbers in an external database. That requires a database URL, lookup behavior, and a Java Database Connectivity driver.
+
+Loading a driver by name is normal Java extensibility. Loading whatever class name appears in configuration without checking it against a small set of approved drivers is not.
+
+PaperCut's description of CVE-2026-82078 says its database utilities instantiate configured driver classes without an allowlist. If an attacker can manipulate those parameters, Java bytecode already placed on the application's classpath can be loaded under the security context of the PaperCut process.
+
+The privilege requirement explains why the bug scores 9.4 rather than behaving like a standalone unauthenticated RCE. The driver loader assumes that only a trusted administrator can choose its inputs.
+
+CVE-2026-81578 destroys that assumption.
+
+PaperCut's own [behind-the-scenes account](https://www.papercut.com/blog/news/behind-the-scenes-august-security-incident/) describes attackers combining the rarely used database lookup feature with file-writing behavior and Java class loading to place and execute a payload. The company has deliberately withheld the full chain while exposed systems remain at risk. That is a reasonable boundary, and there is no need to fill the proprietary gaps with invented source code.
+
+The security rule is still clear. Administrative configuration should require authorization at the action being invoked, and a database-driver field should select from approved implementations rather than function as a general class loader. Either control breaks the chain. The vulnerable product lost both.
+
+## The PoC, honestly
+
+The following model demonstrates only the control-flow mistake. It does not import classes dynamically, touch the network, write a file, speak JDBC, or contain a PaperCut route or parameter.
+
+Two local classes exist in a dictionary. One is approved. The other writes a harmless marker into memory. The vulnerable dispatcher authorizes the displayed page instead of the component being invoked, and the vulnerable loader accepts any class in the local dictionary. The model's fixed variants authorize the component and enforce an allowlist; they illustrate the two security invariants without claiming to reproduce PaperCut's undisclosed implementation.
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Page:
+    public: bool
+
+
+@dataclass(frozen=True)
+class Component:
+    admin_only: bool
+
+
+PUBLIC_PAGE = Page(public=True)
+ADMIN_COMPONENT = Component(admin_only=True)
+
+state = {
+    "driver": "ApprovedDriver",
+    "marker": None,
+}
+
+
+class ApprovedDriver:
+    def start(self):
+        pass
+
+
+class HarmlessMarkerDriver:
+    def start(self):
+        state["marker"] = "local-control-flow-only"
+
+
+LOCAL_CLASSES = {
+    "ApprovedDriver": ApprovedDriver,
+    "HarmlessMarkerDriver": HarmlessMarkerDriver,
+}
+
+APPROVED_DRIVERS = {
+    "ApprovedDriver": ApprovedDriver,
+}
+
+
+def edit_configuration(params):
+    state["driver"] = params["driver"]
+
+
+def vulnerable_dispatch(displayed_page, component, authenticated, action, params):
+    # Wrong object: authorization follows the page being displayed.
+    if not displayed_page.public and not authenticated:
+        raise PermissionError("authentication required")
+
+    action(params)
+
+
+def fixed_dispatch(displayed_page, component, authenticated, action, params):
+    # Right object: the invoked component enforces its own requirement.
+    if component.admin_only and not authenticated:
+        raise PermissionError("administrative component rejected the request")
+
+    action(params)
+
+
+def vulnerable_load_driver():
+    # Local dictionary only. No import, reflection, file access, or bytecode.
+    driver_class = LOCAL_CLASSES[state["driver"]]
+    driver_class().start()
+
+
+def fixed_load_driver():
+    driver_name = state["driver"]
+
+    if driver_name not in APPROVED_DRIVERS:
+        raise ValueError("driver is not approved")
+
+    APPROVED_DRIVERS[driver_name]().start()
+
+
+# Vulnerable model: an anonymous request changes privileged configuration.
+vulnerable_dispatch(
+    displayed_page=PUBLIC_PAGE,
+    component=ADMIN_COMPONENT,
+    authenticated=False,
+    action=edit_configuration,
+    params={"driver": "HarmlessMarkerDriver"},
+)
+vulnerable_load_driver()
+assert state["marker"] == "local-control-flow-only"
+
+
+# Fixed authorization control: the same anonymous request is rejected.
+state.update(driver="ApprovedDriver", marker=None)
+
+try:
+    fixed_dispatch(
+        displayed_page=PUBLIC_PAGE,
+        component=ADMIN_COMPONENT,
+        authenticated=False,
+        action=edit_configuration,
+        params={"driver": "HarmlessMarkerDriver"},
+    )
+except PermissionError:
+    pass
+
+assert state["driver"] == "ApprovedDriver"
+
+
+# Fixed loader control: even poisoned configuration cannot select that class.
+state["driver"] = "HarmlessMarkerDriver"
+
+try:
+    fixed_load_driver()
+except ValueError:
+    pass
+
+assert state["marker"] is None
+```
+
+This model was run locally with Python 3 and exited silently with status 0 because every assertion passed. The first assertion shows the two vulnerable decisions combining. The later assertions are negative controls showing that either component-level authorization or driver allowlisting stops the marker from being reached.
+
+That is all this model proves. It is not evidence that I reproduced PaperCut, and it cannot be pointed at a PaperCut server.
+
+## AI is the clock, not the bug
+
+The PaperCut campaign is going to be remembered as an AI attack, which is true and still manages to miss the useful part.
+
+[GreyNoise reports](https://www.greynoise.io/blog/ai-orchestrated-campaign-against-papercut-ng-mf) that a likely Russian-speaking actor used hundreds of AI agents, a Codex harness with a DeepSeek model, a self-built PaperCut and Active Directory lab, an internet-scanning service, and a library of public offensive tools. Work that normally happens in sequence could happen in parallel: build the lab, develop the chain, assemble targets, test post-exploitation, adapt failures, and launch new workers.
+
+According to GreyNoise's telemetry, the actor went from an empty workspace to RCE against a real victim in under four hours, then reached its first domain administrator about two hours later. Once the larger campaign launched, it compromised at least 11 organizations in 26 seconds. The high-school intrusion reached domain admin in seven minutes.
+
+That does not mean every victim became a domain compromise. GreyNoise observed domain-admin access at 12 of 440 instances, and some victims received no immediate follow-up. The 440 is an observed lower bound from one investigation, not a census of every exposed PaperCut server.
+
+It is still enough to break the normal mental model of patching.
+
+These bug classes are old. Internet scanning and credential dumping are old. AI made the feedback loop cheap enough to run at the speed of a job queue.
+
+AI is not the bug. AI is the clock.
+
+## Three emergency releases and a shrinking margin for error
+
+PaperCut received the first report from an education customer at 9:42 a.m. AEST on August 27. Logs showed real code execution rather than exploitation of an already known bug, and the company declared a P0 incident that day.
+
+The first emergency patch shipped early on August 28 for versions 25 and 26, with version 24 following later. It was built to break the known path quickly. Rapid7 subsequently documented that the first mitigation could be bypassed by selecting another public page for the authorization decision.
+
+Release 2 added hardening. Release 3 arrived on September 1 with more hardening and fixes for SAML login and legacy SQL-driver regressions discovered during the emergency sequence. PaperCut now says releases 1 and 2 are not sufficient. Release 3 protects against the disclosed chain, but the company recommends moving every installation to the fully tested September 10 maintenance releases.
+
+This is the part where "why hasn't anyone fixed it?" needs an honest answer: they have fixed the vulnerable code.
+
+PaperCut's public account describes a chain spanning page dispatch, authorization, a rarely used database feature, file placement, and Java class loading. The company was simultaneously identifying variants, backporting mitigations across three maintained version lines, and repairing SAML and legacy SQL-driver regressions. Its normal testing also includes manual work with real printer hardware, which the emergency releases necessarily compressed.
+
+[PaperCut says](https://www.papercut.com/blog/news/behind-the-scenes-august-security-incident/) it chose useful protection immediately over waiting for one perfect, fully tested answer while customers remained exposed. That made the response messy. Incident response is messy.
+
+The September 10 builds are the clean answer for the code. They are not the clean answer for machines reached before them.
+
+## The patch closes the door. It does not empty the building
+
+PaperCut says publicly reachable, unpatched servers are still being targeted, and the second wave of post-compromise activity has become more sophisticated.
+
+PaperCut says the September 10 maintenance releases address the disclosed chain. Installing one does not erase a payload already executed as the PaperCut service. It does not restore a deleted log, revoke a copied password, rotate a domain credential, remove a persistence mechanism, or undo an account added to Domain Admins.
+
+GreyNoise observed attackers harvesting process memory and registry secrets, stealing credentials, deploying tunnels, and using compromised service privileges to move into Active Directory. Huntress observed PaperCut's process launching system-discovery commands and recovered an attacker-supplied Java class designed to execute commands and remove its working files afterward.
+
+PaperCut's indicators reflect that cleanup behavior. Administrators should investigate suspicious child processes from `pc-app.exe` or `pc-app`, missing or truncated `server.log` files, unexpected Java classes under the server library directory, matching command or output artifacts in content storage, and database-lookup errors that do not belong in the environment. The absence of those files is not an all-clear; PaperCut explicitly warns that attackers may delete them as they progress.
+
+Preserve off-host evidence. [Huntress recommends](https://www.huntress.com/blog/papercut-actively-exploited) collecting the PaperCut log directory and configuration, endpoint process trees, file metadata, reverse-proxy and WAF records, firewall and DNS telemetry, network flows, and recent services, tasks, autoruns, and file creation. An attacker can remove a local log. They cannot as easily reach every upstream system that recorded the connection.
+
+Most importantly, PaperCut's recovery guidance is not "patch and scan." If compromise is suspected, the vendor recommends securing current backups, completely wiping and rebuilding the Application Server, and restoring a known-clean backup from before the suspicious activity.
+
+That is the difference between vulnerability management and incident response. The patch repairs software. The rebuild removes the attacker's claim on the machine.
+
+## What to do tonight
+
+If PaperCut NG or MF exists in your environment, the order matters:
+
+1. **Inventory every server.** Include the primary Application Server, Site Servers, and secondary or print servers. PaperCut says the server components need to be updated, not only the primary node.
+
+2. **Remove public exposure.** Restrict the management interface to trusted addresses, a VPN, or another controlled administrative path. For version 23 and older, this is essential while planning the mandatory upgrade to a supported branch.
+
+3. **Install the real maintenance release.** The fixed floors for this disclosed chain are 24.1.10, 25.0.13, and 26.0.5. Emergency releases 1 and 2 are obsolete. Release 3 contains the disclosed protection, but PaperCut still recommends the maintenance build with full QA and additional hardening.
+
+4. **Preserve evidence before restarting or upgrading a suspicious host.** Copy logs and metadata, export endpoint telemetry, and secure proxy, firewall, DNS, identity, and network records somewhere the server cannot alter.
+
+5. **Treat exposure plus suspicious evidence as an intrusion.** Isolate the host, activate the incident-response plan, and follow [PaperCut's wipe-and-rebuild guidance](https://www.papercut.com/kb/Main/security-bulletin-27-aug-2026-urgent-security-advisory/). Restore only from a backup known to predate the activity.
+
+6. **Rotate what the service could reach.** PaperCut credentials are only the beginning. Investigate service accounts, local and domain secrets, database credentials, API keys, newly created accounts, directory changes, and domain-controller activity. GreyNoise's campaign proves that domain access was a real outcome, not a theoretical ceiling.
+
+Do not let a clean vulnerability scan overrule intrusion evidence. A rebuilt, patched server is a recovery. A patched server with yesterday's attacker still inside it is a quieter compromise.
+
+## The seven-minute incident
+
+The lesson here is not that AI suddenly invented a new category of vulnerability. It is that our patch timelines are still measured in maintenance windows while an attacker can now parallelize the work between disclosure, reproduction, targeting, and exploitation.
+
+That makes exposure inventory, network isolation, off-host telemetry, credential rotation, and rehearsed rebuilding part of the patch plan. They are no longer the work that starts after patching fails.
+
+The September 10 update fixes PaperCut. It does not fix the seven minutes before it.
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away
 DATE       : 2026-09-08
@@ -212,7 +511,7 @@ The costume changes. The thing that brings it back does not.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Five Security Threats Almost Nobody Is Watching Yet
 DATE       : 2026-09-03
@@ -425,7 +724,7 @@ The practical review question is simple: when one layer authenticates a fact, wh
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Perfex CRM 3.4.x and Earlier: Unauthenticated to RCE in Three Quiet Steps
 DATE       : 2026-08-18
@@ -762,7 +1061,7 @@ The boring bugs are the ones that kill you. Patch your Perfex, turn off the migr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-33185 Got Patched, But the Test-Email SSRF Path Is Only Half-Fixed
 DATE       : 2026-08-17
@@ -910,12 +1209,12 @@ Each one is a small change. Together they close the gap that the CVE-2026-33185 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-99501: When pip install Steals Every SSH Key in Your Agent Through Docker BuildKit
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-99501-docker-buildkit-ssh-agent-hijack/
-CVE        : CVE-2026-99501, cve-2026-99501
+CVE        : cve-2026-99501, CVE-2026-99501
 CATEGORIES : exploits, supply-chain, devops
 TAGS       : cve-2026-99501, docker, buildkit, ssh-agent, supply-chain, pip, hijack
 WORD_COUNT : 1501
@@ -1031,7 +1330,7 @@ Until then, treat `--mount=type=ssh` the way you would treat pasting your privat
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-66066: Reading a Rails Server's Environment Through an Uploaded 'Image'
 DATE       : 2026-08-04
@@ -1148,7 +1447,7 @@ Upgrading to 8.1.3.1 closes it. The part worth remembering is the shape of the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : shellDojo is live — train like they're already inside
 DATE       : 2026-08-03
@@ -1218,7 +1517,7 @@ If any of that sounds like your kind of Friday, the range is live at [shell-dojo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : the veil — v1.0.0-alpha.10
 DATE       : 2026-08-03
@@ -1307,7 +1606,7 @@ This is the final alpha, which means the road to beta starts now. If you run me,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CXL Memory — Disaggregated RAM with No Security Model
 DATE       : 2026-08-02
@@ -1613,7 +1912,7 @@ CXL is the future of data center memory. It's also a future where your data live
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Three Obscure Hardware Attack Vectors You've Never Heard Of
 DATE       : 2026-07-30
@@ -1671,7 +1970,7 @@ Each of these is obscure in its own way — but all three are real, weaponizable
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RowPress — When Leaving a DRAM Row Open Longer Causes Bit Flips (The Rowhammer Evolution Nobody Patched)
 DATE       : 2026-07-30
@@ -1904,7 +2203,7 @@ RowPress is that root cause exposed. And as of DDR5's third generation, it remai
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Platypus — Recovering AES Keys by Reading a Linux File (The RAPL Power Side Channel Nobody Knows About)
 DATE       : 2026-07-29
@@ -2142,7 +2441,7 @@ The Platypus attack is not the last power side channel. It is the first of a gen
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost Disk — NVMe SSD Controller Firmware Rootkits and the Persistent Implant Nobody Is Auditing
 DATE       : 2026-07-28
@@ -2411,7 +2710,7 @@ Until then, the most persistent, forensic-resistant implant isn't hiding in your
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GhostTouch — Injecting Fake Taps into Capacitive Touchscreens Using Electromagnetic Fields
 DATE       : 2026-07-27
@@ -2591,7 +2890,7 @@ A GhostTouch-class attack could be deployed today and no existing enterprise mob
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Light Commands — Laser-Based Audio Injection on Voice-Controllable Systems
 DATE       : 2026-07-26
@@ -2723,7 +3022,7 @@ The Light Commands team published their full paper, video demonstrations, and de
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows 11 DirectWrite Font Fuzzing — System Service Exception via Kernel Font Driver
 DATE       : 2026-07-26
@@ -2980,7 +3279,7 @@ The difference between a BSOD and a working remote code execution exploit is con
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows Kernel Object Namespace — Zero Isolation, Zero Audit, Zero Visibility
 DATE       : 2026-07-25
@@ -3154,7 +3453,7 @@ There is no built-in audit tool, no security baseline, no Group Policy, and no W
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop
 DATE       : 2026-07-18
@@ -3374,7 +3673,7 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
@@ -3575,12 +3874,12 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
 URL        : https://garrettstimpson.ca/posts/2026/07/01/cve-2026-55200-libssh2-transport-read-oob-write/
-CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, CVE-2026-55200, cve-2026-55200
+CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, cve-2026-55200, CVE-2026-55200
 CATEGORIES : exploits, supply-chain
 TAGS       : cve-2026-55200, libssh2, ssh, integer-overflow, rce, curl, supply-chain
 WORD_COUNT : 1276
@@ -3658,12 +3957,12 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : CVE-2026-31429, cve-2026-31429
+CVE        : cve-2026-31429, CVE-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1277
@@ -3770,12 +4069,12 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : cve-2026-23111, CVE-2026-23111
+CVE        : CVE-2026-23111, cve-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -3835,7 +4134,7 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
@@ -3922,7 +4221,7 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing
 DATE       : 2026-06-18
@@ -4070,12 +4369,12 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag
 DATE       : 2026-06-16
 URL        : https://garrettstimpson.ca/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/
-CVE        : CVE-2026-20182, cve-2026-20245, CVE-2026-20245, CVE-2026-20262, cve-2026-20262
+CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, cve-2026-20262, CVE-2026-20262
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, cve-2026-20262, cve-2026-20245, path-traversal, root, vmanage, zero-day
 WORD_COUNT : 1449
@@ -4144,7 +4443,7 @@ I expect we will find out. Probably sooner than anyone wants.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
@@ -4270,7 +4569,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -4335,7 +4634,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -4398,12 +4697,12 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : CVE-2026-45247, cve-2026-45247
+CVE        : cve-2026-45247, CVE-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1214
@@ -4478,7 +4777,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
@@ -4551,12 +4850,12 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
 URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
-CVE        : cve-2022-0492, CVE-2022-0492
+CVE        : CVE-2022-0492, cve-2022-0492
 CATEGORIES : exploits, linux
 TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
 WORD_COUNT : 1248
@@ -4645,7 +4944,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
@@ -4709,7 +5008,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -4806,7 +5105,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -4888,7 +5187,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -5023,7 +5322,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
@@ -5109,7 +5408,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
@@ -5186,7 +5485,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -5282,12 +5581,12 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : cve-2026-20817, CVE-2026-20817
+CVE        : CVE-2026-20817, cve-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1052
@@ -5355,7 +5654,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -5437,7 +5736,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -5576,12 +5875,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -5666,12 +5965,12 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : cve-2026-34926, CVE-2026-34926
+CVE        : CVE-2026-34926, cve-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -5731,12 +6030,12 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="044" type="security-research-post">
+<DOCUMENT id="045" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : cve-2026-46300, CVE-2026-46300
+CVE        : CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -5841,7 +6140,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="045" type="security-research-post">
+<DOCUMENT id="046" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -5953,7 +6252,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="046" type="security-research-post">
+<DOCUMENT id="047" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -6023,7 +6322,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="047" type="security-research-post">
+<DOCUMENT id="048" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -6200,7 +6499,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="048" type="security-research-post">
+<DOCUMENT id="049" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -6294,7 +6593,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="049" type="security-research-post">
+<DOCUMENT id="050" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -6457,7 +6756,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="050" type="security-research-post">
+<DOCUMENT id="051" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -6615,7 +6914,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="051" type="security-research-post">
+<DOCUMENT id="052" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -6749,7 +7048,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="052" type="security-research-post">
+<DOCUMENT id="053" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -6971,7 +7270,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="053" type="security-research-post">
+<DOCUMENT id="054" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -7099,7 +7398,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="054" type="security-research-post">
+<DOCUMENT id="055" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -7306,12 +7605,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="055" type="security-research-post">
+<DOCUMENT id="056" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : cve-2026-40369, CVE-2026-40369
+CVE        : CVE-2026-40369, cve-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -7420,7 +7719,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="056" type="security-research-post">
+<DOCUMENT id="057" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -7604,7 +7903,7 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="057" type="security-research-post">
+<DOCUMENT id="058" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -7760,7 +8059,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="058" type="security-research-post">
+<DOCUMENT id="059" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -7913,12 +8212,12 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="059" type="security-research-post">
+<DOCUMENT id="060" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : CVE-2026-46333, cve-2026-46333
+CVE        : cve-2026-46333, CVE-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 898
@@ -8013,12 +8312,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="060" type="security-research-post">
+<DOCUMENT id="061" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : cve-2026-42945, CVE-2026-42945
+CVE        : CVE-2026-42945, cve-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -8164,7 +8463,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="061" type="security-research-post">
+<DOCUMENT id="062" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
@@ -8372,7 +8671,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="062" type="security-research-post">
+<DOCUMENT id="063" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -8487,12 +8786,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="063" type="security-research-post">
+<DOCUMENT id="064" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -8584,7 +8883,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="064" type="security-research-post">
+<DOCUMENT id="065" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -8731,5 +9030,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 64 documents — 2026-09-13T06:28:48Z
+END OF CORPUS — 65 documents — 2026-09-13T15:21:03Z
 ================================================================================
