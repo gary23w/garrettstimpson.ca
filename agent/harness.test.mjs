@@ -904,8 +904,8 @@ test('worker entry points share persistence and direct-tool boundary guards', ()
   assert.match(source, /if\(isExplicitOsintSweep\(q\)\)\{ var od=detectOsint/);
   assert.doesNotMatch(source, /^\s*\{ var od=detectOsint\(q, window\.__lastOsint\);/m);
   assert.match(source, /const directAccess = validateDirectToolPolicy\(policy, selected, targets\);/);
-  assert.match(source, /const checkedInput = validateDirectToolInput\(tool, body\.args, body\.target\);/);
-  assert.match(source, /const args = checkedInput\.args;[\s\S]{0,180}collectToolTargets\(checkedInput\.target, args, tool\)/);
+  assert.match(source, /const checkedInput = [^;]*validateDirectToolInput\(tool, body\.args, body\.target\);/);
+  assert.match(source, /const args = checkedInput\.args;[\s\S]{0,250}collectToolTargets\(checkedInput\.target, args, tool\)/);
   assert.match(source, /async function crawl\(env, url\)[\s\S]*?validateDerivedNetworkTarget\(targetPolicy, u\.toString\(\), candidate\)/);
   assert.match(source, /async function postMalwarePipeline\(env, postUrl\)[\s\S]*?validateDerivedNetworkTarget\(targetPolicy, target, lm\[1\]\)/);
   assert.match(source, /const debugPlan = guardDeterministicToolPlan\(/);

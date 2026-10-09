@@ -16,6 +16,7 @@
 import NDB_WASM from './neuron_core.wasm';   // CompiledWasm module (see wrangler.toml [[rules]])
 import { NeuronDB } from './neuron-db.mjs';  // the official typed binding over the wasm mem() FFI
 import { handleMcpRequest } from './mcp.mjs';
+import { garyToolCatalog, getGaryToolSpec, loadGaryToolCatalog, garyRuntimeConfigured, validateGaryArguments, collectGaryTargets, runGaryTool, parseGaryRouterObject, routeExplicitGaryCall } from './gary-tools.mjs';
 import {
   buildIntelPlan,
   buildPowerShellIocEvidence,
@@ -784,6 +785,9 @@ function buildToolRoutePolicy(query, opts = {}) {
   }
 
   if (corpusIntent) return { use: false, reason: 'corpus-intent', classes, allowedTools: [], targets };
+  const explicitGary = q.match(/\bgary_[a-z0-9_-]+\b/g) || [];
+  if (explicitGary.length) { classes.push('gary'); allow(explicitGary.filter(name => getGaryToolSpec(name, opts.env || {}))); }
+  else if (explicitToolIntent && /\b(pentest|penetration|recon|scan|exploit|security|vulnerabilit|traffic|shell|asset|finding|task|gary)\w*\b/.test(q)) { allow(garyToolCatalog(opts.env || {}).filter(t => t.available).map(t => t.name)); }
   if (!allowed.size && explicitToolIntent) {
     return { use: true, reason: 'explicit-tool-intent', classes: ['generic'], allowedTools: toolCatalog(opts.env || {}).map(t => t.name), targets };
   }
@@ -1400,7 +1404,8 @@ function toolCatalog(env) {
     passive: false,
     description: 'Custom tool wiring entry (execution delegated to broker if configured)',
   }));
-  return [...BUILTIN_TOOL_SPECS, ...custom];
+  const gary = garyToolCatalog(env);
+  return [...BUILTIN_TOOL_SPECS, ...gary, ...custom.filter(t => !gary.some(g => g.name === t.name))];
 }
 
 const TOOL_SPEC_BY_NAME = Object.fromEntries(BUILTIN_TOOL_SPECS.map(t => [t.name, t]));
@@ -1444,7 +1449,7 @@ function withRuntimeSettings(env, settings) {
 }
 
 function getToolSpec(name) {
-  return TOOL_SPEC_BY_NAME[name] || { name, category: 'custom', passive: false, description: 'custom tool' };
+  return TOOL_SPEC_BY_NAME[name] || getGaryToolSpec(name) || { name, category: 'custom', passive: false, description: 'custom tool' };
 }
 
 function makeEvidenceEntry({ tool, input, args, result, via, index }) {
@@ -1485,6 +1490,12 @@ function buildEvidenceLedger(entries) {
 }
 
 async function executeTool(env, tool, args, via) {
+  const gary = getGaryToolSpec(tool, env);
+  if (gary) {
+    const out = await runGaryTool(env, gary, args);
+    if (out.isError) throw new Error(out.result || 'Gary tool execution failed.');
+    return { mode: 'gary', result: out.result, content: out.content, extra: out.extra };
+  }
   const mode = via || (isBuiltinTool(tool) ? 'builtin' : 'broker');
   if (mode === 'builtin') {
     return { mode, result: await runBuiltinCached(env, tool, args) };
@@ -1495,7 +1506,7 @@ async function executeTool(env, tool, args, via) {
 }
 
 function appendEvidence(evidence, toolContext, tool, args, mode, result) {
-  const input = String(args.target || args.url || args.query || args.domain || args.ip || args.email || args.cveId || '');
+  const input = mode === 'gary' ? JSON.stringify(args) : String(args.target || args.url || args.query || args.domain || args.ip || args.email || args.cveId || '');
   const entry = makeEvidenceEntry({ tool, input, args, result, via: mode, index: evidence.length + 1 });
   evidence.push(entry);
   toolContext.push(formatEvidenceForPrompt(entry));
@@ -1503,8 +1514,14 @@ function appendEvidence(evidence, toolContext, tool, args, mode, result) {
 }
 
 async function runToolWithEvidence(env, evidence, toolContext, tool, args, via) {
-  const { mode, result } = await executeTool(env, tool, args, via);
+  const { mode, result, extra } = await executeTool(env, tool, args, via);
   appendEvidence(evidence, toolContext, tool, args, mode, result);
+  if (mode === 'gary' && Array.isArray(extra)) {
+    for (const message of extra) {
+      const text = typeof message.content === 'string' ? message.content : (message.content || []).filter(block => block.type === 'text').map(block => block.text).join('\n');
+      if (text) toolContext.push('GARY SKILL INSTRUCTIONS:\n' + text.slice(0, 30000));
+    }
+  }
   return String(result || '');
 }
 
@@ -1770,7 +1787,7 @@ function validateToolAccess(policy, toolName, target, confirmed) {
 }
 
 function validateAutonomousToolAccess(env, policy, spec, args = {}) {
-  const targets = collectToolTargets('', args, spec.name);
+  const targets = spec.via === 'gary' ? collectGaryTargets(args) : collectToolTargets('', args, spec.name);
   if (!spec.passive) {
     if (!isTruthy(env.AGENT_ALLOW_ACTIVE_TOOLS, false)) {
       return { ok: false, error: `Autonomous active tool ${spec.name} is disabled.` };
@@ -3592,7 +3609,8 @@ async function toolRouter(env, userMsg, already, contextSoFar, allowedTools) {
   const PERSISTENCE_TEXT_INTENT = hasExplicitPersistenceAnalysisIntent(msg);
   const PEOPLE_INTENT = /\b(background|public records?|relatives?|people search|who is behind|sec filings?|edgar|corporate registr|phone (?:number|lookup)|reverse phone)\b/i.test(msg);
   const PEOPLE_ARTIFACT = PEOPLE_INTENT && (/\+?\d[\d\s().-]{7,}\d/.test(msg) || /\b[A-Z][a-z]{1,30}\s+[A-Z][a-z]{1,30}\b/.test(msg));
-  const hasArtifact = ARTIFACT.some(re => re.test(msg)) || TEXT_ARTIFACT.some(re => re.test(msg)) || TEXT_VERB || PERSISTENCE_TEXT_INTENT || PEOPLE_ARTIFACT;
+  const explicitGary = /\bgary_[a-z0-9_-]+\b/i.test(msg);
+  const hasArtifact = explicitGary || ARTIFACT.some(re => re.test(msg)) || TEXT_ARTIFACT.some(re => re.test(msg)) || TEXT_VERB || PERSISTENCE_TEXT_INTENT || PEOPLE_ARTIFACT;
   const allowedWasProvided = Array.isArray(allowedTools) || allowedTools instanceof Set;
   const allowed = new Set([...(allowedTools || [])].map(x => String(x).toLowerCase()));
   if (isCorpusIntent(msg)) return null;
@@ -3603,7 +3621,9 @@ async function toolRouter(env, userMsg, already, contextSoFar, allowedTools) {
 
   const catalog = toolCatalog(env).filter(t => !allowedWasProvided || allowed.has(String(t.name).toLowerCase()));
   if (!catalog.length) return null;
-  const menu = catalog.map(t => `${t.name}: ${t.description}`).join('\n');
+  const explicitCall = await routeExplicitGaryCall(env, msg, allowedWasProvided ? allowed : null, contextSoFar || '');
+  if (explicitCall.handled) return explicitCall.choice;
+  const menu = catalog.filter(t => t.available !== false).map(t => `${t.name}: ${t.description.slice(0, 500)}`).join('\n');
   const sys = [
     'You are the TOOL ROUTER for "Agent Garrett", a DEFENSIVE security / OSINT / malware-analysis agent.',
     'Decide whether ONE tool would materially help answer the user message. Reply with ONLY one line of minified JSON, nothing else:',
@@ -3638,10 +3658,27 @@ async function toolRouter(env, userMsg, already, contextSoFar, allowedTools) {
   try {
     const r = await env.AI.run(ROUTER_MODEL, { messages: [{ role: 'system', content: sys }, { role: 'user', content: u }], stream: false, max_tokens: 160, temperature: 0 });
     const txt = extractAiText(r).trim();
-    const m = txt.match(/\{[^{}]*\}/);
-    if (!m) return null;
-    const o = JSON.parse(m[0]);
+    const o = parseGaryRouterObject(txt);
+    if (!o) return null;
     if (!o.tool || String(o.tool).toLowerCase() === 'none') return null;
+    const gary = getGaryToolSpec(String(o.tool).toLowerCase(), env);
+    if (gary) {
+      if (allowedWasProvided && !allowed.has(gary.name)) return null;
+      const supplied = o.args && typeof o.args === 'object' ? o.args : null;
+      const response = supplied ? null : await env.AI.run(ROUTER_MODEL, {
+        messages: [
+          { role: 'system', content: 'Return only a JSON object of Gary arguments for ' + gary.name + '. Use the schema exactly, preserve native numbers, arrays and objects. Use only values stated by the user or observed in the evidence. Never invent identifiers, targets or authorization. Omit _gary unless the user explicitly provides it. If required input is missing, return {\"missingInput\":true}. Schema: ' + JSON.stringify(gary.inputSchema) },
+          { role: 'user', content: u },
+        ], stream: false, max_tokens: 1800, temperature: 0,
+      });
+      const args = supplied || parseGaryRouterObject(extractAiText(response));
+      if (args?.missingInput || !validateGaryArguments(gary, args).ok) return null;
+      const hay = (msg + ' ' + (contextSoFar || '')).toLowerCase();
+      if (collectGaryTargets(args).some(target => !hay.includes(target.toLowerCase()))) return null;
+      const arg = JSON.stringify(args);
+      if ((already || []).includes(toolCallKey(gary.name, arg))) return null;
+      return { tool: gary.name, arg, args };
+    }
     const arg = String(o.arg || o.argument || o.value || '').trim();
     const PRON = new Set(['him','her','them','it','they','he','she','his','hers','their','theirs','this','that','these','those','someone','somebody','anyone','anybody','everyone','person','people','the person','this person','that person','the guy','this guy','that guy','guy','user','the user','target','the target','subject','the subject','me','you','us','more','everybody']);
     const norm = arg.toLowerCase().replace(/[?.!,]+$/, '').replace(/^(the|a|an)\s+/, '');
@@ -5638,6 +5675,7 @@ el('imp-file').onchange=function(ev){
   };
   rd.readAsText(f);
 };
+var GARY_SCHEMAS={};
 var TOOL_ARGKEY={ nvd_lookup:'cveId', epss_lookup:'cveId', kev_lookup:'cveId', rdap_ip:'ip', rdap_domain:'domain', dns_lookup:'domain', cert_ct:'domain', shodan_internetdb:'ip', reverse_dns:'ip', http_headers:'url', web_search:'query', fetch_url:'url', ip_geo:'ip', asn_info:'target', wayback:'url', urlscan:'domain', urlhaus:'host', github_osint:'query', crtsh_subs:'domain', circl_cve:'cveId', greynoise:'ip', wellknown:'target', username_enum:'username', github_user:'username', gravatar:'email', email_recon:'email', breach_check:'email', tech_fingerprint:'url', origin_ip:'domain', image_osint:'url', onion_search:'query', ransomware_watch:'query', onion_intel:'text', email_security:'domain', typosquat:'domain', crypto_addr:'address', dns_records:'domain', tor_exit:'ip', pwned_password:'password', cve_search:'query', bucket_finder:'name', email_permutations:'input', cors_check:'url', subdomain_takeover:'domain', onion_fetch:'url', hash_lookup:'hash', file_analyze:'url', post_malware_pipeline:'url', decode:'input', ioc_extract:'text', persistence_analyze:'text', evidence_manifest:'text', forensic_timeline:'text', eventlog_triage:'text', cvss:'vector', unshorten:'url', stealer_check:'target', leakcheck:'target', paste_search:'target', dork:'target', phish_check:'url', archive_urls:'domain', favicon_hash:'url', crawl:'url', disclosure_draft:'target', cve_poc:'cveId', kev_recent:'count', mitre:'technique', subdomains:'domain', jwt:'token', cidr:'input', hash_id:'hash', encode:'input', timestamp:'input', vuln_scan:'target', nmap_scan:'target', pcap_analyze:'target', reverse_analyze:'target', forensics_triage:'target', memory_forensics:'target', evtx_analyze:'target', disk_forensics:'target', email_forensics:'target', yara_scan:'target', artifact_carve:'target', crypto_ctf:'input', keybase:'username', devto_user:'username', people_search:'name', edgar:'name', opencorporates:'name', phone_osint:'phone', holehe:'email', exposure_search:'selector' };
 async function loadCatalog(){
   try{
@@ -5657,20 +5695,26 @@ async function loadCatalog(){
     tools.forEach(function(t){
       if(t.category!==curCat){ curCat=t.category; var ch=document.createElement('div'); ch.className='tool-item'; ch.style.color='var(--muted)'; ch.style.textTransform='uppercase'; ch.style.letterSpacing='.08em'; ch.style.marginTop='6px'; ch.textContent='— '+curCat+' —'; cat.appendChild(ch); }
       var row=document.createElement('div'); row.className='tool-item';
-      row.innerHTML='<strong style="color:#bbb">'+t.name+'</strong> <span class="tool-pill '+(t.passive?'passive':'active')+'">'+(t.passive?'passive':'active')+'</span> '+(t.description||'');
+      var label=document.createElement('strong'); label.style.color='#bbb'; label.textContent=t.name; row.appendChild(label);
+      var pill=document.createElement('span'); pill.className='tool-pill '+(t.passive?'passive':'active'); pill.textContent=t.passive?'passive':'active'; row.appendChild(pill);
+      row.appendChild(document.createTextNode(' '+(t.description||'')+(t.unavailableReason?' — '+t.unavailableReason:'')));
+      if(t.via==='gary') GARY_SCHEMAS[t.name]=t.inputSchema;
       cat.appendChild(row);
       var o=document.createElement('option'); o.value=t.name; o.textContent=t.name+'  ('+t.category+')'; sel.appendChild(o);
     });
+    sel.onchange=function(){ var g=GARY_SCHEMAS[sel.value]; el('t-target').placeholder=g?'Gary arguments as JSON':'arg: CVE / IP / domain / url'; el('t-target').title=g?JSON.stringify(g):''; }; sel.onchange();
     if(d.targetAllowlist && d.targetAllowlist.length){ var sc=document.createElement('div'); sc.className='tool-item'; sc.style.marginTop='6px'; sc.textContent='in-scope targets: '+d.targetAllowlist.join(', '); cat.appendChild(sc); }
   }catch(e){ el('t-catalog').textContent='catalog unavailable: '+e.message; }
 }
 el('t-run').onclick=async function(){
   var tool=el('t-tool').value, val=el('t-target').value.trim();
-  var args={}; var k=TOOL_ARGKEY[tool]||'target'; if(val) args[k]=val;
+  var args={}; var isGary=!!GARY_SCHEMAS[tool];
+  if(isGary){ try { args=JSON.parse(val||'{}'); if(!args || typeof args!=='object' || Array.isArray(args)) throw new Error('Use a JSON object for Gary arguments.'); } catch(e){ el('t-result').textContent='Invalid Gary arguments: '+e.message; return; } }
+  else { var k=TOOL_ARGKEY[tool]||'target'; if(val) args[k]=val; }
   var out=el('t-result'); out.innerHTML='<div class="t-out">running '+tool+'…</div>';
   try{
     var r=await fetch('/api/tools/run',{ method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ tool:tool, args:args, target:val, confirm:el('t-confirm').checked, settings:curOpts() }) });
+      body: JSON.stringify({ tool:tool, args:args, target:isGary?'':val, confirm:el('t-confirm').checked, settings:curOpts() }) });
     var d=await r.json();
     if(!d.ok){ out.innerHTML=''; var er=document.createElement('div'); er.className='t-out'; er.textContent='error: '+(d.error||('HTTP '+r.status)); out.appendChild(er); return; }
     var res=typeof d.result==='string'?d.result:JSON.stringify(d.result,null,2);
@@ -5829,20 +5873,25 @@ export default {
     if (url.pathname === '/mcp') {
       return handleMcpRequest(request, env, {
         readJson: req => readJsonBodyLimited(req),
+        getToolSpec: async name => { if (name.startsWith('gary_')) await loadGaryToolCatalog(env); return toolCatalog(env).find(t => t.name === name); },
         listTools: async () => {
+          let garyReady = true;
+          try { await loadGaryToolCatalog(env); } catch { garyReady = false; }
           const policy = getToolPolicy(env);
           const activeEnabled = isTruthy(env.MCP_ALLOW_ACTIVE_TOOLS, false);
           const darkwebEnabled = isTruthy(env.MCP_ALLOW_DARKWEB, false);
           return toolCatalog(env).filter(spec =>
+            (spec.via !== 'gary' || (garyReady && spec.available)) &&
             (spec.category !== 'darkweb' || darkwebEnabled) &&
             (spec.passive || (activeEnabled && policy.toolAllowlist.has(spec.name)))
           );
         },
         callTool: async (name, args) => {
+          if (name.startsWith('gary_')) await loadGaryToolCatalog(env);
           const policy = getToolPolicy(env);
           const selected = toolCatalog(env).find(spec => spec.name === name);
           if (!selected) throw new Error(`Unknown tool: ${name}`);
-          const targets = collectToolTargets('', args, name);
+          const targets = selected.via === 'gary' ? collectGaryTargets(args) : collectToolTargets('', args, name);
           if (!selected.passive) {
             if (!isTruthy(env.MCP_ALLOW_ACTIVE_TOOLS, false)) throw new Error('Active MCP tools are disabled.');
             if (!policy.toolAllowlist.size || !policy.toolAllowlist.has(name)) throw new Error(`Active MCP tool ${name} is not explicitly allowlisted.`);
@@ -5851,6 +5900,10 @@ export default {
           const access = validateToolAccess(policy, name, targets, false);
           if (!access.ok) throw new Error(access.error);
           if (selected.category === 'darkweb' && !isTruthy(env.MCP_ALLOW_DARKWEB, false)) throw new Error('Dark-web MCP tools are disabled.');
+          if (selected.via === 'gary') {
+            const called = await runGaryTool(env, selected, args);
+            return { ...called, via: 'gary', target: targets[0] || '', evidence: toolEvidenceMetadata(selected, called.result) };
+          }
           const result = isBuiltinTool(name)
             ? await runBuiltinCached(env, name, args)
             : await runBrokerTool(env, { tool: name, args, target: targets[0] || '', requestedAt: new Date().toISOString() });
@@ -5951,6 +6004,8 @@ export default {
       try {
         const runtimeEnv = withRuntimeSettings(env, { brokerUrl: url.searchParams.get('brokerUrl') || '' });
         const policy = getAgentPolicy(runtimeEnv);
+        let garyError = '';
+        try { await loadGaryToolCatalog(runtimeEnv); } catch (error) { garyError = error.message; }
         return json({
           ok: true,
           safeMode: policy.safeMode,
@@ -5963,6 +6018,8 @@ export default {
           targetAllowlist: [...policy.targetAllowlist],
           tools: toolCatalog(runtimeEnv),
           brokerConfigured: !!runtimeEnv.TOOL_BROKER_URL,
+          garyConfigured: garyRuntimeConfigured(runtimeEnv),
+          ...(garyError ? { garyError } : {}),
         });
       } catch (e) { return json({ ok: false, error: 'catalog: ' + (e && e.message ? e.message : String(e)) }, 500); }
     }
@@ -5974,18 +6031,17 @@ export default {
       const tool = String(body.tool || '').trim().toLowerCase();
       const policy = getToolPolicy(runtimeEnv);
       if (!tool) return json({ ok: false, error: 'tool is required' }, 400);
-      const checkedInput = validateDirectToolInput(tool, body.args, body.target);
+      if (tool.startsWith('gary_')) { try { await loadGaryToolCatalog(runtimeEnv); } catch (error) { return json({ ok: false, error: error.message }, 503); } }
+      const selected = toolCatalog(runtimeEnv).find(t => t.name === tool);
+      const checkedInput = selected?.via === 'gary' ? validateGaryArguments(selected, body.args) : validateDirectToolInput(tool, body.args, body.target);
       if (!checkedInput.ok) return json(checkedInput, checkedInput.status || 400);
-      // From this point onward authorization and execution receive this exact
-      // validated, normalized string-only object. Never return to the raw body.
       const args = checkedInput.args;
-      const targets = collectToolTargets(checkedInput.target, args, tool);
+      const targets = selected?.via === 'gary' ? collectGaryTargets(args) : collectToolTargets(checkedInput.target, args, tool);
       const target = targets[0] || '';
       if (policy.requireConfirm && body.confirm !== true) {
         return json({ ok: false, error: 'confirm=true is required in CTF safe mode' }, 400);
       }
 
-      const selected = toolCatalog(runtimeEnv).find(t => t.name === tool);
       const darkwebEnabled = !body.settings || body.settings.darkweb !== false;
       if (!darkwebEnabled && selected && selected.category === 'darkweb') {
         return json({ ok: false, error: 'dark-web/onion tools are disabled in settings' }, 403);
@@ -6002,7 +6058,12 @@ export default {
         const started = Date.now();
         let result;
         let via = 'builtin';
-        if (isBuiltinTool(tool)) {
+        let native;
+        if (selected.via === 'gary') {
+          via = 'gary';
+          native = await runGaryTool(runtimeEnv, selected, args);
+          result = native.result;
+        } else if (isBuiltinTool(tool)) {
           result = await runBuiltinCached(runtimeEnv, tool, args);
         } else {
           via = 'broker';
@@ -6025,7 +6086,7 @@ export default {
           elapsedMs: Date.now() - started,
         }));
 
-        return json({ ok: true, tool, via, target, result, ...toolEvidenceMetadata(selected || getToolSpec(tool), result) });
+        return json({ ok: !native?.isError, tool, via, target, result, ...(native ? { content: native.content, extra: native.extra, isError: native.isError, ...(native.isError ? { error: native.result } : {}) } : {}), ...toolEvidenceMetadata(selected || getToolSpec(tool), result) });
       } catch (e) {
         return json({ ok: false, tool, target, error: e.message }, 500);
       }
@@ -6327,6 +6388,7 @@ export default {
           }
           const corpusIntent = isCorpusIntent(lastUser);
           const searchPolicy = shouldUseWebSearch(lastUser, { corpusIntent });
+          if (/\bgary|pentest|penetration|recon|scan|exploit|traffic|shell|finding|asset\b/i.test(lastUser)) { try { await loadGaryToolCatalog(runtimeEnv); } catch (error) { dbg('gary runtime', error.message); } }
           const routePolicy = buildToolRoutePolicy(lastUser, { kind: body.kind, corpusIntent, darkwebEnabled, env: runtimeEnv });
           const persistenceOnly = routePolicy.reason === 'explicit-persistence-text-closed-world';
           const { cveIds, ips, domains, wantSearch } = persistenceOnly
@@ -6426,6 +6488,7 @@ export default {
 
           // ── Agentic tool loop — the AI chooses tools from the full catalog ──
           if (opts.aiTools !== false && routePolicy.use) {
+            try { await loadGaryToolCatalog(runtimeEnv); } catch (error) { dbg('gary runtime', error.message); }
             const ranTools = evidence.map(e => toolCallKey(e.tool, e.input));
             for (let step = 0; step < policy.routerMaxSteps; step++) {
               const choice = await toolRouter(runtimeEnv, lastUser, ranTools, renderBalancedContext(toolContext, 4800, 900), routePolicy.allowedTools);
@@ -6436,7 +6499,8 @@ export default {
               const pickedSpec = toolCatalog(runtimeEnv).find(t => t.name === tool);
               if (!pickedSpec) { dbg('ai_tool skip', tool + ' (unknown)'); break; }
               if (!darkwebEnabled && pickedSpec.category === 'darkweb') { dbg('ai_tool blocked', tool + ' (darkweb disabled)'); break; }
-              const access = validateAutonomousToolAccess(runtimeEnv, policy, pickedSpec, buildGenericToolArgs(arg));
+              const args = choice.args || buildGenericToolArgs(arg);
+              const access = validateAutonomousToolAccess(runtimeEnv, policy, pickedSpec, args);
               if (!access.ok) { dbg('ai_tool blocked', access.error); break; }
               dbg('ai_tool', tool + ' <- ' + arg.slice(0, 80)); send('TOOL:' + tool);
               try {
@@ -6445,7 +6509,7 @@ export default {
                   evidence,
                   toolContext,
                   tool,
-                  buildGenericToolArgs(arg),
+                  args,
                   isBuiltinTool(tool) ? 'builtin' : 'broker'
                 );
                 dbg('ai_tool result', result.slice(0, 160));

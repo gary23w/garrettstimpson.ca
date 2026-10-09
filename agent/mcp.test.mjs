@@ -19,6 +19,19 @@ test('MCP fails closed without a configured token', async () => {
   assert.equal(response.status, 503);
 });
 
+test('MCP ignores the unauthenticated override and still requires a bearer token', async () => {
+  const request = post({ jsonrpc: '2.0', id: 1, method: 'ping' }, { Authorization: '' });
+  const configured = await handleMcpRequest(request, { ...env, MCP_ALLOW_UNAUTHENTICATED: 'true' }, handlers);
+  assert.equal(configured.status, 401);
+
+  const unconfigured = await handleMcpRequest(
+    post({ jsonrpc: '2.0', id: 2, method: 'ping' }),
+    { MCP_ALLOW_UNAUTHENTICATED: 'true' },
+    handlers,
+  );
+  assert.equal(unconfigured.status, 503);
+});
+
 test('MCP rejects invalid bearer credentials', async () => {
   const request = post({ jsonrpc: '2.0', id: 1, method: 'ping' }, { Authorization: 'Bearer wrong' });
   const response = await handleMcpRequest(request, env, handlers);

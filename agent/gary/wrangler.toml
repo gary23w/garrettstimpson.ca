@@ -1,0 +1,33 @@
+name = "garrettstimpson-gary"
+main = "worker.mjs"
+compatibility_date = "2026-10-09"
+compatibility_flags = ["enable_request_signal"]
+workers_dev = false
+preview_urls = false
+
+[[rules]]
+type = "Text"
+globs = ["**/bootstrap.py"]
+fallthrough = true
+
+[ai]
+binding = "AI"
+
+[vars]
+GARY_LLM_MODEL = "@cf/zai-org/glm-4.7-flash"
+
+[[containers]]
+class_name = "GaryContainer"
+scheduling_policy = "durable_object"
+
+[[durable_objects.bindings]]
+name = "GARY_CONTAINER"
+class_name = "GaryContainer"
+
+[exports.GaryContainer]
+type = "durable-object"
+storage = "sqlite"
+
+[[r2_buckets]]
+binding = "GARY_STATE"
+bucket_name = "garrettstimpson-gary-state"

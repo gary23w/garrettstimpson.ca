@@ -1,3 +1,4 @@
+import { validateGaryArguments } from './gary-tools.mjs';
 import { TOOL_INPUT_STRING_KEYS, validateToolArgumentObject } from './harness.mjs';
 
 const LEGACY_PROTOCOL = '2025-11-25';
@@ -11,7 +12,6 @@ const SUPPORTED_PROTOCOLS = new Set([
 ]);
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
 
-const truthy = value => /^(1|true|yes|on)$/i.test(String(value || '').trim());
 const rpc = (id, result) => ({ jsonrpc: '2.0', id: id ?? null, result });
 const rpcError = (id, code, message, data) => ({
   jsonrpc: '2.0', id: id ?? null,
@@ -43,7 +43,6 @@ function allowedOrigin(request, env) {
 }
 
 function authorized(request, env) {
-  if (truthy(env.MCP_ALLOW_UNAUTHENTICATED)) return { ok: true };
   const token = String(env.MCP_API_TOKEN || '').trim();
   if (token.length < 24) return { ok: false, status: 503, error: 'MCP_API_TOKEN is not securely configured.' };
   const auth = request.headers.get('Authorization') || '';
@@ -88,11 +87,11 @@ export function mcpToolDefinition(spec) {
     name: spec.name,
     title: spec.name.replace(/_/g, ' '),
     description: `${spec.description || spec.name}. ${passive ? 'Passive/read-only evidence lookup.' : 'Active or target-contacting operation; server scope policy applies.'}`,
-    inputSchema: { type: 'object', properties: INPUT_PROPERTIES, additionalProperties: false },
+    inputSchema: spec.inputSchema || { type: 'object', properties: INPUT_PROPERTIES, additionalProperties: false },
     annotations: {
       readOnlyHint: passive,
-      destructiveHint: false,
-      idempotentHint: true,
+      destructiveHint: spec.via === 'gary' && !passive,
+      idempotentHint: spec.via !== 'gary',
       openWorldHint: spec.openWorld !== false,
     },
   };
@@ -148,17 +147,21 @@ export async function handleMcpRequest(request, env, handlers) {
     if (!name || !args || typeof args !== 'object' || Array.isArray(args)) {
       return jsonResponse(rpcError(body.id, -32602, 'tools/call requires a name and object arguments.'), 400);
     }
-    const argumentError = validateArguments(args);
+    let spec;
+    try { spec = await handlers.getToolSpec?.(name); } catch (error) { return jsonResponse(rpcError(body.id, -32000, error.message), 503); }
+    const argumentError = spec?.via === 'gary' ? (validateGaryArguments(spec, args).error || null) : validateArguments(args);
     if (argumentError) return jsonResponse(rpcError(body.id, -32602, argumentError), 400);
     try {
       const called = await handlers.callTool(name, args);
       const text = typeof called.result === 'string' ? called.result : JSON.stringify(called.result);
+      const nativeContent = Array.isArray(called.content) ? called.content.map(block => block.type === 'image' && block.source?.type === 'base64' ? { type: 'image', data: block.source.data, mimeType: block.source.media_type } : block).filter(block => block.type === 'text' || (block.type === 'image' && block.data && block.mimeType)) : [];
       return jsonResponse(rpc(body.id, {
-        content: [{ type: 'text', text }],
+        content: nativeContent.length ? nativeContent : [{ type: 'text', text: text || '' }],
         structuredContent: {
           tool: name,
           via: called.via || 'builtin',
           target: called.target || '',
+          ...(called.extra ? { extra: called.extra } : {}),
           ...(called.evidence && typeof called.evidence === 'object' ? called.evidence : {}),
         },
         isError: called.isError === true,

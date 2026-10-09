@@ -5,12 +5,14 @@
   "scripts": {
     "test": "node validate.js && node --test *.test.mjs",
     "check": "node --check src/index.js && npm test",
-    "deploy": "wrangler deploy"
+    "deploy": "node gary/deploy.mjs",
+    "gary:dev": "wrangler dev --config gary/wrangler.toml",
+    "gary:build": "node gary/package.mjs"
   },
   "devDependencies": {
-    "wrangler": "4.146.0"
+    "wrangler": "4.149.0"
   },
-  "description": "Security research agent \u2014 neuron-db WASM memory, evidence-aware routing, defensive dark-web monitoring, incident forensics, passive OSINT, and a stateless MCP server.",
+  "description": "Security research agent — neuron-db WASM memory, evidence-aware routing, defensive dark-web monitoring, incident forensics, passive OSINT, and a stateless MCP server.",
   "cloudflare": {
     "bindings": [
       {
@@ -106,6 +108,12 @@
         "name": "MAILGUN_DOMAIN",
         "text": "",
         "description": "Mailgun sending domain (used with MAILGUN_API_KEY)."
+      },
+      {
+        "type": "service",
+        "name": "GARY_RUNTIME",
+        "service": "garrettstimpson-gary",
+        "entrypoint": "GaryBackend"
       }
     ]
   }

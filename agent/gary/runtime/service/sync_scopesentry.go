@@ -1,0 +1,478 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/storage"
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/transport"
+)
+
+const (
+	scopeSentryMCPName = "ScopeSentry"
+	syncMaxPerType     = 5000
+	syncDefaultPage    = 100
+)
+
+func (s *Server) findMCPByName(name string) (*db.MCPServer, error) {
+	all, err := s.m.pg.ListMCP()
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range all {
+		if m.Name == name {
+			return m, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *Server) scopeSentryClient(ctx context.Context) (*mcphttp.Client, error) {
+	m, err := s.findMCPByName(scopeSentryMCPName)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, fmt.Errorf("Data source %s does not exist, please create it first", scopeSentryMCPName)
+	}
+	if m.URL == "" {
+		return nil, fmt.Errorf("Data source %s has no URL configured, please configure it first", scopeSentryMCPName)
+	}
+	return mcphttp.New(ctx, m.Name, m.URL, jsonStrMap(m.Env), m.Insecure)
+}
+
+func envHasValue(raw json.RawMessage) bool {
+	for _, v := range jsonStrMap(raw) {
+		if strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) syncSSStatus(w http.ResponseWriter, r *http.Request) {
+	if s.pg(w) == nil {
+		return
+	}
+	m, err := s.findMCPByName(scopeSentryMCPName)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	resp := map[string]any{
+		"exists":     m != nil,
+		"configured": false,
+		"enabled":    false,
+		"reachable":  false,
+		"tools":      []string{},
+	}
+	if m == nil {
+		writeJSON(w, 200, resp)
+		return
+	}
+	configured := m.URL != "" && envHasValue(m.Env)
+	resp["configured"] = configured
+	resp["enabled"] = m.Enabled
+	resp["url"] = m.URL
+	if m.Tools != nil {
+		resp["tools"] = m.Tools
+	}
+
+	if configured && m.Enabled {
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		defer cancel()
+		if cl, cerr := mcphttp.New(ctx, m.Name, m.URL, jsonStrMap(m.Env), m.Insecure); cerr == nil {
+			if _, terr := cl.Tools(ctx); terr == nil {
+				resp["reachable"] = true
+			}
+			_ = cl.Close()
+		}
+	}
+	writeJSON(w, 200, resp)
+}
+
+func (s *Server) syncSSDatasource(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var body struct {
+		URL    string `json:"url"`
+		APIKey string `json:"api_key"`
+	}
+	_ = decode(r, &body)
+	body.URL = strings.TrimSpace(body.URL)
+	body.APIKey = strings.TrimSpace(body.APIKey)
+
+	m, err := s.findMCPByName(scopeSentryMCPName)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if m == nil {
+		m = &db.MCPServer{Name: scopeSentryMCPName, Transport: "http", Env: json.RawMessage(`{"X-API-Key":""}`)}
+	}
+	if body.URL != "" {
+		m.URL = body.URL
+	}
+	if body.APIKey != "" {
+		env, _ := json.Marshal(map[string]string{"X-API-Key": body.APIKey})
+		m.Env = env
+	}
+
+	m.Enabled = m.URL != "" && envHasValue(m.Env)
+
+	id, err := pg.SaveMCP(m)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	m.ID = id
+
+	if m.Enabled {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		_ = s.discoverAndCacheMCP(ctx, m)
+		cancel()
+	}
+	writeJSON(w, 200, map[string]any{"id": id, "enabled": m.Enabled})
+}
+
+func (s *Server) syncSSProjects(w http.ResponseWriter, r *http.Request) {
+	if s.pg(w) == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	cl, err := s.scopeSentryClient(ctx)
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	defer cl.Close()
+
+	args := map[string]any{
+		"pageIndex": queryInt(r, "page", 1),
+		"pageSize":  queryInt(r, "size", 50),
+	}
+	if q := r.URL.Query().Get("search"); q != "" {
+		args["search"] = q
+	}
+	text, err := cl.Call(ctx, "list_projects_data", args)
+	if err != nil {
+		writeErr(w, 502, "list_projects_data failed:"+err.Error())
+		return
+	}
+
+	var env struct {
+		Result map[string]json.RawMessage `json:"result"`
+		Tag    map[string]int             `json:"tag"`
+	}
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		writeErr(w, 502, "Failed to parse list of items:"+err.Error())
+		return
+	}
+	projects := json.RawMessage("[]")
+	if raw, ok := env.Result["All"]; ok && len(raw) > 0 {
+		projects = raw
+	}
+	writeJSON(w, 200, map[string]any{"projects": projects, "tag": env.Tag})
+}
+
+func (s *Server) syncSSTasks(w http.ResponseWriter, r *http.Request) {
+	if s.pg(w) == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	cl, err := s.scopeSentryClient(ctx)
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	defer cl.Close()
+
+	args := map[string]any{
+		"pageIndex": queryInt(r, "page", 1),
+		"pageSize":  queryInt(r, "size", 50),
+	}
+	if q := r.URL.Query().Get("search"); q != "" {
+		args["search"] = q
+	}
+	text, err := cl.Call(ctx, "list_tasks", args)
+	if err != nil {
+		writeErr(w, 502, "list_tasks failed:"+err.Error())
+		return
+	}
+	var env struct {
+		List json.RawMessage `json:"list"`
+	}
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		writeErr(w, 502, "Failed to parse task list:"+err.Error())
+		return
+	}
+	tasks := env.List
+	if len(tasks) == 0 {
+		tasks = json.RawMessage("[]")
+	}
+	writeJSON(w, 200, map[string]any{"tasks": tasks})
+}
+
+type ssSyncReq struct {
+	Dimension     string   `json:"dimension"`
+	Targets       []string `json:"targets"`
+	AssetTypes    []string `json:"asset_types"`
+	CreateCompany bool     `json:"create_company"`
+	PageSize      int      `json:"page_size"`
+}
+
+func (s *Server) syncSSRun(w http.ResponseWriter, r *http.Request) {
+	if s.pg(w) == nil {
+		return
+	}
+	as := s.assetStore()
+	cs := s.companyStore()
+	if as == nil || cs == nil {
+		writeErr(w, 503, "database unavailable")
+		return
+	}
+	var req ssSyncReq
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.Dimension != "project" && req.Dimension != "task" {
+		writeErr(w, 400, "dimension must be project or task")
+		return
+	}
+	if len(req.Targets) == 0 {
+		writeErr(w, 400, "targets cannot be empty")
+		return
+	}
+	if len(req.AssetTypes) == 0 {
+		req.AssetTypes = []string{"subdomain", "service", "app"}
+	}
+	pageSize := req.PageSize
+	if pageSize <= 0 || pageSize > 500 {
+		pageSize = syncDefaultPage
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	cl, err := s.scopeSentryClient(ctx)
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	defer cl.Close()
+
+	synced := map[string]int{"subdomain": 0, "app": 0, "service": 0, "ip": 0}
+	var companies []string
+	var warnings, errs []string
+	madeCompany := false
+
+	for _, target := range req.Targets {
+		filter := map[string]any{}
+		switch req.Dimension {
+		case "project":
+			filter["project"] = []string{target}
+			if req.CreateCompany {
+				name, roots, perr := s.ssProjectMeta(ctx, cl, target)
+				if perr != nil {
+					warnings = append(warnings, fmt.Sprintf("Failed to get project %s details: %v", target, perr))
+				} else if name != "" {
+					cid, cerr := cs.UpsertByName(name)
+					if cerr != nil {
+						warnings = append(warnings, fmt.Sprintf("Company %s creation failed: %v", name, cerr))
+					} else {
+						companies = append(companies, name)
+						madeCompany = true
+						if len(roots) > 0 {
+							cs.AddScope(cid, roots, "scopesentry:"+name)
+						}
+					}
+				}
+			}
+		case "task":
+			filter["task"] = []string{target}
+		}
+
+		for _, at := range req.AssetTypes {
+			ssType, ok := map[string]string{"subdomain": "subdomain", "service": "asset", "app": "app"}[at]
+			if !ok {
+				warnings = append(warnings, "Unknown asset type, skipped:"+at)
+				continue
+			}
+			items, truncated, ferr := s.ssPageAll(ctx, cl, ssType, filter, pageSize)
+			if ferr != nil {
+				errs = append(errs, fmt.Sprintf("%s(%s) pull failed: %v", at, target, ferr))
+				continue
+			}
+			if truncated {
+				warnings = append(warnings, fmt.Sprintf("%s(%s) reaches the limit of %d items and has been truncated", at, target, syncMaxPerType))
+			}
+			for _, raw := range items {
+				if e := s.ssIngest(as, at, raw, synced); e != "" {
+					errs = append(errs, e)
+				}
+			}
+		}
+	}
+
+	if madeCompany {
+		_ = cs.RecomputeAttribution()
+	}
+
+	writeJSON(w, 200, map[string]any{
+		"synced":    synced,
+		"companies": companies,
+		"warnings":  warnings,
+		"errors":    errs,
+	})
+}
+
+func (s *Server) ssProjectMeta(ctx context.Context, cl *mcphttp.Client, projectID string) (name string, roots []string, err error) {
+	text, err := cl.Call(ctx, "get_project", map[string]any{"id": projectID})
+	if err != nil {
+		return "", nil, err
+	}
+	var p struct {
+		Name   string `json:"name"`
+		Target string `json:"target"`
+	}
+	if err := json.Unmarshal([]byte(text), &p); err != nil {
+		return "", nil, err
+	}
+	for _, line := range strings.Split(p.Target, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			roots = append(roots, t)
+		}
+	}
+	return p.Name, roots, nil
+}
+
+func (s *Server) ssPageAll(ctx context.Context, cl *mcphttp.Client, ssType string, filter map[string]any, pageSize int) (items []json.RawMessage, truncated bool, err error) {
+	for page := 1; ; page++ {
+		args := map[string]any{"asset_type": ssType, "pageIndex": page, "pageSize": pageSize}
+		if len(filter) > 0 {
+			args["filter"] = filter
+		}
+		text, cerr := cl.Call(ctx, "list_assets", args)
+		if cerr != nil {
+			return items, truncated, cerr
+		}
+		var env struct {
+			List []json.RawMessage `json:"list"`
+		}
+		if uerr := json.Unmarshal([]byte(text), &env); uerr != nil {
+			return items, truncated, uerr
+		}
+		if len(env.List) == 0 {
+			break
+		}
+		items = append(items, env.List...)
+		if len(items) >= syncMaxPerType {
+			items = items[:syncMaxPerType]
+			truncated = true
+			break
+		}
+		if len(env.List) < pageSize {
+			break
+		}
+	}
+	return items, truncated, nil
+}
+
+func (s *Server) ssIngest(as *db.AssetStore, assetType string, raw json.RawMessage, synced map[string]int) string {
+	switch assetType {
+	case "subdomain":
+		var it struct {
+			Host  string   `json:"host"`
+			Type  string   `json:"type"`
+			Value []string `json:"value"`
+			IP    []string `json:"ip"`
+		}
+		if err := json.Unmarshal(raw, &it); err != nil {
+			return "Subdomain resolution failed:" + err.Error()
+		}
+		if it.Host == "" {
+			return ""
+		}
+		if _, err := as.UpsertSubdomain(db.UpsertSubdomainReq{Domain: it.Host, RecordType: it.Type, RecordValue: it.Value}); err != nil {
+			return "subdomain " + it.Host + ": " + err.Error()
+		}
+		synced["subdomain"]++
+		for _, ip := range it.IP {
+			if ip != "" {
+				if _, err := as.UpsertIP(db.UpsertIPReq{IP: ip, BoundDomains: []string{it.Host}}); err == nil {
+					synced["ip"]++
+				}
+			}
+		}
+	case "app":
+		var it struct {
+			Name        string `json:"name"`
+			Category    string `json:"category"`
+			Description string `json:"description"`
+			ICP         string `json:"icp"`
+		}
+		if err := json.Unmarshal(raw, &it); err != nil {
+			return "app parsing failed:" + err.Error()
+		}
+		if it.Name == "" {
+			return ""
+		}
+		if _, err := as.UpsertApp(db.UpsertAppReq{Name: it.Name, Category: it.Category, Description: it.Description, ICP: it.ICP}); err != nil {
+			return "app " + it.Name + ": " + err.Error()
+		}
+		synced["app"]++
+	case "service":
+		var it struct {
+			Domain   string   `json:"domain"`
+			IP       string   `json:"ip"`
+			Port     string   `json:"port"`
+			Service  string   `json:"service"`
+			URL      string   `json:"url"`
+			Title    string   `json:"title"`
+			Status   *int     `json:"status"`
+			Products []string `json:"products"`
+			Icon     string   `json:"icon"`
+		}
+		if err := json.Unmarshal(raw, &it); err != nil {
+			return "Service parsing failed:" + err.Error()
+		}
+		if it.Service == "http" || it.URL != "" {
+			if it.URL == "" {
+				return ""
+			}
+			if _, err := as.UpsertHTTPService(db.UpsertHTTPServiceReq{
+				URL: it.URL, Technologies: it.Products, StatusCode: it.Status,
+				PageTitle: it.Title, FaviconMMH3: it.Icon, IP: it.IP,
+			}); err != nil {
+				return "service " + it.URL + ": " + err.Error()
+			}
+		} else {
+			port, _ := strconv.Atoi(it.Port)
+			if _, err := as.UpsertOtherService(db.UpsertOtherServiceReq{
+				Domain: it.Domain, IP: it.IP, Port: port, ServiceName: it.Service,
+			}); err != nil {
+				return "service " + it.IP + ":" + it.Port + ": " + err.Error()
+			}
+		}
+		synced["service"]++
+	}
+	return ""
+}
+
+func queryInt(r *http.Request, key string, def int) int {
+	if v := r.URL.Query().Get(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}

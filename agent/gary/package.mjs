@@ -1,0 +1,10 @@
+import fs from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+import {packageGary} from './archive.mjs';
+const directory=fileURLToPath(new URL('./',import.meta.url));
+const source=await packageGary(directory);
+const output=new URL('./build/source.tar.gz',import.meta.url);
+await fs.mkdir(new URL('./build/',import.meta.url),{recursive:true});
+await fs.writeFile(output,source);
+console.log(JSON.stringify({path:fileURLToPath(output),bytes:source.length,sha256:createHash('sha256').update(source).digest('hex')}));

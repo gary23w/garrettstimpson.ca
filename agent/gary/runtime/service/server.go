@@ -1,0 +1,3546 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/approval"
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/capture"
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/engine/llm"
+	actool "github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/engine/tool"
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/engine/transcript"
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/providers"
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/reports"
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/storage"
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/tools"
+	"github.com/gary23w/garrettstimpson.ca/agent/gary/runtime/usage"
+)
+
+var BuildVersion = "dev"
+
+type Server struct {
+	m      *Manager
+	engine *Engine
+	ctx    context.Context
+
+	skillDir string
+	jwtKey   []byte
+
+	concMu sync.Mutex
+
+	cfgMu     sync.Mutex
+	chatAgent *agent.ChatAgent
+
+	llmProv   llm.Provider
+	llmDirect llm.Provider
+	llmCfg    agent.Config
+	llmOn     bool
+	llmProf   string
+
+	chatMu   sync.Mutex
+	chatBusy map[string]bool
+
+	chatCancel map[string]context.CancelCauseFunc
+
+	queueMu       sync.Mutex
+	triggerQ      map[string][]triggeredRun
+	triggerActive map[string]int
+	triggerCfg    map[string]triggerBehavior
+
+	profMu         sync.Mutex
+	profChatAgents map[int64]*agent.ChatAgent
+
+	provCacheMu   sync.Mutex
+	provByProfile map[int64]*provEntry
+	provCacheGen  uint64
+
+	llmHealth *llmpool.Registry
+
+	taskAgentMu sync.Mutex
+	taskAgents  map[string]*taskAgentBundle
+
+	archiveWake chan struct{}
+	archiveWG   sync.WaitGroup
+	side        *sideQuestionState
+}
+
+type provEntry struct {
+	prov llm.Provider
+	cfg  agent.Config
+}
+
+type triggeredRun struct {
+	agentKey  string
+	title     string
+	message   string
+	taskID    int64
+	taskDesc  string
+	taskGoal  string
+	mergeable bool
+}
+
+func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDir string) *Server {
+	key, err := loadOrCreateJWTKey(keyDir, dataDir)
+	if err != nil {
+		log.Fatalf("[auth] JWT key: %v", err)
+	}
+	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
+		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
+		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
+		profChatAgents: map[int64]*agent.ChatAgent{},
+		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
+		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+	s.initSideQuestions()
+
+	s.applyRetryPolicy()
+
+	s.engine.SetAuthoritativeAgentResolver(func(t *Task) (*agent.Planner, *agent.Worker) {
+		if !s.taskRuntimeAvailable(t, "planner", "worker") {
+			return nil, nil
+		}
+		b := s.agentsForTask(t)
+		return b.pl, b.wk
+	})
+
+	s.engine.SetReadiness(func() bool {
+		s.cfgMu.Lock()
+		defer s.cfgMu.Unlock()
+		return s.llmOn
+	})
+
+	if m.pg != nil {
+		agent.PromptOverride = func(key string) (string, bool) {
+			a, err := m.pg.GetAgentByKey(key)
+			if err != nil || a == nil {
+				return "", false
+			}
+			t, err := m.pg.CurrentPrompt(a.ID)
+			if err != nil || t == "" {
+				return "", false
+			}
+			return t, true
+		}
+
+		agent.WrapupOverride = func(key string) (string, bool) {
+			a, err := m.pg.GetAgentByKey(key)
+			if err != nil || a == nil || a.WrapupPrompt == "" {
+				return "", false
+			}
+			return a.WrapupPrompt, true
+		}
+
+		agent.WrapupMaxTurnsOverride = func(key string) (int, bool) {
+			a, err := m.pg.GetAgentByKey(key)
+			if err != nil || a == nil || a.WrapupMaxTurns <= 0 {
+				return 0, false
+			}
+			return a.WrapupMaxTurns, true
+		}
+
+		agent.WrapupTaskTimeoutOverride = func(key string) (string, bool) {
+			a, err := m.pg.GetAgentByKey(key)
+			if err != nil || a == nil || a.TaskTimeoutWrapupPrompt == "" {
+				return "", false
+			}
+			return a.TaskTimeoutWrapupPrompt, true
+		}
+		agent.WrapupTaskTimeoutTurnsOverride = func(key string) (int, bool) {
+			a, err := m.pg.GetAgentByKey(key)
+			if err != nil || a == nil || a.TaskTimeoutWrapupMaxTurns <= 0 {
+				return 0, false
+			}
+			return a.TaskTimeoutWrapupMaxTurns, true
+		}
+		wireAgentAugment(m.pg, s.skillDir, s.hostTools)
+		domainReg := buildDomainReg(m.Assets())
+		wireTools(m.pg, domainReg)
+		seedPrompts(m.pg)
+		s.seedOrchestrationTools()
+		if err := s.seedFindingRetester(); err != nil {
+			log.Printf("[retester] seed: %v", err)
+		}
+		go s.evidenceStore().RunGC(s.ctx)
+		s.seedPythonInterpreter()
+		go newScheduler(s).Run(s.ctx)
+
+		go newNotifier(s).Run(s.ctx)
+
+		go s.discoverEmptyMCPsOnStartup()
+		logSink.SetDB(ctx, m.pg)
+	}
+
+	if _, configured := s.loadLLMConfig(); !configured {
+		if cfg, ok := agent.FromEnv(); ok {
+			if err := s.saveLLMConfig(cfg); err != nil {
+				log.Printf("[engine] default environment profile could not be saved: %v", err)
+			}
+		}
+	}
+	if cfg, ok := s.loadLLMConfig(); ok {
+		if err := s.applyLLM(cfg); err != nil {
+			log.Printf("[engine] saved LLM config init failed — engine idle: %v", err)
+		} else {
+			log.Printf("[engine] LLM configured from DB: %s / %s", cfg.Provider(), cfg.Model)
+		}
+	} else if cfg, ok := agent.FromEnv(); ok {
+		if err := s.applyLLM(cfg); err != nil {
+			log.Printf("[engine] env provider init failed — engine idle: %v", err)
+		} else {
+			log.Printf("[engine] LLM configured from env: %s / %s", cfg.Provider(), cfg.Model)
+		}
+	} else {
+		log.Printf("[engine] no LLM provider configured — engine idle until set via /api/llm or env")
+	}
+	s.restoreTaskRuntimes()
+	go s.reconcileConcurrency()
+	s.startTaskArchiveWorker()
+	s.wireInterceptReviewer()
+	return s
+}
+
+func (s *Server) restoreTaskRuntimes() {
+	m := s.m
+
+	for _, t := range m.LoadExisting() {
+		lifecycle := t.lifecycleSnapshot()
+
+		if n, _ := t.Store.ResetRunningIntents(); n > 0 {
+			log.Printf("[engine] task %s resets %d remaining running intents to open", t.ID, n)
+		}
+		if lifecycle.Paused {
+			s.engine.Pause(t.ID, agent.AbortPausedOnReload)
+		}
+
+		if !isTerminalStatus(lifecycle.Status) {
+			s.engine.startDeadlineCoordinator(s.ctx, t)
+		}
+	}
+
+	for _, t := range m.List() {
+		lifecycle := t.lifecycleSnapshot()
+		if !lifecycle.Queued && !isTerminalStatus(lifecycle.Status) {
+			s.engine.Run(s.ctx, t)
+		}
+	}
+}
+
+func (s *Server) agentMaxTurns(key string) int {
+	if s.m.pg == nil {
+		return 0
+	}
+	a, err := s.m.pg.GetAgentByKey(key)
+	if err != nil || a == nil {
+		return 0
+	}
+	return a.MaxTurns
+}
+
+func (s *Server) agentRunSeconds(key string) int {
+	if s.m.pg == nil {
+		return 1200
+	}
+	a, err := s.m.pg.GetAgentByKey(key)
+	if err != nil || a == nil {
+		return 1200
+	}
+	return a.RunSecs
+}
+
+func (s *Server) loadLLMConfig() (agent.Config, bool) {
+	p, err := s.m.pg.ActiveProfile()
+	if err != nil || p == nil {
+		return agent.Config{}, false
+	}
+	cfg := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
+	cfg.RatePerSecond, cfg.RatePerMinute = p.RatePerSecond, p.RatePerMinute
+	cfg.ContextWindowK = p.ContextWindowK
+	cfg.ThinkingType = p.ThinkingType
+	cfg.ReasoningEffort = p.ReasoningEffort
+	cfg.Stream = p.Streaming
+	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
+	cfg.SessionHeaderKey = p.SessionHeaderKey
+	s.applyProfileRetry(&cfg, p)
+	if cfg.APIKey == "" {
+		return cfg, false
+	}
+	s.cfgMu.Lock()
+	s.llmProf = p.Name
+	s.cfgMu.Unlock()
+	return cfg, true
+}
+
+func (s *Server) saveLLMConfig(cfg agent.Config) error {
+
+	format := cfg.Provider()
+	var id int64
+
+	var priority int
+	var poolExclude bool
+	streaming := cfg.Stream
+	var maxTokens int
+	var maxTokensField string
+	var sessionHeaderKey string
+	var retry db.RetryOverride
+	if profs, _ := s.m.pg.ListProfiles(); profs != nil {
+		for _, p := range profs {
+			if p.Name == "default" {
+				id, priority, poolExclude, streaming = p.ID, p.Priority, p.PoolExclude, p.Streaming
+				maxTokens, maxTokensField = p.MaxTokens, p.MaxTokensField
+				sessionHeaderKey = p.SessionHeaderKey
+				retry = p.Retry
+				break
+			}
+		}
+	}
+	newID, err := s.m.pg.SaveProfile(&db.LLMProfile{
+		ID: id, Name: "default", Format: format, Model: cfg.Model, BaseURL: cfg.BaseURL, Proxy: cfg.Proxy,
+		APIKey: cfg.APIKey, RatePerSecond: cfg.RatePerSecond, RatePerMinute: cfg.RatePerMinute,
+		ContextWindowK: cfg.ContextWindowK, ThinkingType: cfg.ThinkingType, ReasoningEffort: cfg.ReasoningEffort, IsDefault: true,
+		Priority: priority, PoolExclude: poolExclude, Streaming: streaming,
+		MaxTokens: maxTokens, MaxTokensField: maxTokensField, SessionHeaderKey: sessionHeaderKey,
+		Retry: retry,
+	})
+	if err != nil {
+		return err
+	}
+	return s.m.pg.SetActiveProfile(newID)
+}
+
+func (s *Server) reapplyActiveProfile() {
+	cfg, ok := s.loadLLMConfig()
+	if !ok {
+		return
+	}
+	if err := s.applyLLM(cfg); err != nil {
+		log.Printf("[engine] reapply active profile failed: %v", err)
+		return
+	}
+	log.Printf("[engine] LLM reapplied from active profile: %s / %s", cfg.Provider(), cfg.Model)
+}
+
+func (s *Server) webSearchFor(key string) agent.WebSearchOpts {
+	o := s.m.WebSearchOpts()
+	if a, err := s.m.pg.GetAgentByKey(key); err != nil || a == nil || !a.WebSearch {
+		o.Enabled = false
+	}
+	return o
+}
+
+func nonStreamingResolver(cfg agent.Config) func() bool {
+	nonStreaming := !cfg.Stream
+	return func() bool { return nonStreaming }
+}
+
+func maxTokensResolver(cfg agent.Config) func() int {
+	maxTokens := cfg.MaxTokens
+	return func() int { return maxTokens }
+}
+
+func (s *Server) applyLLM(cfg agent.Config) error {
+	var prov llm.Provider
+
+	if active, _ := s.m.pg.ActiveProfile(); active != nil {
+		if activeCfg, ok := s.loadProfileConfig(active.ID); ok && activeCfg == cfg {
+			prov, _, _ = s.providerForProfile(active.ID)
+		}
+	}
+	if prov == nil {
+		var err error
+		prov, err = cfg.NewProvider()
+		if err != nil {
+			return err
+		}
+
+		s.cfgMu.Lock()
+		profName := s.llmProf
+		s.cfgMu.Unlock()
+		prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, profName, cfg.ThinkingType, cfg.ReasoningEffort, s.m.LLMRecordEnabled)
+		prov = bindSideProvider(prov, cfg, 0, profName)
+	}
+	s.cfgMu.Lock()
+	s.llmDirect = prov
+	s.cfgMu.Unlock()
+
+	if act, err := s.m.pg.ActiveProfile(); err == nil && act != nil {
+		prov = s.poolForActive(act.ID, prov, cfg)
+	}
+
+	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
+	win := cfg.CompactionWindow()
+
+	s.cfgMu.Lock()
+
+	s.chatAgent = agent.NewChatAgent(prov, cfg.Model, s.m.dir, tx, win)
+	s.chatAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	s.chatAgent.SetWebSearch(s.m.WebSearchOpts())
+	s.chatAgent.SetGuard(s.chatGuard())
+	s.chatAgent.SetNonStreaming(nonStreamingResolver(cfg))
+	s.chatAgent.SetMaxTokens(maxTokensResolver(cfg))
+	s.chatAgent.SetNoaEnabled(s.m.NoaCompactionEnabled)
+	s.llmProv = prov
+	s.llmCfg = cfg
+	s.llmOn = true
+	s.cfgMu.Unlock()
+	s.invalidateTaskAgents()
+
+	if t := s.m.ActiveTask(); t != nil {
+		t.Notify()
+	}
+	return nil
+}
+
+func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
+	p, err := s.m.pg.ProfileByID(id)
+	if err != nil || p == nil {
+		return agent.Config{}, false
+	}
+	cfg := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
+	cfg.RatePerSecond, cfg.RatePerMinute = p.RatePerSecond, p.RatePerMinute
+	cfg.ContextWindowK = p.ContextWindowK
+	cfg.ThinkingType = p.ThinkingType
+	cfg.ReasoningEffort = p.ReasoningEffort
+	cfg.Stream = p.Streaming
+	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
+	cfg.SessionHeaderKey = p.SessionHeaderKey
+	s.applyProfileRetry(&cfg, p)
+	if cfg.APIKey == "" {
+		return cfg, false
+	}
+	return cfg, true
+}
+
+func (s *Server) effectiveProfileForAgent(agentKey string, pinID *int64) *int64 {
+	if s.m.pg != nil && agentKey != "" {
+		if a, _ := s.m.pg.GetAgentByKey(agentKey); a != nil && a.LLMProfileID != nil {
+			return a.LLMProfileID
+		}
+	}
+	return pinID
+}
+
+func (s *Server) resolveChatAgent(c *db.Conversation) *agent.ChatAgent {
+	ca := s.chatAgentRef()
+	if eff := s.effectiveProfileForAgent(c.AgentKey, c.LLMProfileID); eff != nil {
+		if pa := s.chatAgentForProfile(*eff); pa != nil {
+			ca = pa
+		}
+	}
+	return ca
+}
+
+func (s *Server) chatUnavailableReason() string {
+	if s.m.pg != nil {
+		if profiles, err := s.m.pg.ListProfiles(); err == nil && len(profiles) == 0 {
+			return "LLM has not been configured yet: Please go to System → LLM Configuration to add a configuration"
+		}
+		if active, err := s.m.pg.ActiveProfile(); err == nil && active == nil {
+			return "There is no LLM configuration activated: activate one in System → LLM Configuration, or specify a configuration for this session in this dialog"
+		}
+	}
+	return "LLM is not ready for conversation: please check System → LLM Configuration for an available and activated configuration"
+}
+
+func (s *Server) providerForProfile(id int64) (llm.Provider, agent.Config, bool) {
+	s.provCacheMu.Lock()
+	if e := s.provByProfile[id]; e != nil {
+		s.provCacheMu.Unlock()
+		return e.prov, e.cfg, true
+	}
+	generation := s.provCacheGen
+	s.provCacheMu.Unlock()
+	cfg, ok := s.loadProfileConfig(id)
+	if !ok {
+		return nil, agent.Config{}, false
+	}
+	prov, err := cfg.NewProvider()
+	if err != nil {
+		log.Printf("[engine] build provider for LLM profile %d failed: %v", id, err)
+		return nil, agent.Config{}, false
+	}
+
+	if p, _ := s.m.pg.ProfileByID(id); p != nil {
+		prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, p.Name, cfg.ThinkingType, cfg.ReasoningEffort, s.m.LLMRecordEnabled)
+		prov = bindSideProvider(prov, cfg, id, p.Name)
+	}
+	s.provCacheMu.Lock()
+	if generation != s.provCacheGen {
+		s.provCacheMu.Unlock()
+		return s.providerForProfile(id)
+	}
+	if e := s.provByProfile[id]; e != nil {
+		prov, cfg = e.prov, e.cfg
+	} else {
+		s.provByProfile[id] = &provEntry{prov: prov, cfg: cfg}
+		log.Printf("[engine] built provider for LLM profile %d (%s / %s)", id, cfg.Provider(), cfg.Model)
+	}
+	s.provCacheMu.Unlock()
+	return prov, cfg, true
+}
+
+func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
+	s.profMu.Lock()
+	cached := s.profChatAgents[id]
+	s.profMu.Unlock()
+	if cached != nil {
+		return cached
+	}
+	prov, cfg, ok := s.providerForProfile(id)
+	if !ok {
+		return nil
+	}
+	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
+	ca := agent.NewChatAgent(s.poolForBinding(id, prov, cfg), cfg.Model, s.m.dir, tx, cfg.CompactionWindow())
+	ca.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	ca.SetWebSearch(s.m.WebSearchOpts())
+	ca.SetGuard(s.chatGuard())
+	ca.SetNonStreaming(nonStreamingResolver(cfg))
+	ca.SetMaxTokens(maxTokensResolver(cfg))
+	ca.SetNoaEnabled(s.m.NoaCompactionEnabled)
+	s.profMu.Lock()
+	if ex := s.profChatAgents[id]; ex != nil {
+		ca = ex
+	} else {
+		s.profChatAgents[id] = ca
+	}
+	s.profMu.Unlock()
+	return ca
+}
+
+func (s *Server) invalidateProfileAgents() {
+	s.profMu.Lock()
+	s.profChatAgents = map[int64]*agent.ChatAgent{}
+	s.profMu.Unlock()
+	s.provCacheMu.Lock()
+	s.provCacheGen++
+	s.provByProfile = map[int64]*provEntry{}
+	s.provCacheMu.Unlock()
+	s.invalidateTaskAgents()
+}
+
+func (s *Server) chatAgentRef() *agent.ChatAgent {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	return s.chatAgent
+}
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	s.registerSideRoutes(mux)
+
+	mux.HandleFunc("GET /api/auth/status", s.authStatus)
+	mux.HandleFunc("POST /api/auth/init", s.authInit)
+	mux.HandleFunc("POST /api/auth/login", s.authLogin)
+	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
+
+	mux.HandleFunc("GET /api/health", s.health)
+	mux.HandleFunc("GET /api/stats", s.stats)
+	mux.HandleFunc("GET /api/logs", s.getLogs)
+	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
+	mux.HandleFunc("GET /api/logs/stream", s.streamLogs)
+
+	mux.HandleFunc("GET /api/update/check", s.updateCheck)
+	mux.HandleFunc("POST /api/update/apply", s.updateApply)
+	mux.HandleFunc("POST /api/update/rollback", s.updateRollback)
+	mux.HandleFunc("GET /api/update/stream", s.updateStream)
+
+	mux.HandleFunc("GET /api/tasks", s.listTasks)
+	mux.HandleFunc("POST /api/tasks", s.createTask)
+	mux.HandleFunc("GET /api/task-categories", s.pgListTaskCategories)
+	mux.HandleFunc("POST /api/task-categories", s.pgCreateTaskCategory)
+	mux.HandleFunc("PATCH /api/task-categories/{id}", s.pgRenameTaskCategory)
+	mux.HandleFunc("DELETE /api/task-categories/{id}", s.pgDeleteTaskCategory)
+	mux.HandleFunc("POST /api/tasks/category/batch", s.updateTasksCategoryBatch)
+	mux.HandleFunc("GET /api/task-templates", s.pgListTaskTemplates)
+	mux.HandleFunc("POST /api/task-templates", s.pgCreateTaskTemplate)
+	mux.HandleFunc("PATCH /api/task-templates/{id}", s.pgUpdateTaskTemplate)
+	mux.HandleFunc("DELETE /api/task-templates/{id}", s.pgDeleteTaskTemplate)
+	mux.HandleFunc("GET /api/tasks/{id}", s.getTask)
+	mux.HandleFunc("PATCH /api/tasks/{id}", s.updateTaskMetadata)
+	mux.HandleFunc("PATCH /api/tasks/{id}/category", s.updateTaskCategory)
+
+	mux.HandleFunc("GET /api/tasks/{id}/intercept-rules", s.taskInterceptListRules)
+	mux.HandleFunc("POST /api/tasks/{id}/intercept-rules", s.taskInterceptCreateRule)
+	mux.HandleFunc("PUT /api/tasks/{id}/intercept-rules/{rid}", s.taskInterceptUpdateRule)
+	mux.HandleFunc("DELETE /api/tasks/{id}/intercept-rules/{rid}", s.taskInterceptDeleteRule)
+	mux.HandleFunc("POST /api/tasks/{id}/intercept-rules/{rid}/toggle", s.taskInterceptToggleRule)
+	mux.HandleFunc("POST /api/tasks/control/batch", s.controlTasksBatch)
+	mux.HandleFunc("GET /api/task-archives", s.listTaskArchives)
+	mux.HandleFunc("GET /api/task-archives/{id}", s.getTaskArchive)
+	mux.HandleFunc("POST /api/tasks/{id}/archive", s.queueTaskArchive)
+	mux.HandleFunc("POST /api/tasks/archive/batch", s.queueTaskArchivesBatch)
+	mux.HandleFunc("POST /api/task-archives/{id}/restore", s.queueTaskArchiveRestore)
+	mux.HandleFunc("POST /api/task-archives/restore/batch", s.restoreTaskArchivesBatch)
+	mux.HandleFunc("DELETE /api/task-archives/{id}", s.queueTaskArchiveDelete)
+	mux.HandleFunc("POST /api/task-archives/delete/batch", s.deleteTaskArchivesBatch)
+	mux.HandleFunc("GET /api/tasks/{id}/coverage", s.taskCoverage)
+	mux.HandleFunc("GET /api/tasks/{id}/coverage-graph", s.taskCoverageGraph)
+	mux.HandleFunc("GET /api/tasks/{id}/asset-refs", s.taskAssetRefs)
+	mux.HandleFunc("POST /api/tasks/{id}/assets", s.attachTaskAssets)
+	mux.HandleFunc("DELETE /api/tasks/{id}/assets/{assetID}", s.detachTaskAsset)
+	mux.HandleFunc("GET /api/tasks/{id}/intent-assets", s.taskIntentAssets)
+
+	mux.HandleFunc("GET /api/workspace/list", s.wsList)
+	mux.HandleFunc("GET /api/workspace/read", s.wsRead)
+	mux.HandleFunc("POST /api/workspace/write", s.wsWrite)
+	mux.HandleFunc("POST /api/workspace/mkdir", s.wsMkdir)
+	mux.HandleFunc("DELETE /api/workspace/delete", s.wsDelete)
+	mux.HandleFunc("GET /api/workspace/download", s.wsDownload)
+	mux.HandleFunc("POST /api/workspace/upload", s.wsUpload)
+	mux.HandleFunc("GET /api/tasks/{id}/scope", s.taskScopeList)
+	mux.HandleFunc("POST /api/tasks/{id}/scope", s.taskScopeAdd)
+	mux.HandleFunc("DELETE /api/tasks/{id}/scope/{sid}", s.taskScopeDelete)
+	mux.HandleFunc("GET /api/tasks/{id}/goals", s.listGoals)
+	mux.HandleFunc("POST /api/tasks/{id}/goals", s.addGoal)
+	mux.HandleFunc("PATCH /api/tasks/{id}/goals/{gid}", s.editGoal)
+	mux.HandleFunc("DELETE /api/tasks/{id}/goals/{gid}", s.deleteGoal)
+	mux.HandleFunc("GET /api/tasks/{id}/constraints", s.listConstraints)
+	mux.HandleFunc("POST /api/tasks/{id}/constraints", s.addConstraint)
+	mux.HandleFunc("PATCH /api/tasks/{id}/constraints/{cid}", s.editConstraint)
+	mux.HandleFunc("DELETE /api/tasks/{id}/constraints/{cid}", s.deleteConstraint)
+	mux.HandleFunc("POST /api/tasks/{id}/control", s.control)
+	mux.HandleFunc("PUT /api/tasks/{id}/llm", s.updateTaskLLMProfiles)
+	mux.HandleFunc("GET /api/tasks/{id}/llm/resolution", s.taskLLMResolutionHandler)
+	mux.HandleFunc("POST /api/tasks/{id}/intents/{iid}/control", s.controlIntent)
+	mux.HandleFunc("POST /api/tasks/{id}/intents/{iid}/messages", s.sendWorkerMessage)
+	mux.HandleFunc("POST /api/tasks/{id}/intents/{iid}/rerun", s.rerunIntent)
+	mux.HandleFunc("POST /api/tasks/{id}/intents/rerun-blocked", s.rerunBlocked)
+	mux.HandleFunc("POST /api/active", s.setActive)
+
+	mux.HandleFunc("GET /api/llm", s.getLLM)
+	mux.HandleFunc("POST /api/llm", s.setLLM)
+	mux.HandleFunc("POST /api/llm/test", s.testLLM)
+
+	mux.HandleFunc("GET /api/assets", s.listAssets)
+	mux.HandleFunc("GET /api/assets/counts", s.assetCounts)
+	mux.HandleFunc("POST /api/assets", s.insertAssets)
+	mux.HandleFunc("DELETE /api/assets", s.deleteAssets)
+
+	mux.HandleFunc("GET /api/companies", s.listCompanies)
+	mux.HandleFunc("POST /api/companies", s.createCompany)
+	mux.HandleFunc("GET /api/companies/{id}", s.getCompany)
+	mux.HandleFunc("DELETE /api/companies/{id}", s.deleteCompany)
+	mux.HandleFunc("POST /api/companies/{id}/scope", s.addCompanyScope)
+	mux.HandleFunc("POST /api/companies/reattribute", s.reattribute)
+
+	mux.HandleFunc("GET /api/exploration/frontier", s.frontier)
+	mux.HandleFunc("GET /api/exploration/findings", s.findings)
+	mux.HandleFunc("GET /api/exploration/findings/groups", s.findingGroups)
+	mux.HandleFunc("GET /api/exploration/findings/asset-tree", s.findingAssetTree)
+	mux.HandleFunc("GET /api/exploration/findings/stats", s.findingStats)
+	mux.HandleFunc("GET /api/exploration/findings/export", s.findingsExport)
+	s.registerFindingTraffic(mux)
+	mux.HandleFunc("GET /api/exploration/findings/{id}", s.getFinding)
+	mux.HandleFunc("GET /api/exploration/findings/{id}/lineage", s.findingLineage)
+	mux.HandleFunc("POST /api/exploration/findings/{id}/deepen", s.deepenFinding)
+	mux.HandleFunc("GET /api/exploration/findings/{id}/retests", s.listFindingRetests)
+	mux.HandleFunc("GET /api/exploration/findings/retests/active", s.listActiveFindingRetests)
+	mux.HandleFunc("POST /api/exploration/findings/{id}/retests", s.startFindingRetest)
+	mux.HandleFunc("PATCH /api/exploration/findings/{id}", s.patchFinding)
+	mux.HandleFunc("DELETE /api/exploration/findings/{id}", s.deleteFinding)
+	mux.HandleFunc("GET /api/exploration/intents", s.intents)
+	mux.HandleFunc("GET /api/exploration/graph", s.explorationGraph)
+	mux.HandleFunc("GET /api/exploration/nodes", s.explorationNodes)
+	mux.HandleFunc("GET /api/exploration/activity", s.activity)
+	mux.HandleFunc("GET /api/exploration/activity/history", s.activityHistory)
+	mux.HandleFunc("GET /api/exploration/main-sessions", s.mainSessions)
+	mux.HandleFunc("POST /api/exploration/main-session/new", s.newMainSession)
+	mux.HandleFunc("GET /api/exploration/activity/stream", s.streamActivity)
+	mux.HandleFunc("GET /api/exploration/activity/{seq}", s.activityDetail)
+	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
+	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)
+	mux.HandleFunc("GET /api/tokens/conversations", s.conversationTokens)
+	mux.HandleFunc("GET /api/tokens/usage", s.pgUsageStats)
+
+	mux.HandleFunc("GET /api/audit", s.getAudit)
+	mux.HandleFunc("POST /api/gc", s.gc)
+	mux.HandleFunc("GET /api/traffic", s.getTraffic)
+	mux.HandleFunc("GET /api/traffic/hosts", s.getTrafficHosts)
+	mux.HandleFunc("DELETE /api/traffic", s.deleteTraffic)
+	mux.HandleFunc("DELETE /api/traffic/hosts", s.deleteTrafficHosts)
+	mux.HandleFunc("DELETE /api/traffic/all", s.deleteAllTraffic)
+	mux.HandleFunc("GET /api/traffic/exchange", s.getTrafficExchange)
+	mux.HandleFunc("GET /api/traffic/blob", s.getTrafficBlob)
+	mux.HandleFunc("GET /api/commands", s.pgListCommands)
+	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats)
+	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
+	mux.HandleFunc("DELETE /api/llm/records", s.pgDeleteLLMRecords)
+	mux.HandleFunc("GET /api/llm/records/tasks", s.pgLLMTasks)
+	mux.HandleFunc("GET /api/llm/records/by-model", s.pgTokenByModel)
+	mux.HandleFunc("GET /api/llm/records/{id}", s.pgGetLLMRecord)
+	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("PUT /api/settings", s.putSettings)
+
+	mux.HandleFunc("GET /api/notify/meta", s.notifyMeta)
+	mux.HandleFunc("GET /api/notify/channels", s.notifyListChannels)
+	mux.HandleFunc("POST /api/notify/channels", s.notifyCreateChannel)
+	mux.HandleFunc("PATCH /api/notify/channels/{id}", s.notifyUpdateChannel)
+	mux.HandleFunc("DELETE /api/notify/channels/{id}", s.notifyDeleteChannel)
+	mux.HandleFunc("POST /api/notify/channels/{id}/test", s.notifyTestChannel)
+	mux.HandleFunc("GET /api/notify/deliveries", s.notifyListDeliveries)
+	mux.HandleFunc("POST /api/notify/deliveries/{id}/retry", s.notifyRetryDelivery)
+	mux.HandleFunc("POST /api/settings/web-search/test", s.testWebSearch)
+	mux.HandleFunc("GET /api/report", s.getReport)
+	mux.HandleFunc("GET /api/chat/mentions", s.searchChatMentions)
+	mux.HandleFunc("POST /api/chat", s.chat)
+	mux.HandleFunc("POST /api/chat/upload", s.chatUpload)
+	mux.HandleFunc("GET /api/tasks/{id}/chat/status", s.taskChatStatus)
+	mux.HandleFunc("POST /api/tasks/{id}/chat/stop", s.stopChat)
+
+	mux.HandleFunc("DELETE /api/tasks/{id}", s.pgDeleteTask)
+
+	mux.HandleFunc("GET /api/conversations", s.pgListConversations)
+	mux.HandleFunc("POST /api/conversations", s.pgCreateConversation)
+	mux.HandleFunc("POST /api/conversations/delete/batch", s.pgDeleteConversationsBatch)
+	mux.HandleFunc("PATCH /api/conversations/{id}", s.pgRenameConversation)
+	mux.HandleFunc("PATCH /api/conversations/{id}/profile", s.pgUpdateConversation)
+	mux.HandleFunc("DELETE /api/conversations/{id}", s.pgDeleteConversation)
+	mux.HandleFunc("GET /api/conversations/{id}/messages", s.pgConversationMessages)
+	mux.HandleFunc("POST /api/conversations/{id}/messages", s.pgSendConversationMessage)
+	mux.HandleFunc("POST /api/conversations/{id}/stop", s.pgStopConversation)
+	mux.HandleFunc("GET /api/conversations/{id}/messages/{seq}", s.pgConversationMsgDetail)
+
+	mux.HandleFunc("GET /api/agents", s.pgListAgents)
+	mux.HandleFunc("POST /api/agents", s.pgCreateAgent)
+	mux.HandleFunc("GET /api/agents/{key}", s.pgGetAgent)
+	mux.HandleFunc("PATCH /api/agents/{key}", s.pgUpdateAgent)
+	mux.HandleFunc("DELETE /api/agents/{key}", s.pgDeleteAgent)
+	mux.HandleFunc("PUT /api/agents/{key}/config", s.pgSaveAgentConfig)
+	mux.HandleFunc("PUT /api/agents/{key}/prompt", s.pgSavePrompt)
+	mux.HandleFunc("POST /api/agents/{key}/prompt/reset", s.pgResetPrompt)
+	mux.HandleFunc("PUT /api/agents/{key}/wrapup", s.pgSaveWrapup)
+	mux.HandleFunc("POST /api/agents/{key}/wrapup/reset", s.pgResetWrapup)
+	mux.HandleFunc("PUT /api/agents/{key}/wrapup/task-timeout", s.pgSaveTaskTimeoutWrapup)
+	mux.HandleFunc("POST /api/agents/{key}/wrapup/task-timeout/reset", s.pgResetTaskTimeoutWrapup)
+	mux.HandleFunc("GET /api/agents/{key}/triggers", s.pgListTriggers)
+	mux.HandleFunc("POST /api/agents/{key}/triggers", s.pgCreateTrigger)
+	mux.HandleFunc("PATCH /api/triggers/{id}", s.pgUpdateTrigger)
+	mux.HandleFunc("DELETE /api/triggers/{id}", s.pgDeleteTrigger)
+	mux.HandleFunc("GET /api/agents/{key}/prompts", s.pgListPromptVersions)
+	mux.HandleFunc("GET /api/agents/{key}/variables", s.pgPromptVars)
+	mux.HandleFunc("POST /api/agents/{key}/prompt/preview", s.pgPreviewPrompt)
+	mux.HandleFunc("GET /api/agents/{key}/visibility", s.pgGetAgentVisibility)
+	mux.HandleFunc("PUT /api/agents/{key}/visibility", s.pgSetAgentVisibility)
+
+	mux.HandleFunc("GET /api/tools", s.pgListTools)
+	mux.HandleFunc("PUT /api/tools/{key}", s.pgUpdateTool)
+	mux.HandleFunc("POST /api/tools/custom", s.pgCreateCustomTool)
+	mux.HandleFunc("POST /api/tools/custom/test", s.pgTestCustomTool)
+	mux.HandleFunc("PUT /api/tools/custom/{key}", s.pgUpdateCustomTool)
+	mux.HandleFunc("DELETE /api/tools/custom/{key}", s.pgDeleteCustomTool)
+	mux.HandleFunc("POST /api/settings/python/detect", s.pgDetectPython)
+	mux.HandleFunc("POST /api/tools/{key}/reset", s.pgResetTool)
+
+	mux.HandleFunc("GET /api/mcp", s.pgListMCP)
+	mux.HandleFunc("POST /api/mcp", s.pgSaveMCP)
+	mux.HandleFunc("DELETE /api/mcp/{id}", s.pgDeleteMCP)
+	mux.HandleFunc("GET /api/mcp/{id}/tools", s.pgMCPTools)
+	mux.HandleFunc("POST /api/mcp/{id}/refresh", s.pgRefreshMCP)
+
+	mux.HandleFunc("GET /api/sync/scopesentry/status", s.syncSSStatus)
+	mux.HandleFunc("POST /api/sync/scopesentry/datasource", s.syncSSDatasource)
+	mux.HandleFunc("GET /api/sync/scopesentry/projects", s.syncSSProjects)
+	mux.HandleFunc("GET /api/sync/scopesentry/tasks", s.syncSSTasks)
+	mux.HandleFunc("POST /api/sync/scopesentry/sync", s.syncSSRun)
+
+	mux.HandleFunc("GET /api/skills", s.fsListSkills)
+	mux.HandleFunc("POST /api/skills", s.fsCreateSkill)
+	mux.HandleFunc("POST /api/skills/upload", s.fsUploadSkill)
+	mux.HandleFunc("DELETE /api/skills/{name}", s.fsDeleteSkill)
+	mux.HandleFunc("GET /api/skills/missing", s.fsMissingSkills)
+	mux.HandleFunc("GET /api/skills/{name}/usage", s.fsSkillUsage)
+	mux.HandleFunc("PUT /api/skills/{name}/meta", s.fsUpdateSkillMeta)
+	mux.HandleFunc("POST /api/skills/{name}/dirs", s.fsCreateDir)
+	mux.HandleFunc("GET /api/skills/{name}/files", s.fsListFiles)
+
+	mux.HandleFunc("GET /api/skills/{name}/files/{file...}", s.fsReadFile)
+	mux.HandleFunc("PUT /api/skills/{name}/files/{file...}", s.fsWriteFile)
+	mux.HandleFunc("DELETE /api/skills/{name}/files/{file...}", s.fsDeletePath)
+
+	mux.HandleFunc("GET /api/visibility/{kind}/{id}", s.pgResourceVisibility)
+	mux.HandleFunc("POST /api/visibility/toggle", s.pgToggleVisibility)
+
+	mux.HandleFunc("GET /api/visibility/skill/{name}", s.pgSkillVisibility)
+	mux.HandleFunc("POST /api/visibility/skill/toggle", s.pgToggleSkillVisibility)
+
+	mux.HandleFunc("GET /api/llm/profiles", s.pgListProfiles)
+	mux.HandleFunc("POST /api/llm/profiles", s.pgSaveProfile)
+	mux.HandleFunc("DELETE /api/llm/profiles/{id}", s.pgDeleteProfile)
+	mux.HandleFunc("POST /api/llm/profiles/active", s.pgActivateProfile)
+	mux.HandleFunc("GET /api/llm/retry-policy", s.pgGetLLMRetryPolicy)
+	mux.HandleFunc("POST /api/llm/retry-policy", s.pgSaveLLMRetryPolicy)
+	mux.HandleFunc("GET /api/llm/pool", s.pgLLMPoolStatus)
+	mux.HandleFunc("POST /api/llm/pool/reset", s.pgLLMPoolReset)
+	mux.HandleFunc("POST /api/llm/models", s.pgListModels)
+
+	mux.HandleFunc("GET /api/intercept/rules", s.interceptListRules)
+	mux.HandleFunc("POST /api/intercept/rules", s.interceptCreateRule)
+	mux.HandleFunc("PUT /api/intercept/rules/{id}", s.interceptUpdateRule)
+	mux.HandleFunc("DELETE /api/intercept/rules/{id}", s.interceptDeleteRule)
+	mux.HandleFunc("POST /api/intercept/rules/{id}/toggle", s.interceptToggleRule)
+
+	mux.HandleFunc("GET /api/asset-intercept/rules", s.assetInterceptListRules)
+	mux.HandleFunc("POST /api/asset-intercept/rules", s.assetInterceptCreateRule)
+	mux.HandleFunc("PUT /api/asset-intercept/rules/{id}", s.assetInterceptUpdateRule)
+	mux.HandleFunc("DELETE /api/asset-intercept/rules/{id}", s.assetInterceptDeleteRule)
+	mux.HandleFunc("POST /api/asset-intercept/rules/{id}/toggle", s.assetInterceptToggleRule)
+
+	mux.HandleFunc("GET /api/intercept/pending", s.interceptListPending)
+	mux.HandleFunc("GET /api/intercept/pending/{id}", s.interceptGetOne)
+	mux.HandleFunc("POST /api/intercept/pending/{id}/decide", s.interceptDecide)
+	mux.HandleFunc("GET /api/intercept/history", s.interceptHistory)
+	mux.HandleFunc("GET /api/intercept/history/{id}", s.interceptDetail)
+	mux.HandleFunc("GET /api/intercept/history/{id}/execution", s.interceptExecution)
+	mux.HandleFunc("GET /api/intercept/task/{taskID}", s.interceptListTaskItems)
+	mux.HandleFunc("GET /api/intercept/tool-config", s.interceptGetToolConfig)
+	mux.HandleFunc("PUT /api/intercept/tool-config", s.interceptSetToolConfig)
+	mux.HandleFunc("GET /api/intercept/judge", s.interceptGetJudgeConfig)
+	mux.HandleFunc("PUT /api/intercept/judge", s.interceptSetJudgeConfig)
+	mux.HandleFunc("GET /api/intercept/judge/usage", s.interceptJudgeUsage)
+
+	api := cors(s.requireAuth(mux))
+	root := http.NewServeMux()
+	root.Handle("/api/", api)
+	root.Handle("/", s.webuiHandler())
+	return root
+}
+
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"ok": true, "service": "gary", "version": BuildVersion})
+}
+
+func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{}
+	out["engine_mode"] = "idle"
+	out["llm_configured"] = s.engine.Ready()
+	if tr := s.m.Traffic(); tr != nil {
+		c, _ := tr.Count()
+		out["traffic"] = c
+		out["traffic_enabled"] = true
+	}
+	if counts, err := s.m.Assets().CountsByType(); err == nil {
+		total := 0
+		for _, n := range counts {
+			total += n
+		}
+		out["assets"] = total
+		out["asset_counts"] = counts
+	}
+
+	taskParam := r.URL.Query().Get("task")
+	t := s.m.ResolveTask(taskParam)
+	if t == nil {
+		if taskParam != "" && taskParam != "active" {
+			writeErr(w, 404, "task not found")
+			return
+		}
+		writeJSON(w, 200, out)
+		return
+	}
+	out["llm_configured"] = s.engine.ReadyFor(t)
+
+	st, _ := t.Store.Stats()
+	out["exploration"] = st
+
+	intents, _ := t.Store.ListByKind(db.KindIntent, 100000)
+	inFlight := 0
+	for _, in := range intents {
+		if in.State == "running" {
+			inFlight++
+		}
+	}
+	goals, _ := t.Store.ListByKind(db.KindGoal, 10000)
+	goalsMet := 0
+	for _, g := range goals {
+		if g.State == "met" {
+			goalsMet++
+		}
+	}
+	last := s.engine.LastActivity(t.ID)
+	paused := s.engine.IsPaused(t.ID)
+	activeCalls := s.engine.ActiveLLMCalls(t.ID)
+	running := s.engine.ReadyFor(t) && s.engine.Started(t.ID) && !paused
+
+	stalled := running && activeCalls == 0 && inFlight > 0 && last > 0 && time.Now().Unix()-last > 120
+
+	engineMode := "idle"
+	switch {
+	case paused:
+		engineMode = "paused"
+	case stalled:
+		engineMode = "stalled"
+	case running && activeCalls > 0:
+		engineMode = "exploring"
+	}
+	out["engine_mode"] = engineMode
+
+	out["active_task"] = map[string]any{
+		"id": t.ID, "description": t.Description, "goal": t.Goal,
+		"running":       running,
+		"paused":        paused,
+		"engine_mode":   engineMode,
+		"in_flight":     inFlight,
+		"llm_in_flight": activeCalls,
+		"last_activity": last,
+		"stalled":       stalled,
+		"goals_total":   len(goals),
+		"goals_met":     goalsMet,
+	}
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
+	active := ""
+	if t := s.m.ActiveTask(); t != nil {
+		active = t.ID
+	}
+	list := s.m.List()
+	metrics, _ := s.m.PG().TaskListMetricsAll()
+	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
+	dtos := make([]TaskDTO, 0, len(list))
+	for _, t := range list {
+		dto := taskDTO(t, s.resolvedTaskStatus(t))
+		applyTaskArchiveBlocker(&dto, archiveBlockers)
+		metric := metrics[t.ExpID]
+		dto.Tokens = tokenTotalDTO(metric.Tokens)
+
+		dto.LastActivity = metric.LastActivity
+		if live := s.engine.LastActivity(t.ID); live > dto.LastActivity {
+			dto.LastActivity = live
+		}
+		dto.GoalsTotal = metric.Goals.Total
+		dto.GoalsMet = metric.Goals.Met
+		dto.InFlight = metric.RunningIntents
+		dto.Findings = FindingSeverityDTO{
+			Critical: metric.Findings.Critical,
+			High:     metric.Findings.High,
+			Medium:   metric.Findings.Medium,
+			Low:      metric.Findings.Low,
+		}
+		dtos = append(dtos, dto)
+	}
+	writeJSON(w, 200, map[string]any{"tasks": dtos, "active": active})
+}
+
+func (s *Server) resolvedTaskStatus(t *Task) string {
+	if t == nil {
+		return "created"
+	}
+	lifecycle := t.lifecycleSnapshot()
+	switch {
+	case isTerminalStatus(lifecycle.Status):
+		return lifecycle.Status
+	case lifecycle.Queued:
+		return "queued"
+	case lifecycle.Paused || s.engine.IsPaused(t.ID):
+		return "paused"
+	case t.llmStateSnapshot().FailoverState == "chain_exhausted" && s.engine.Started(t.ID):
+
+		return "running"
+	case s.engine.ReadyFor(t) && s.engine.Started(t.ID):
+		return "running"
+	default:
+		return "created"
+	}
+}
+
+func (s *Server) setActive(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if !s.m.SetActive(req.ID) {
+		writeErr(w, 404, "task not found")
+		return
+	}
+
+	if t, ok := s.m.Task(req.ID); ok && !t.lifecycleSnapshot().Queued {
+		s.engine.Run(s.ctx, t)
+	}
+	writeJSON(w, 200, map[string]any{"active": req.ID})
+}
+
+func (s *Server) control(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	var req struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if req.Action != "pause" && req.Action != "resume" {
+		writeErr(w, 400, "action must be pause|resume")
+		return
+	}
+	result, err := s.applyTaskControl(t, req.Action)
+	if err != nil {
+		writeErr(w, 409, err.Error())
+		return
+	}
+	writeJSON(w, 200, result)
+}
+
+func (s *Server) controlIntent(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	if !s.engine.beginTaskOperation(t.ID) {
+		writeErr(w, 409, "Task is being deleted, intent cannot be controlled")
+		return
+	}
+	defer s.engine.decInflight(t.ID)
+
+	iid, err := strconv.ParseInt(r.PathValue("iid"), 10, 64)
+	if err != nil || iid <= 0 {
+		writeErr(w, 400, "bad intent id")
+		return
+	}
+	var req struct {
+		Action string `json:"action"`
+		Reason string `json:"reason"`
+		Mode   string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if req.Action != "pause" && req.Action != "resume" && req.Action != "cancel" {
+		writeErr(w, 400, "action must be pause|resume|cancel")
+		return
+	}
+
+	result, err := s.applyIntentControl(r.Context(), t, iid, req.Action, req.Reason, req.Mode)
+	if err != nil {
+		writeErr(w, 409, err.Error())
+		return
+	}
+	writeJSON(w, 200, result)
+}
+
+func restoreRerunIntent(t *Task, before *db.Node) error {
+	if t == nil || before == nil {
+		return fmt.Errorf("missing intent rollback snapshot")
+	}
+	if before.State == "blocked" && before.BlockedReason != "" {
+		return t.Store.SetIntentBlockedReason(before.ID, before.BlockedReason)
+	}
+	return t.Store.SetIntentState(before.ID, before.State)
+}
+
+func (s *Server) rerunIntent(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	iid, err := strconv.ParseInt(r.PathValue("iid"), 10, 64)
+	if err != nil {
+		writeErr(w, 400, "bad intent id")
+		return
+	}
+	if !s.engine.beginTaskOperation(t.ID) {
+		writeErr(w, 409, "The task is being deleted and the intent cannot be rerun.")
+		return
+	}
+	defer s.engine.decInflight(t.ID)
+	before, err := t.Store.GetNode(iid)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	reopened, err := t.Store.ReopenIntent(iid)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if !reopened {
+		writeErr(w, 409, "The intent is not rerunable (only blocked/exhausted/stopped can be rerun)")
+		return
+	}
+	queued, err := s.admitTask(t, "resume")
+	if err != nil {
+		if rollbackErr := restoreRerunIntent(t, before); rollbackErr != nil {
+			err = fmt.Errorf("%w; restore intent %d after admission failure: %v", err, iid, rollbackErr)
+		}
+		writeErr(w, 500, err.Error())
+		return
+	}
+	log.Printf("[task] #%s Intent #%d has been restarted (rerun)", t.ID, iid)
+	writeJSON(w, 200, map[string]any{"id": t.ID, "reopened": iid, "queued": queued})
+}
+
+func (s *Server) rerunBlocked(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	if !s.engine.beginTaskOperation(t.ID) {
+		writeErr(w, 409, "The task is being deleted and the intent cannot be rerun.")
+		return
+	}
+	defer s.engine.decInflight(t.ID)
+	intents, err := t.Store.ListByKind(db.KindIntent, 1000000)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	before := make([]*db.Node, 0)
+	for _, intent := range intents {
+		if intent.State == "blocked" {
+			copy := *intent
+			before = append(before, &copy)
+		}
+	}
+	n, err := t.Store.ReopenBlockedIntents()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	queued := false
+	if n > 0 {
+		queued, err = s.admitTask(t, "resume")
+		if err != nil {
+			rollbackErrors := make([]string, 0)
+			for _, intent := range before {
+				if rollbackErr := restoreRerunIntent(t, intent); rollbackErr != nil {
+					rollbackErrors = append(rollbackErrors, fmt.Sprintf("intent %d: %v", intent.ID, rollbackErr))
+				}
+			}
+			if len(rollbackErrors) > 0 {
+				err = fmt.Errorf("%w; restore blocked intents after admission failure: %s", err, strings.Join(rollbackErrors, "; "))
+			}
+			writeErr(w, 500, err.Error())
+			return
+		}
+		log.Printf("[task] #%s Reopen %d blocked intentions in batches", t.ID, n)
+	}
+	writeJSON(w, 200, map[string]any{"id": t.ID, "reopened": n, "queued": queued})
+}
+
+func (s *Server) getLLM(w http.ResponseWriter, r *http.Request) {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	writeJSON(w, 200, map[string]any{
+		"configured":       s.llmOn,
+		"provider":         s.llmCfg.Provider(),
+		"model":            s.llmCfg.Model,
+		"base_url":         s.llmCfg.BaseURL,
+		"proxy":            s.llmCfg.Proxy,
+		"key_set":          s.llmCfg.APIKey != "",
+		"rate_per_second":  s.llmCfg.RatePerSecond,
+		"rate_per_minute":  s.llmCfg.RatePerMinute,
+		"context_window_k": s.llmCfg.ContextWindowK,
+		"thinking_type":    s.llmCfg.ThinkingType,
+		"reasoning_effort": s.llmCfg.ReasoningEffort,
+	})
+}
+
+func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider        string  `json:"provider"`
+		Model           string  `json:"model"`
+		BaseURL         string  `json:"base_url"`
+		Proxy           string  `json:"proxy"`
+		APIKey          string  `json:"api_key"`
+		RatePerSecond   float64 `json:"rate_per_second"`
+		RatePerMinute   float64 `json:"rate_per_minute"`
+		ContextWindowK  int     `json:"context_window_k"`
+		ThinkingType    string  `json:"thinking_type"`
+		ReasoningEffort string  `json:"reasoning_effort"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
+	cfg.RatePerSecond, cfg.RatePerMinute = req.RatePerSecond, req.RatePerMinute
+	cfg.ThinkingType = req.ThinkingType
+	cfg.ReasoningEffort = req.ReasoningEffort
+	if k := req.ContextWindowK; k > 0 {
+		if k > 1000 {
+			k = 1000
+		}
+		cfg.ContextWindowK = k
+	}
+	if cfg.APIKey == "" {
+		s.cfgMu.Lock()
+		cfg.APIKey = s.llmCfg.APIKey
+		s.cfgMu.Unlock()
+	}
+	if cfg.APIKey == "" {
+		writeErr(w, 400, "api_key required")
+		return
+	}
+
+	if _, err := cfg.NewProvider(); err != nil {
+		writeErr(w, 400, "provider init failed: "+err.Error())
+		return
+	}
+	if err := s.saveLLMConfig(cfg); err != nil {
+		writeErr(w, 500, "persist provider failed: "+err.Error())
+		return
+	}
+	s.invalidateProfileAgents()
+	if _, ok := s.loadLLMConfig(); !ok {
+		writeErr(w, 500, "saved provider is unavailable")
+		return
+	}
+	if err := s.applyLLM(cfg); err != nil {
+		writeErr(w, 400, "provider init failed: "+err.Error())
+		return
+	}
+	log.Printf("[engine] LLM configured via UI: %s / %s", cfg.Provider(), cfg.Model)
+	s.getLLM(w, r)
+}
+
+func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider         string `json:"provider"`
+		Model            string `json:"model"`
+		BaseURL          string `json:"base_url"`
+		Proxy            string `json:"proxy"`
+		APIKey           string `json:"api_key"`
+		ThinkingType     string `json:"thinking_type"`
+		ReasoningEffort  string `json:"reasoning_effort"`
+		ProfileID        *int64 `json:"profile_id"`
+		Streaming        *bool  `json:"streaming"`
+		SessionHeaderKey string `json:"session_header_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
+
+	cfg.ThinkingType = req.ThinkingType
+	cfg.ReasoningEffort = req.ReasoningEffort
+
+	if req.Streaming != nil {
+		cfg.Stream = *req.Streaming
+	}
+
+	cfg.SessionHeaderKey = req.SessionHeaderKey
+
+	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
+		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
+			if cfg.APIKey == "" {
+				cfg.APIKey = p.APIKey
+			}
+			if cfg.SessionHeaderKey == "" {
+				cfg.SessionHeaderKey = p.SessionHeaderKey
+			}
+		}
+	}
+	if cfg.APIKey == "" {
+		s.cfgMu.Lock()
+		cfg.APIKey = s.llmCfg.APIKey
+		s.cfgMu.Unlock()
+	}
+	if cfg.APIKey == "" {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "API Key not provided"})
+		return
+	}
+
+	lat, reply, err := agent.TestConnection(r.Context(), cfg)
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "latency_ms": lat.Milliseconds(), "model": cfg.Model, "reply": truncateReply(reply),
+	})
+}
+
+func truncateReply(s string) string {
+	const max = 200
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
+type createTaskReq struct {
+	Name                 string   `json:"name,omitempty"`
+	CategoryID           *int64   `json:"category_id,omitempty"`
+	Description          string   `json:"description"`
+	Goal                 string   `json:"goal"`
+	LLMProfileID         *int64   `json:"llm_profile_id,omitempty"`
+	LLMProfileIDs        []int64  `json:"llm_profile_ids,omitempty"`
+	SourceTaskIDs        []string `json:"source_task_ids,omitempty"`
+	CompanyIDs           []int64  `json:"company_ids,omitempty"`
+	TimeoutSeconds       int      `json:"timeout_seconds"`
+	PlanHeartbeatSeconds int      `json:"plan_heartbeat_seconds"`
+	SeedFirstIntent      *bool    `json:"seed_first_intent,omitempty"`
+	CoverageEnabled      *bool    `json:"coverage_enabled,omitempty"`
+
+	InterceptRules []taskInterceptRuleReq `json:"intercept_rules,omitempty"`
+}
+
+func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
+	var req createTaskReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Description) == "" {
+		req.Description = "Unnamed task"
+	}
+	if len(req.LLMProfileIDs) == 0 && req.LLMProfileID != nil {
+		req.LLMProfileIDs = []int64{*req.LLMProfileID}
+	}
+	if err := s.validateTaskProfileIDs(req.LLMProfileIDs); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if req.TimeoutSeconds < 0 {
+		req.TimeoutSeconds = 0
+	}
+	if len(req.SourceTaskIDs) > db.MaxTaskSourceCount {
+		writeErr(w, 400, fmt.Sprintf("At most %d related tasks can be selected", db.MaxTaskSourceCount))
+		return
+	}
+	sourceIDs := make([]int64, 0, len(req.SourceTaskIDs))
+	seenSources := map[int64]bool{}
+	for _, raw := range req.SourceTaskIDs {
+		id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+		if err != nil || id <= 0 || seenSources[id] {
+			writeErr(w, 400, "The associated task id is invalid or duplicate")
+			return
+		}
+		if _, ok := s.m.Task(strconv.FormatInt(id, 10)); !ok {
+			writeErr(w, 400, fmt.Sprintf("Associated task #%d does not exist", id))
+			return
+		}
+		seenSources[id] = true
+		sourceIDs = append(sourceIDs, id)
+	}
+	companyIDs, err := db.NormalizeTaskCompanyIDs(req.CompanyIDs)
+	if err != nil {
+		writeErr(w, 400, fmt.Sprintf("Invalid affiliated enterprises: select at most %d valid enterprises", db.MaxTaskCompanyCount))
+		return
+	}
+	req.CompanyIDs = companyIDs
+	interceptRules, err := buildTaskInterceptRules(req.InterceptRules)
+	if err != nil {
+		writeErr(w, 400, "Task-level interception rules are invalid:"+err.Error())
+		return
+	}
+	t, err := s.m.CreateTaskWithOptions(req.Description, req.Goal, db.TaskCreateOptions{
+		Name: strings.TrimSpace(req.Name), CategoryID: req.CategoryID,
+		SourceTaskIDs: sourceIDs, CompanyIDs: req.CompanyIDs, LLMProfileIDs: req.LLMProfileIDs,
+		TimeoutSeconds: req.TimeoutSeconds, PlanHeartbeatSeconds: req.PlanHeartbeatSeconds,
+		CoverageEnabled: req.CoverageEnabled,
+		InterceptRules:  interceptRules,
+	})
+	if err != nil {
+		if errors.Is(err, db.ErrTaskCategoryInvalid) || errors.Is(err, db.ErrTaskCategoryNotFound) {
+			writeErr(w, 400, "Task classification does not exist or is invalid")
+			return
+		}
+		if errors.Is(err, db.ErrTaskCompanyIDsInvalid) || errors.Is(err, db.ErrTaskCompanyNotFound) {
+			writeErr(w, 400, "The associated enterprise does not exist or is invalid")
+			return
+		}
+		writeErr(w, 500, err.Error())
+		return
+	}
+	log.Printf("[task] New task #%s «%s» Target: %s", t.ID, req.Description, req.Goal)
+
+	s.launchTask(t, req.Description+" "+req.Goal, req.SeedFirstIntent != nil && *req.SeedFirstIntent)
+	writeJSON(w, 201, taskDTO(t, s.resolvedTaskStatus(t)))
+}
+
+func (s *Server) validateTaskProfileIDs(ids []int64) error {
+	seen := map[int64]bool{}
+	for _, id := range ids {
+		if id <= 0 || seen[id] {
+			return fmt.Errorf("LLM configuration id is invalid or duplicate")
+		}
+		seen[id] = true
+		if _, ok := s.loadProfileConfig(id); !ok {
+			return fmt.Errorf("LLM configuration #%d does not exist or API Key is not set", id)
+		}
+	}
+	return nil
+}
+
+func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+
+	before := t.llmStateSnapshot()
+	var req struct {
+		LLMProfileIDs      []int64 `json:"llm_profile_ids"`
+		ActiveLLMProfileID *int64  `json:"active_llm_profile_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if err := s.validateTaskProfileIDs(req.LLMProfileIDs); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	active := int64(0)
+	if req.ActiveLLMProfileID != nil {
+		active = *req.ActiveLLMProfileID
+	}
+	reopened, err := s.m.ReplaceTaskLLMProfiles(t.ID, req.LLMProfileIDs, active)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+
+	t.Notify()
+	go s.reconcileConcurrency()
+	llmState := t.llmStateSnapshot()
+	result := map[string]any{
+		"id": t.ID, "llm_profile_ids": llmState.ProfileIDs,
+		"active_llm_profile_id": llmState.ActiveID,
+		"llm_failover_state":    llmState.FailoverState, "reopened_intents": reopened,
+	}
+	if !sameOptionalID(before.ActiveID, llmState.ActiveID) {
+		event := s.emitManualTaskLLMSwitch(t, before.ActiveID, llmState.ActiveID)
+		result["switch_event"] = activityDTO(event)
+	}
+	writeJSON(w, 200, result)
+}
+
+var (
+	reURL    = regexp.MustCompile(`https?://[^\s'"]+`)
+	reIPPort = regexp.MustCompile(`\b((?:\d{1,3}\.){3}\d{1,3})(?::(\d{1,5}))?`)
+	reDomain = regexp.MustCompile(`\b((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})(?::(\d{1,5}))?`)
+)
+
+func parseTarget(text string) (scheme, host string, port int, ok bool) {
+	text = strings.TrimSpace(text)
+	if m := reURL.FindString(text); m != "" {
+		if u, err := url.Parse(m); err == nil && u.Hostname() != "" {
+			scheme = strings.ToLower(u.Scheme)
+			host = strings.ToLower(u.Hostname())
+			port = portOr(u.Port(), defaultPort(scheme))
+			return scheme, host, port, true
+		}
+	}
+	if m := reIPPort.FindStringSubmatch(text); m != nil {
+		host = m[1]
+		port = portOr(m[2], 80)
+		return schemeForPort(port), host, port, true
+	}
+	for _, indexes := range reDomain.FindAllStringSubmatchIndex(text, -1) {
+		if indexes[0] > 0 && strings.ContainsRune("/\\", rune(text[indexes[0]-1])) {
+			continue
+		}
+		host = strings.ToLower(text[indexes[2]:indexes[3]])
+		if indexes[4] < 0 {
+			return "https", host, 443, true
+		}
+		port = portOr(text[indexes[4]:indexes[5]], 443)
+		return schemeForPort(port), host, port, true
+	}
+	return "", "", 0, false
+}
+
+func portOr(s string, d int) int {
+	if n, err := strconv.Atoi(s); err == nil && n > 0 {
+		return n
+	}
+	return d
+}
+func defaultPort(scheme string) int {
+	if scheme == "http" {
+		return 80
+	}
+	return 443
+}
+func schemeForPort(p int) string {
+	if p == 443 || p == 8443 {
+		return "https"
+	}
+	return "http"
+}
+
+func (s *Server) llmHost() string {
+	s.cfgMu.Lock()
+	base := s.llmCfg.BaseURL
+	s.cfgMu.Unlock()
+	if base == "" {
+		return ""
+	}
+	if u, err := url.Parse(base); err == nil {
+		return strings.ToLower(u.Hostname())
+	}
+	return ""
+}
+
+func (s *Server) seed(t *Task, text string) {
+	scheme, host, port, ok := parseTarget(text)
+	if !ok {
+		log.Printf("[seed] task %s: Failed to resolve the target host/IP from %q, and the site will not be created (please configure scope manually)", t.ID, text)
+		return
+	}
+
+	if gw := s.llmHost(); gw != "" && host == gw {
+		log.Printf("[seed] task %s: Target %q is an LLM gateway, rejected as a penetration target", t.ID, host)
+		return
+	}
+
+	u := scheme + "://" + host
+	if !(scheme == "https" && port == 443) && !(scheme == "http" && port == 80) {
+		u += ":" + strconv.Itoa(port)
+	}
+	var rootID int64
+	if as := s.m.Assets(); as != nil {
+		taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+		if net.ParseIP(host) != nil {
+			rootID, _ = as.UpsertIP(db.UpsertIPReq{IP: host, TaskID: taskID})
+		} else if scheme == "https" || scheme == "http" {
+			rootID, _ = as.UpsertHTTPService(db.UpsertHTTPServiceReq{URL: u, TaskID: taskID})
+		} else {
+			rootID, _ = as.UpsertRootDomain(db.UpsertRootDomainReq{Domain: host, TaskID: taskID})
+		}
+		if rootID > 0 {
+			_ = as.SetTaskAssetSource(taskID, rootID, "task", "Initialized by task description or goal", nil)
+		}
+	}
+
+	if rootID > 0 {
+		if begin, _ := t.Store.OriginFactID(); begin > 0 {
+			_ = t.Store.Anchor(begin, rootID)
+		}
+	}
+	log.Printf("[seed] task %s: target site %s", t.ID, u)
+
+}
+
+func (s *Server) seedFirstIntent(t *Task) {
+	summary := fmt.Sprintf("Complete mission goal: %s (mission: %s)", t.Goal, t.Description)
+	id, err := t.Store.AddIntent(map[string]any{"summary": summary}, 8, nil, "seed")
+	if err != nil {
+		log.Printf("[seed] task %s: Failed to send seed intent: %v", t.ID, err)
+		return
+	}
+	if origin, _ := t.Store.OriginFactID(); origin > 0 {
+		_ = t.Store.Link(origin, db.RelDerivedFrom, id)
+	}
+	log.Printf("[seed] task %s: Seed intent #%d has been issued", t.ID, id)
+}
+
+func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	dto := taskDTO(t, s.resolvedTaskStatus(t))
+	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
+	applyTaskArchiveBlocker(&dto, archiveBlockers)
+	writeJSON(w, 200, dto)
+}
+
+func (s *Server) taskCoverage(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	as := s.m.Assets()
+	if as == nil {
+		writeErr(w, 503, "asset store is not enabled")
+		return
+	}
+
+	if !t.CoverageEnabled {
+		writeJSON(w, 200, &db.Coverage{Enabled: false, ByType: []db.CoverageByType{}})
+		return
+	}
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+	cov, err := as.TaskCoverageWithSources(taskID)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	cov.Enabled = true
+	writeJSON(w, 200, cov)
+}
+
+func (s *Server) taskCoverageGraph(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	as := s.m.Assets()
+	if as == nil {
+		writeErr(w, 503, "asset store is not enabled")
+		return
+	}
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+	g, err := as.BuildCoverageGraph(taskID, t.ExpID)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, g)
+}
+
+func (s *Server) taskAssetRefs(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	assetID, _ := strconv.ParseInt(r.URL.Query().Get("asset_id"), 10, 64)
+	if assetID <= 0 {
+		writeErr(w, 400, "asset_id is required")
+		return
+	}
+	refs, err := t.Store.AssetRefsWithSources(assetID)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	intents := []CoverageAssetRefDTO{}
+	facts := []CoverageAssetRefDTO{}
+	findings := []CoverageAssetRefDTO{}
+	for _, ref := range refs {
+		dto := coverageAssetRefDTO(ref)
+		switch ref.Kind {
+		case "intent":
+			intents = append(intents, dto)
+		case "fact":
+			facts = append(facts, dto)
+		case "finding":
+			findings = append(findings, dto)
+		}
+	}
+	writeJSON(w, 200, map[string]any{"intents": intents, "facts": facts, "findings": findings})
+}
+
+func (s *Server) taskScopeList(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	as := s.m.Assets()
+	if as == nil {
+		writeErr(w, 503, "asset store is not enabled")
+		return
+	}
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+	rows, err := as.ListTaskScopeWithSources(taskID)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"scope": rows})
+}
+
+func (s *Server) taskScopeAdd(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	as := s.m.Assets()
+	if as == nil {
+		writeErr(w, 503, "asset store is not enabled")
+		return
+	}
+	var body struct {
+		Kind   string `json:"kind"`
+		Value  string `json:"value"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, "invalid JSON")
+		return
+	}
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+	ts, err := as.AddAgentScope(taskID, body.Kind, body.Value, body.Reason, "manual")
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, ts)
+}
+
+func (s *Server) taskScopeDelete(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	as := s.m.Assets()
+	if as == nil {
+		writeErr(w, 503, "asset store is not enabled")
+		return
+	}
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+	scopeID, err := strconv.ParseInt(r.PathValue("sid"), 10, 64)
+	if err != nil {
+		writeErr(w, 400, "invalid scope id")
+		return
+	}
+	deleted, err := as.DeleteTaskScope(taskID, scopeID)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if !deleted {
+		writeErr(w, 404, "scope row not found")
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) frontier(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeJSON(w, 200, []any{})
+		return
+	}
+	fr, _ := t.Store.Frontier(atoiDefault(r.URL.Query().Get("limit"), 100))
+	writeJSON(w, 200, taskNodeDTOs(fr))
+}
+
+func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
+
+	q := r.URL.Query()
+	taskParam := q.Get("task")
+	if taskParam == "" {
+
+		if q.Get("page") == "" && q.Get("limit") == "" {
+			fs, _ := s.m.pg.ListFindings(500)
+			assets := s.resolveFindingAssets(fs)
+			out := make([]FindingDTO, 0, len(fs))
+			for _, f := range fs {
+				out = append(out, findingFromDB(f, assets))
+			}
+			writeJSON(w, 200, out)
+			return
+		}
+		page := findingPaginationParam(q.Get("page"), 1, 0)
+		limit := findingPaginationParam(q.Get("limit"), 20, 200)
+		fs, total, err := s.m.pg.ListFindingsPage(findingFilterFromQuery(q), page, limit)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		assets := s.resolveFindingAssets(fs)
+		out := make([]FindingDTO, 0, len(fs))
+		for _, f := range fs {
+			out = append(out, findingFromDB(f, assets))
+		}
+		writeJSON(w, 200, map[string]any{"items": out, "total": total, "page": page, "page_size": limit})
+		return
+	}
+	t := s.m.ResolveTask(taskParam)
+	if t == nil {
+		writeJSON(w, 200, []any{})
+		return
+	}
+	f, err := t.Store.ListByKind(db.KindFinding, 200)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	tid, _ := strconv.ParseInt(t.ID, 10, 64)
+	meta, err := s.m.pg.FindingMetaByNodeID(tid)
+	if err != nil {
+		log.Printf("[findings] task=%s meta: %v", t.ID, err)
+	}
+	var aidSet []int64
+	for _, m := range meta {
+		aidSet = append(aidSet, m.AssetIDs...)
+	}
+	assets := s.resolveAssetIDs(aidSet)
+	out := findingDTOsForTask(t, f, meta, assets)
+
+	sources, err := t.Store.DirectSourceStores()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	for _, source := range sources {
+		nodes, listErr := source.Store.ListByKind(db.KindFinding, 200)
+		if listErr != nil {
+			writeErr(w, 500, listErr.Error())
+			return
+		}
+		for _, node := range nodes {
+			node.SourceTaskID = source.Task.TaskID
+			node.Inherited = true
+		}
+		sourceMeta, metaErr := s.m.pg.FindingMetaByNodeID(source.Task.TaskID)
+		if metaErr != nil {
+			log.Printf("[findings] source_task=%d meta: %v", source.Task.TaskID, metaErr)
+		}
+		var sourceAssetIDs []int64
+		for _, item := range sourceMeta {
+			sourceAssetIDs = append(sourceAssetIDs, item.AssetIDs...)
+		}
+		out = append(out, findingDTOsForOwner(
+			i64s(source.Task.TaskID),
+			source.Task.Description,
+			nodes,
+			sourceMeta,
+			s.resolveAssetIDs(sourceAssetIDs),
+		)...)
+	}
+	writeJSON(w, 200, out)
+}
+
+func normFilter(v string) string {
+	if v == "all" {
+		return ""
+	}
+	return v
+}
+
+func (s *Server) resolveFindingAssets(fs []*db.DBFinding) map[int64]*db.Asset {
+	var ids []int64
+	for _, f := range fs {
+		ids = append(ids, f.AssetIDs...)
+	}
+	return s.resolveAssetIDs(ids)
+}
+
+func (s *Server) resolveAssetIDs(ids []int64) map[int64]*db.Asset {
+	assets := map[int64]*db.Asset{}
+	seen := map[int64]bool{}
+	var uniq []int64
+	for _, id := range ids {
+		if id > 0 && !seen[id] {
+			seen[id] = true
+			uniq = append(uniq, id)
+		}
+	}
+	if len(uniq) == 0 {
+		return assets
+	}
+	list, err := s.m.pg.Assets().GetByIDs(uniq)
+	if err != nil {
+		log.Printf("[findings] resolve assets: %v", err)
+	}
+	for _, a := range list {
+		assets[a.ID] = a
+	}
+	return assets
+}
+
+func (s *Server) findingStats(w http.ResponseWriter, r *http.Request) {
+	st, err := s.m.pg.FindingStats()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, st)
+}
+
+func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
+	id := int64(atoiDefault(r.PathValue("id"), 0))
+	if id <= 0 {
+		writeErr(w, 400, "bad finding id")
+		return
+	}
+	f, err := s.m.pg.GetFinding(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if f == nil {
+		writeErr(w, 404, "finding not found")
+		return
+	}
+	assets := s.resolveAssetIDs(f.AssetIDs)
+	dto := findingFromDB(f, assets)
+	if contextTaskID := strings.TrimSpace(r.URL.Query().Get("context_task")); contextTaskID != "" {
+		contextTask := s.m.ResolveTask(contextTaskID)
+		if contextTask == nil {
+			writeErr(w, 404, "context task not found")
+			return
+		}
+		sourceTaskID, inherited, allowed := findingProvenanceInTask(contextTask, f.TaskID)
+		if !allowed {
+			writeErr(w, 404, "finding not available in task context")
+			return
+		}
+		dto.SourceTaskID = sourceTaskID
+		dto.Inherited = inherited
+	}
+	writeJSON(w, 200, dto)
+}
+
+func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	scope := q.Get("scope")
+	format := q.Get("format")
+
+	var ids []int64
+	var filter db.FindingFilter
+	switch scope {
+	case "selected":
+		for _, part := range strings.Split(q.Get("ids"), ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			id, err := strconv.ParseInt(part, 10, 64)
+			if err != nil || id <= 0 {
+				writeErr(w, 400, "bad finding id: "+part)
+				return
+			}
+			ids = append(ids, id)
+		}
+		if len(ids) == 0 {
+			writeErr(w, 400, "no findings selected")
+			return
+		}
+	case "all":
+
+	case "filtered", "":
+		filter = findingFilterFromQuery(q)
+	default:
+		writeErr(w, 400, "bad scope: "+scope)
+		return
+	}
+
+	fs, err := s.m.pg.ListFindingsForExport(filter, ids)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+
+	stage, err := os.MkdirTemp("", "gary-finding-export-")
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	defer os.RemoveAll(stage)
+	if err = s.evidenceStore().StageFindingsExport(r.Context(), fs, stage, format == "md-zip"); err != nil {
+		evidenceError(w, err)
+		return
+	}
+	now := time.Now()
+	stamp := now.Format("20060102-150405")
+	setDownload := func(contentType, filename string) {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	}
+
+	switch format {
+	case "md-single":
+		setDownload("text/markdown; charset=utf-8", "findings-"+stamp+".md")
+		_, _ = w.Write([]byte(report.FindingsMarkdown(fs, now)))
+	case "md-zip":
+		path := filepath.Join(stage, "findings.zip")
+		if err := buildFindingsEvidenceZip(path, fs, stage, now); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		defer file.Close()
+		setDownload("application/zip", "findings-"+stamp+".zip")
+		http.ServeContent(w, r, "findings.zip", now, file)
+	case "csv":
+		setDownload("text/csv; charset=utf-8", "findings-"+stamp+".csv")
+		_, _ = w.Write(report.FindingsCSV(fs))
+	case "json":
+		assets := s.resolveFindingAssets(fs)
+		out := make([]FindingDTO, 0, len(fs))
+		for _, f := range fs {
+			for i := range f.TrafficBindings {
+				f.TrafficBindings[i].Snapshot.ReqHead = ""
+				f.TrafficBindings[i].Snapshot.RespHead = ""
+			}
+			out = append(out, findingFromDB(f, assets))
+		}
+		setDownload("application/json; charset=utf-8", "findings-"+stamp+".json")
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(out)
+	default:
+		writeErr(w, 400, "bad format: "+format)
+	}
+}
+
+func findingProvenanceInTask(contextTask *Task, findingTaskID *int64) (sourceTaskID string, inherited, allowed bool) {
+	if contextTask == nil || findingTaskID == nil {
+		return "", false, false
+	}
+	contextID, err := strconv.ParseInt(contextTask.ID, 10, 64)
+	if err != nil {
+		return "", false, false
+	}
+	if *findingTaskID == contextID {
+		return "", false, true
+	}
+	for _, sourceID := range contextTask.lifecycleSnapshot().SourceTaskIDs {
+		if sourceID == *findingTaskID {
+			return i64s(sourceID), true, true
+		}
+	}
+	return "", false, false
+}
+
+func (s *Server) findingLineage(w http.ResponseWriter, r *http.Request) {
+	id := int64(atoiDefault(r.PathValue("id"), 0))
+	if id <= 0 {
+		writeErr(w, 400, "bad finding id")
+		return
+	}
+	f, err := s.m.pg.GetFinding(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if f == nil {
+		writeErr(w, 404, "finding not found")
+		return
+	}
+	empty := map[string]any{"nodes": []any{}, "edges": []any{}}
+	if f.NodeID == nil || f.TaskID == nil {
+		writeJSON(w, 200, empty)
+		return
+	}
+	t := s.m.ResolveTask(i64s(*f.TaskID))
+	if t == nil {
+		writeJSON(w, 200, empty)
+		return
+	}
+	nodes, edges, err := t.Store.FindingLineage(*f.NodeID)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"nodes": taskNodeDTOs(nodes), "edges": edgeDTOs(edges)})
+}
+
+func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
+	id := int64(atoiDefault(r.PathValue("id"), 0))
+	if id <= 0 {
+		writeErr(w, 400, "bad finding id")
+		return
+	}
+	var body struct {
+		Status    *string `json:"status"`
+		Severity  *string `json:"severity"`
+		Name      *string `json:"name"`
+		VulnClass *string `json:"vulnclass"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if body.Status == nil && body.Severity == nil && body.Name == nil && body.VulnClass == nil {
+		writeErr(w, 400, "nothing to update: provide status/severity/name/vulnclass")
+		return
+	}
+	if body.Status != nil {
+		if !db.ValidFindingStatus(*body.Status) {
+			writeErr(w, 400, "bad status: "+*body.Status)
+			return
+		}
+
+		from, found, notified, err := s.m.pg.SetFindingStatusWithNotify(r.Context(), id, *body.Status)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if !found {
+			writeErr(w, 404, "finding not found")
+			return
+		}
+		if !notified && from != *body.Status {
+			log.Printf("[notify] The status change event is not registered finding=%d %s→%s (status has been updated)", id, from, *body.Status)
+		}
+	}
+	if body.Severity != nil {
+		if !db.ValidSeverity(*body.Severity) {
+			writeErr(w, 400, "bad severity: "+*body.Severity)
+			return
+		}
+		n, err := s.m.pg.SetFindingSeverity(id, *body.Severity)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if n == 0 {
+			writeErr(w, 404, "finding not found")
+			return
+		}
+	}
+	if body.Name != nil {
+		n, err := s.m.pg.SetFindingName(id, strings.TrimSpace(*body.Name))
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if n == 0 {
+			writeErr(w, 404, "finding not found")
+			return
+		}
+	}
+	if body.VulnClass != nil {
+		n, err := s.m.pg.SetFindingVulnClass(id, strings.TrimSpace(*body.VulnClass))
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if n == 0 {
+			writeErr(w, 404, "finding not found")
+			return
+		}
+	}
+	f, err := s.m.pg.GetFinding(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if f == nil {
+		writeErr(w, 404, "finding not found")
+		return
+	}
+	writeJSON(w, 200, findingFromDB(f, s.resolveAssetIDs(f.AssetIDs)))
+}
+
+func (s *Server) deleteFinding(w http.ResponseWriter, r *http.Request) {
+	id := int64(atoiDefault(r.PathValue("id"), 0))
+	if id <= 0 {
+		writeErr(w, 400, "bad finding id")
+		return
+	}
+	n, err := s.m.pg.DeleteFinding(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if n == 0 {
+		writeErr(w, 404, "finding not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": true, "id": id})
+}
+
+func (s *Server) intents(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+
+		writeJSON(w, 200, []any{})
+		return
+	}
+	q := r.URL.Query()
+	limit := min(atoiDefault(q.Get("limit"), 300), 500)
+
+	if q.Get("before") == "" && q.Get("page") == "" {
+		in, err := t.Store.ListByKind(db.KindIntent, limit)
+		if err != nil {
+			log.Printf("[intents] task=%s limit=%d: %v", t.ID, limit, err)
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, taskNodeDTOs(in))
+		return
+	}
+
+	before := int64(atoiDefault(q.Get("before"), 0))
+	in, hasMore, err := taskIntentHistoryPage(t.Store, before, limit, false, 0)
+	if err != nil {
+		log.Printf("[intents] task=%s before=%d limit=%d: %v", t.ID, before, limit, err)
+		writeErr(w, 500, err.Error())
+		return
+	}
+	sources, err := t.Store.DirectSourceStores()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	for _, source := range sources {
+		items, sourceMore, sourceErr := taskIntentHistoryPage(source.Store, before, limit, true, source.Task.TaskID)
+		if sourceErr != nil {
+			writeErr(w, 500, sourceErr.Error())
+			return
+		}
+		in = append(in, items...)
+		hasMore = hasMore || sourceMore
+	}
+	sort.Slice(in, func(i, j int) bool { return in[i].ID > in[j].ID })
+	if len(in) > limit {
+		in = in[:limit]
+		hasMore = true
+	}
+	writeJSON(w, 200, map[string]any{"items": taskNodeDTOs(in), "has_more": hasMore})
+}
+
+func inheritedIntentResult(state string) bool {
+	switch state {
+	case "done", "blocked", "exhausted", "stopped":
+		return true
+	default:
+		return false
+	}
+}
+
+func inheritedGraphSnapshot(nodes []*db.Node, edges []db.Edge, sourceTaskID int64) ([]*db.Node, []db.Edge) {
+	visible := make(map[int64]struct{}, len(nodes))
+	filteredNodes := make([]*db.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil || (node.Kind == db.KindIntent && !inheritedIntentResult(node.State)) {
+			continue
+		}
+		node.SourceTaskID = sourceTaskID
+		node.Inherited = true
+		visible[node.ID] = struct{}{}
+		filteredNodes = append(filteredNodes, node)
+	}
+	filteredEdges := make([]db.Edge, 0, len(edges))
+	for _, edge := range edges {
+		if _, ok := visible[edge.From]; !ok {
+			continue
+		}
+		if _, ok := visible[edge.To]; !ok {
+			continue
+		}
+		filteredEdges = append(filteredEdges, edge)
+	}
+	return filteredNodes, filteredEdges
+}
+
+func taskIntentHistoryPage(store *db.ExplorationStore, before int64, limit int, inherited bool, sourceTaskID int64) ([]*db.Node, bool, error) {
+	if !inherited {
+		return store.ListByKindPage(db.KindIntent, before, limit)
+	}
+	batch := max(limit, 300)
+	cursor := before
+	out := make([]*db.Node, 0, limit+1)
+	for {
+		page, more, err := store.ListByKindPage(db.KindIntent, cursor, batch)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, node := range page {
+			if !inheritedIntentResult(node.State) {
+				continue
+			}
+			node.SourceTaskID = sourceTaskID
+			node.Inherited = true
+			out = append(out, node)
+			if len(out) > limit {
+				return out[:limit], true, nil
+			}
+		}
+		if !more || len(page) == 0 {
+			return out, false, nil
+		}
+		cursor = page[len(page)-1].ID
+	}
+}
+
+func (s *Server) explorationGraph(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeJSON(w, 200, map[string]any{"nodes": []any{}, "edges": []any{}})
+		return
+	}
+	nodes, err := t.Store.Nodes(2000)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	edges, err := t.Store.Edges(5000)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	sources, err := t.Store.DirectSourceStores()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	for _, source := range sources {
+		sourceNodes, nodeErr := source.Store.Nodes(2000)
+		if nodeErr != nil {
+			writeErr(w, 500, nodeErr.Error())
+			return
+		}
+		sourceEdges, edgeErr := source.Store.Edges(5000)
+		if edgeErr != nil {
+			writeErr(w, 500, edgeErr.Error())
+			return
+		}
+		sourceNodes, sourceEdges = inheritedGraphSnapshot(sourceNodes, sourceEdges, source.Task.TaskID)
+		nodes = append(nodes, sourceNodes...)
+		edges = append(edges, sourceEdges...)
+	}
+	writeJSON(w, 200, map[string]any{"nodes": taskNodeDTOs(nodes), "edges": edgeDTOs(edges)})
+}
+
+func (s *Server) explorationNodes(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page := atoiDefault(q.Get("page"), 1)
+	size := atoiDefault(q.Get("size"), 20)
+	t := s.m.ResolveTask(q.Get("task"))
+	if t == nil {
+		writeJSON(w, 200, map[string]any{
+			"items": []any{}, "total": 0, "page": page, "size": size,
+			"edges": []any{}, "refs": map[string]any{},
+		})
+		return
+	}
+	filter := db.NodeFilter{
+		Kinds:  csvValues(q.Get("kind")),
+		States: csvValues(q.Get("state")),
+		Query:  q.Get("q"),
+		Asc:    q.Get("order") == "asc",
+	}
+	nodes, total, err := t.Store.NodesPage(filter, page, size)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	ids := make([]int64, 0, len(nodes))
+	onPage := make(map[int64]bool, len(nodes))
+	for _, n := range nodes {
+		ids = append(ids, n.ID)
+		onPage[n.ID] = true
+	}
+	edges, err := t.Store.EdgesTouching(ids)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	neighbourSet := map[int64]bool{}
+	for _, e := range edges {
+		if !onPage[e.From] {
+			neighbourSet[e.From] = true
+		}
+		if !onPage[e.To] {
+			neighbourSet[e.To] = true
+		}
+	}
+	neighbourIDs := make([]int64, 0, len(neighbourSet))
+	for id := range neighbourSet {
+		neighbourIDs = append(neighbourIDs, id)
+	}
+	neighbours, err := t.Store.NodesByIDs(neighbourIDs)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	refs := make(map[string]TaskNodeDTO, len(neighbours))
+	for _, n := range neighbours {
+		refs[i64s(n.ID)] = taskNodeDTO(n)
+	}
+	writeJSON(w, 200, map[string]any{
+		"items":  taskNodeDTOs(nodes),
+		"total":  total,
+		"page":   page,
+		"size":   size,
+		"edges":  edgeDTOs(edges),
+		"refs":   refs,
+		"assets": s.nodeAnchoredAssets(t, append(ids, neighbourIDs...)),
+	})
+}
+
+func (s *Server) nodeAnchoredAssets(t *Task, nodeIDs []int64) map[string][]FindingAssetDTO {
+	out := map[string][]FindingAssetDTO{}
+	anchors, err := t.Store.NodeAssets(nodeIDs)
+	if err != nil {
+		log.Printf("[broadcast] node assets: %v", err)
+		return out
+	}
+	var flat []int64
+	for _, ids := range anchors {
+		flat = append(flat, ids...)
+	}
+	assets := s.resolveAssetIDs(flat)
+	for nodeID, ids := range anchors {
+		if dtos := findingAssetDTOs(ids, assets); len(dtos) > 0 {
+			out[i64s(nodeID)] = dtos
+		}
+	}
+	return out
+}
+
+func csvValues(s string) []string {
+	out := []string{}
+	for _, part := range strings.Split(s, ",") {
+		if v := strings.TrimSpace(part); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeJSON(w, 200, map[string]any{"items": []any{}, "cursor": 0})
+		return
+	}
+	since := int64(atoiDefault(r.URL.Query().Get("since"), 0))
+	limit := atoiDefault(r.URL.Query().Get("limit"), 300)
+	var intentPtr *int64
+	if iv := r.URL.Query().Get("intent"); iv != "" {
+		if n, err := strconv.ParseInt(iv, 10, 64); err == nil {
+			intentPtr = &n
+		}
+	}
+	var (
+		items  []db.Activity
+		cursor int64
+		err    error
+	)
+	if intentPtr != nil {
+		items, cursor, err = t.Store.ActivityListWithSources(*intentPtr, since, limit)
+	} else {
+		items, cursor, err = t.Store.ActivityList(nil, since, limit)
+	}
+	if err != nil {
+		log.Printf("[activity] task=%s since=%d limit=%d intent=%v: %v", t.ID, since, limit, intentPtr, err)
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": activityDTOs(items), "cursor": cursor})
+}
+
+func parseActivitySession(sess string) (db.ActivitySessionFilter, bool) {
+	switch {
+	case sess == "" || sess == "main":
+
+		return db.ActivitySessionFilter{Main: true}, true
+	case strings.HasPrefix(sess, "main:"):
+		seg, err := strconv.Atoi(strings.TrimPrefix(sess, "main:"))
+		if err != nil || seg < 0 {
+			return db.ActivitySessionFilter{}, false
+		}
+		return db.ActivitySessionFilter{Main: true, MainSeg: &seg}, true
+	case sess == "plan":
+		return db.ActivitySessionFilter{Worker: "planner"}, true
+	case strings.HasPrefix(sess, "intent:"):
+		id, err := strconv.ParseInt(strings.TrimPrefix(sess, "intent:"), 10, 64)
+		if err != nil {
+			return db.ActivitySessionFilter{}, false
+		}
+		return db.ActivitySessionFilter{NodeID: &id}, true
+	}
+	return db.ActivitySessionFilter{}, false
+}
+
+func activitySessionStore(t *Task, filter db.ActivitySessionFilter) (*db.ExplorationStore, int64, error) {
+	if filter.NodeID == nil {
+		return t.Store, 0, nil
+	}
+	node, err := t.Store.GetNodeWithSources(*filter.NodeID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if node == nil || node.Kind != db.KindIntent {
+		return nil, 0, nil
+	}
+	if !node.Inherited {
+		return t.Store, 0, nil
+	}
+	if !inheritedIntentResult(node.State) {
+		return nil, 0, nil
+	}
+	sources, err := t.Store.DirectSourceStores()
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, source := range sources {
+		if source.Task.TaskID == node.SourceTaskID {
+			return source.Store, source.Task.TaskID, nil
+		}
+	}
+	return nil, 0, nil
+}
+
+func (s *Server) activityHistory(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	q := r.URL.Query()
+	sess := q.Get("session")
+	filter, ok := parseActivitySession(sess)
+	if !ok {
+		writeErr(w, 400, "bad session")
+		return
+	}
+	if filter.Main && filter.MainSeg == nil {
+		seg, err := t.Store.CurrentMainSeg()
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		filter.MainSeg = &seg
+	}
+	before := int64(atoiDefault(q.Get("before"), 0))
+	limit := min(atoiDefault(q.Get("limit"), 200), 500)
+	store, sourceTaskID, err := activitySessionStore(t, filter)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if store == nil {
+		writeErr(w, 404, "session not found")
+		return
+	}
+
+	snapshot, err := t.Store.ActivityMaxID()
+	if err != nil {
+		log.Printf("[activity/history] task=%s session=%s snapshot: %v", t.ID, sess, err)
+		writeErr(w, 500, err.Error())
+		return
+	}
+	var items []db.Activity
+	var hasMore bool
+	if sourceTaskID > 0 {
+
+		items, hasMore, err = store.ActivityPageForTerminalIntent(*filter.NodeID, before, limit)
+	} else {
+		items, hasMore, err = store.ActivityPage(filter, before, limit)
+	}
+	if err != nil {
+		log.Printf("[activity/history] task=%s session=%s before=%d limit=%d: %v", t.ID, sess, before, limit, err)
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if sourceTaskID > 0 {
+		for i := range items {
+			items[i].SourceTaskID = sourceTaskID
+			items[i].Inherited = true
+		}
+	}
+	earliest := before
+	if len(items) > 0 {
+		earliest = items[0].ID
+	}
+	writeJSON(w, 200, map[string]any{
+		"items":           activityDTOs(items),
+		"snapshot_cursor": snapshot,
+		"earliest_cursor": earliest,
+		"has_more":        hasMore,
+	})
+}
+
+func (s *Server) tokenStats(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeJSON(w, 200, map[string]any{
+			"workers":  []db.TokenUsage{},
+			"sessions": []db.SessionTokenUsage{},
+			"total":    tokenTotalDTO(db.TokenUsage{}),
+		})
+		return
+	}
+	stats, err := t.Store.TokenStatsByWorker()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	sessions, err := t.Store.TokenStatsBySession()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	total, err := t.Store.TokenTotal()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"workers": stats, "sessions": sessions, "total": tokenTotalDTO(total)})
+}
+
+func (s *Server) tokenDailyStats(w http.ResponseWriter, r *http.Request) {
+	days := atoiDefault(r.URL.Query().Get("days"), 30)
+	if s.m.pg == nil {
+		writeJSON(w, 200, []any{})
+		return
+	}
+	buckets, err := s.m.pg.TokenDailyAll(days)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if buckets == nil {
+		buckets = []db.DailyTokenBucket{}
+	}
+	writeJSON(w, 200, buckets)
+}
+
+func (s *Server) conversationTokens(w http.ResponseWriter, r *http.Request) {
+	if s.m.pg == nil {
+		writeJSON(w, 200, []any{})
+		return
+	}
+	rows, err := s.m.pg.ConversationTokenSummaries()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, rows)
+}
+
+func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
+	since := int64(atoiDefault(r.URL.Query().Get("since"), 0))
+	limit := atoiDefault(r.URL.Query().Get("limit"), 500)
+	lines, cursor := logSink.recent(since, limit)
+	writeJSON(w, 200, map[string]any{"items": lines, "cursor": cursor})
+}
+
+func (s *Server) getLogsHistory(w http.ResponseWriter, r *http.Request) {
+	if s.m.pg == nil {
+		writeJSON(w, 200, map[string]any{"items": []any{}, "has_more": false})
+		return
+	}
+	before := int64(atoiDefault(r.URL.Query().Get("before"), 0))
+	limit := atoiDefault(r.URL.Query().Get("limit"), 200)
+	if limit > 500 {
+		limit = 500
+	}
+
+	var (
+		rows []*db.DBLog
+		err  error
+	)
+	if before <= 0 {
+		rows, err = s.m.pg.RecentLogs(limit)
+	} else {
+		rows, err = s.m.pg.ListLogsBefore(before, limit)
+	}
+	if err != nil {
+		writeErr(w, 500, "db: "+err.Error())
+		return
+	}
+	items := make([]LogLine, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, LogLine{
+			DBID:  r.ID,
+			TS:    r.CreatedAt.Format(time.RFC3339),
+			Level: r.Level,
+			Tag:   r.Tag,
+			Text:  r.Text,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "has_more": len(rows) == limit})
+}
+
+func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, 500, "streaming unsupported")
+		return
+	}
+	since := int64(atoiDefault(r.URL.Query().Get("since"), 0))
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	ch, unsub := logSink.subscribe()
+	defer unsub()
+	send := func(l LogLine) {
+		b, _ := json.Marshal(l)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	}
+	lines, cursor := logSink.recent(since, 1000)
+	for _, l := range lines {
+		send(l)
+	}
+	if cursor > since {
+		since = cursor
+	}
+	flusher.Flush()
+
+	ctx := r.Context()
+	ping := time.NewTicker(20 * time.Second)
+	defer ping.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case l, ok := <-ch:
+			if !ok {
+				return
+			}
+			if l.Seq <= since {
+				continue
+			}
+			since = l.Seq
+			send(l)
+		case <-ping.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, 500, "streaming unsupported")
+		return
+	}
+	var intentPtr *int64
+	if iv := r.URL.Query().Get("intent"); iv != "" {
+		if n, err := strconv.ParseInt(iv, 10, 64); err == nil {
+			intentPtr = &n
+		}
+	}
+
+	since := int64(atoiDefault(r.URL.Query().Get("since"), 0))
+	if le := r.Header.Get("Last-Event-ID"); le != "" {
+		if n, err := strconv.ParseInt(le, 10, 64); err == nil {
+			since = n
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	ch, unsub := s.engine.Broadcaster().Subscribe(t.ID)
+	defer unsub()
+
+	sendSSE := func(a db.Activity) {
+		b, _ := json.Marshal(activityDTO(a))
+		fmt.Fprintf(w, "id: %d\ndata: %s\n\n", a.ID, b)
+		flusher.Flush()
+	}
+
+	const replayBatch = 500
+	for {
+		items, cursor, err := t.Store.ActivityList(intentPtr, since, replayBatch)
+		if err != nil {
+			log.Printf("[activity/stream] task=%s replay since=%d: %v", t.ID, since, err)
+			return
+		}
+		for _, a := range items {
+			sendSSE(a)
+		}
+		if cursor > since {
+			since = cursor
+		}
+		if len(items) < replayBatch {
+			break
+		}
+	}
+	flusher.Flush()
+
+	ctx := r.Context()
+	ping := time.NewTicker(20 * time.Second)
+	defer ping.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case a, ok := <-ch:
+			if !ok {
+				return
+			}
+			if a.ID <= since {
+				continue
+			}
+			if intentPtr != nil && (a.NodeID == nil || *a.NodeID != *intentPtr) {
+				continue
+			}
+			since = a.ID
+			sendSSE(a)
+		case <-ping.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) activityDetail(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeErr(w, 404, "no task")
+		return
+	}
+	seq, _ := strconv.ParseInt(r.PathValue("seq"), 10, 64)
+	d, err := taskActivityDetail(t, seq)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"detail": d})
+}
+
+func taskActivityDetail(t *Task, seq int64) (string, error) {
+	return t.Store.ActivityDetailWithSources(seq)
+}
+
+func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeJSON(w, 200, map[string]any{"enabled": false, "exchanges": []any{}})
+		return
+	}
+	q := r.URL.Query()
+	page := atoiDefault(q.Get("page"), 0)
+	size := atoiDefault(q.Get("size"), 100)
+	ex, matched, _ := tr.Page(traffic.PageQuery{
+		Host:    q.Get("host"),
+		Method:  q.Get("method"),
+		Query:   q.Get("q"),
+		Body:    q.Get("body"),
+		Path:    q.Get("path"),
+		Status:  q.Get("status"),
+		RespMin: int64(atoiDefault(q.Get("resp_min"), -1)),
+		RespMax: int64(atoiDefault(q.Get("resp_max"), -1)),
+		Sort:    q.Get("sort"),
+		Order:   q.Get("order"),
+	}, page, size)
+	count, _ := tr.Count()
+	writeJSON(w, 200, map[string]any{
+		"enabled":   s.m.TrafficEnabled(),
+		"proxy":     s.m.ProxyAddr(),
+		"count":     count,
+		"total":     matched,
+		"page":      page,
+		"size":      size,
+		"exchanges": trafficDTOs(ex),
+	})
+}
+
+func (s *Server) getTrafficHosts(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeJSON(w, 200, map[string]any{"hosts": []any{}})
+		return
+	}
+	hosts, err := tr.Hosts()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"hosts": hosts})
+}
+
+func (s *Server) deleteTraffic(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeErr(w, 404, "traffic disabled")
+		return
+	}
+	host := strings.TrimSpace(r.URL.Query().Get("host"))
+	if host == "" {
+		writeErr(w, 400, "missing host")
+		return
+	}
+	n, err := tr.DeleteHost(host)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
+}
+
+func (s *Server) deleteTrafficHosts(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeErr(w, 404, "traffic disabled")
+		return
+	}
+	var req struct {
+		Hosts []string `json:"hosts"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "invalid body")
+		return
+	}
+	hosts := make([]string, 0, len(req.Hosts))
+	for _, h := range req.Hosts {
+		if h = strings.TrimSpace(h); h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	if len(hosts) == 0 {
+		writeErr(w, 400, "missing hosts")
+		return
+	}
+	n, err := tr.DeleteHostsExact(hosts)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
+}
+
+func (s *Server) deleteAllTraffic(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeErr(w, 404, "traffic disabled")
+		return
+	}
+	n, reclaimed, err := tr.DeleteAll()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n, "reclaimed": reclaimed})
+}
+
+func (s *Server) getTrafficExchange(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeErr(w, 404, "traffic disabled")
+		return
+	}
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeErr(w, 400, "missing id")
+		return
+	}
+	req, resp, err := tr.Get(id)
+	if err != nil {
+		writeErr(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"req": req, "resp": resp})
+}
+
+func (s *Server) getTrafficBlob(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeErr(w, 404, "traffic disabled")
+		return
+	}
+	hash := strings.TrimSpace(r.URL.Query().Get("hash"))
+	if hash == "" {
+		writeErr(w, 400, "missing hash")
+		return
+	}
+	f, size, err := tr.Blob(hash)
+	if err != nil {
+		writeErr(w, 404, err.Error())
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", hash+".bin"))
+	if _, err := io.Copy(w, f); err != nil {
+		log.Printf("[traffic] Download blob %s interrupted: %v", hash, err)
+	}
+}
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.settingsPayload())
+}
+
+func (s *Server) settingsPayload() map[string]any {
+	on, backend, braveKey, tavilyKey, proxy := s.m.WebSearch()
+	pyStored, _, _ := s.m.pg.GetSetting(settingPythonInterp)
+	concOn, concLimit := s.m.ConcurrencyLimit()
+	if concLimit == 0 {
+		concLimit = defaultConcurrencyLimit
+	}
+	return map[string]any{
+		"traffic_capture":          s.m.TrafficEnabled(),
+		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
+		"llm_record":               s.m.LLMRecordEnabled(),
+		"web_search_enabled":       on,
+		"web_search_backend":       backend,
+		"brave_key_set":            strings.TrimSpace(braveKey) != "",
+		"tavily_key_set":           strings.TrimSpace(tavilyKey) != "",
+		"web_search_proxy":         proxy,
+		"global_proxy":             s.m.GlobalProxy(),
+		"python_interpreter":       strings.TrimSpace(pyStored),
+		"workers":                  s.m.Workers(),
+		"task_concurrency_enabled": concOn,
+		"task_concurrency_limit":   concLimit,
+
+		"llm_pool_enabled":       s.m.LLMPoolEnabled(),
+		"llm_pool_bind_fallback": s.m.LLMPoolBindFallback(),
+
+		"constraints_inject_planner": s.constraintInjectPlanner(),
+		"constraints_inject_worker":  s.constraintInjectWorker(),
+
+		"noa_compaction": s.m.NoaCompactionEnabled(),
+
+		"notify_enabled":             s.m.pg.GetBool(settingNotifyEnabled, true),
+		"notify_public_base_url":     notifyPublicBaseURL(s.m.pg),
+		"notify_digest_interval_min": notifyDigestIntervalMin(s.m.pg),
+	}
+}
+
+func notifyPublicBaseURL(pg *db.DB) string {
+	v, _, _ := pg.GetSetting(settingNotifyPublicBaseURL)
+	return v
+}
+
+func notifyDigestIntervalMin(pg *db.DB) int {
+	v, ok, _ := pg.GetSetting(settingNotifyDigestMinutes)
+	if !ok {
+		return notifyDefaultDigestMinutes
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n <= 0 {
+		return notifyDefaultDigestMinutes
+	}
+	return n
+}
+
+func (s *Server) pgDetectPython(w http.ResponseWriter, r *http.Request) {
+	p := detectPython()
+	if p == "" {
+		writeErr(w, 404, "python not detected (python3/python are not in PATH)")
+		return
+	}
+	if err := s.m.pg.SetSetting(settingPythonInterp, p); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"python_interpreter": p})
+}
+
+func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TrafficCapture      *bool `json:"traffic_capture"`
+		AgentTrafficBinding *bool `json:"agent_traffic_binding"`
+		LLMRecord           *bool `json:"llm_record"`
+
+		WebSearchEnabled *bool   `json:"web_search_enabled"`
+		WebSearchBackend *string `json:"web_search_backend"`
+		BraveKey         *string `json:"brave_search_api_key"`
+		TavilyKey        *string `json:"tavily_search_api_key"`
+		WebSearchProxy   *string `json:"web_search_proxy"`
+		GlobalProxy      *string `json:"global_proxy"`
+		PythonInterp     *string `json:"python_interpreter"`
+		Workers          *int    `json:"workers"`
+
+		ConcurrencyEnabled *bool `json:"task_concurrency_enabled"`
+		ConcurrencyLimit   *int  `json:"task_concurrency_limit"`
+
+		LLMPoolEnabled      *bool `json:"llm_pool_enabled"`
+		LLMPoolBindFallback *bool `json:"llm_pool_bind_fallback"`
+
+		ConstraintsInjectPlanner *bool `json:"constraints_inject_planner"`
+		ConstraintsInjectWorker  *bool `json:"constraints_inject_worker"`
+
+		NoaCompaction *bool `json:"noa_compaction"`
+
+		NotifyEnabled    *bool   `json:"notify_enabled"`
+		NotifyBaseURL    *string `json:"notify_public_base_url"`
+		NotifyDigestMins *int    `json:"notify_digest_interval_min"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if req.ConstraintsInjectPlanner != nil {
+		if err := s.m.pg.SetBool(settingConstraintsInjectPlanner, *req.ConstraintsInjectPlanner); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.ConstraintsInjectWorker != nil {
+		if err := s.m.pg.SetBool(settingConstraintsInjectWorker, *req.ConstraintsInjectWorker); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.NoaCompaction != nil {
+
+		if err := s.m.SetNoaCompaction(*req.NoaCompaction); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+
+	if req.NotifyEnabled != nil {
+		if err := s.m.pg.SetBool(settingNotifyEnabled, *req.NotifyEnabled); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.NotifyBaseURL != nil {
+
+		base := trimTrailingSlash(strings.TrimSpace(*req.NotifyBaseURL))
+		if base != "" && !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+			writeErr(w, 400, "The return link address must start with http:// or https://")
+			return
+		}
+		if err := s.m.pg.SetSetting(settingNotifyPublicBaseURL, base); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.NotifyDigestMins != nil {
+
+		if *req.NotifyDigestMins < 1 || *req.NotifyDigestMins > 24*60 {
+			writeErr(w, 400, "Aggregation period needs to be between 1 and 1440 minutes")
+			return
+		}
+		if err := s.m.pg.SetSetting(settingNotifyDigestMinutes, strconv.Itoa(*req.NotifyDigestMins)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.Workers != nil {
+		if err := s.m.SetWorkers(*req.Workers); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	}
+	if req.ConcurrencyEnabled != nil || req.ConcurrencyLimit != nil {
+
+		curOn, curLimit := s.m.ConcurrencyLimit()
+		if curLimit == 0 {
+			curLimit = defaultConcurrencyLimit
+		}
+		on, limit := curOn, curLimit
+		if req.ConcurrencyEnabled != nil {
+			on = *req.ConcurrencyEnabled
+		}
+		if req.ConcurrencyLimit != nil {
+			limit = *req.ConcurrencyLimit
+		}
+		if err := s.m.SetConcurrency(on, limit); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+
+		go s.reconcileConcurrency()
+	}
+	if req.PythonInterp != nil {
+		if err := s.m.pg.SetSetting(settingPythonInterp, strings.TrimSpace(*req.PythonInterp)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.LLMRecord != nil {
+
+		if err := s.m.SetLLMRecordEnabled(*req.LLMRecord); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	changed := false
+	if req.LLMPoolEnabled != nil {
+		if err := s.m.SetLLMPoolEnabled(*req.LLMPoolEnabled); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		changed = true
+	}
+	if req.LLMPoolBindFallback != nil {
+		if err := s.m.SetLLMPoolBindFallback(*req.LLMPoolBindFallback); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		changed = true
+	}
+	if req.LLMPoolEnabled != nil || req.LLMPoolBindFallback != nil {
+
+		s.invalidateProfileAgents()
+	}
+	if req.AgentTrafficBinding != nil {
+		if err := s.m.pg.SetBool(settingAgentTrafficBinding, *req.AgentTrafficBinding); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.TrafficCapture != nil {
+		if err := s.m.SetTrafficEnabled(*req.TrafficCapture); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		changed = true
+	}
+	if req.GlobalProxy != nil {
+
+		if err := s.m.SetGlobalProxy(*req.GlobalProxy); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		changed = true
+	}
+	if req.WebSearchEnabled != nil || req.WebSearchBackend != nil || req.BraveKey != nil || req.TavilyKey != nil || req.WebSearchProxy != nil {
+
+		on, backend, _, _, _ := s.m.WebSearch()
+		if req.WebSearchEnabled != nil {
+			on = *req.WebSearchEnabled
+		}
+		if req.WebSearchBackend != nil {
+			backend = *req.WebSearchBackend
+		}
+		if err := s.m.SetWebSearch(on, backend, req.BraveKey, req.TavilyKey, req.WebSearchProxy); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		changed = true
+	}
+	if changed {
+
+		s.cfgMu.Lock()
+		cfg, on := s.llmCfg, s.llmOn
+		s.cfgMu.Unlock()
+		if on {
+			if err := s.applyLLM(cfg); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+		}
+	}
+	writeJSON(w, 200, s.settingsPayload())
+}
+
+func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Backend   string `json:"web_search_backend"`
+		Proxy     string `json:"web_search_proxy"`
+		BraveKey  string `json:"brave_search_api_key"`
+		TavilyKey string `json:"tavily_search_api_key"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	_, backend, storedBraveKey, storedTavilyKey, _ := s.m.WebSearch()
+	if strings.TrimSpace(req.Backend) != "" {
+		backend = req.Backend
+	}
+
+	proxy := strings.TrimSpace(req.Proxy)
+
+	braveKey := storedBraveKey
+	if strings.TrimSpace(req.BraveKey) != "" {
+		braveKey = req.BraveKey
+	}
+	tavilyKey := storedTavilyKey
+	if strings.TrimSpace(req.TavilyKey) != "" {
+		tavilyKey = req.TavilyKey
+	}
+	cfg := actool.WebSearchConfig{Backend: backend, BraveAPIKey: braveKey, TavilyAPIKey: tavilyKey, Proxy: proxy}
+
+	wall := 30 * time.Second
+
+	probeQuery := "test"
+	if strings.TrimSpace(backend) == deepSeekWebSearchBackend {
+		cfg.DeepSeekBaseURL, cfg.DeepSeekAPIKey, cfg.DeepSeekModel = s.m.deepSeekSearchCreds()
+		wall = 120 * time.Second
+
+		probeQuery = "DeepSeek company official website"
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), wall)
+	defer cancel()
+	results, err := actool.WebSearchProbe(ctx, cfg, probeQuery, 3)
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error(), "backend": backend})
+		return
+	}
+	if len(results) == 0 {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "The search returned 0 results (may be limited or the proxy is blocked)", "backend": backend})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "count": len(results), "backend": backend})
+}
+
+func (s *Server) mainSessions(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	list, err := t.Store.ListMainSessions()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	current := 0
+	if len(list) > 0 {
+		current = list[0].Seq
+	}
+	writeJSON(w, 200, map[string]any{"sessions": list, "current": current})
+}
+
+func (s *Server) newMainSession(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	if s.engine.IsDeleting(t.ID) {
+		writeErr(w, 409, "The task is being deleted and a new session cannot be created.")
+		return
+	}
+	m, err := t.Store.NewMainSession()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"seq": m.Seq, "created_at": rfc3339(m.CreatedAt), "current": m.Seq})
+}
+
+func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeErr(w, 404, "no active task")
+		return
+	}
+	if s.engine.IsDeleting(t.ID) {
+		writeErr(w, 409, "Task is being deleted and new messages cannot be sent")
+		return
+	}
+
+	var req struct {
+		Message     string           `json:"message"`
+		Attachments []chatAttachment `json:"attachments,omitempty"`
+		Seg         *int             `json:"seg,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	agentMessage, ok := s.prepareChatMentionMessage(w, req.Message)
+	if !ok {
+		return
+	}
+
+	s.chatMu.Lock()
+	if s.engine.IsDeleting(t.ID) {
+		s.chatMu.Unlock()
+		writeErr(w, 409, "Task is being deleted and new messages cannot be sent")
+		return
+	}
+	if s.chatBusy[t.ID] {
+		s.chatMu.Unlock()
+		writeErr(w, 409, "The main Agent is processing the previous message, please wait.")
+		return
+	}
+	ctx, cancel := context.WithCancelCause(s.ctx)
+	ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: req.Message})
+	s.chatBusy[t.ID] = true
+	s.chatCancel[t.ID] = cancel
+	s.chatMu.Unlock()
+
+	mainSeg := 0
+	if req.Seg != nil && *req.Seg >= 0 {
+		mainSeg = *req.Seg
+	} else {
+		mainSeg, _ = t.Store.CurrentMainSeg()
+	}
+	segPtr := &mainSeg
+
+	humanTurn := userActivityWithAttachments("mainagent", req.Message, req.Attachments)
+	humanTurn.MainSeg = segPtr
+	s.engine.emitActivity(t, humanTurn)
+	var ma *agent.MainAgent
+	if s.taskRuntimeAvailable(t, "mainagent") {
+		ma = s.agentsForTask(t).main
+	}
+	if ma != nil {
+
+		go func() {
+			defer func() {
+				s.finishTaskChat(t.ID, cancel)
+			}()
+
+			emit := func(rec db.Activity) {
+				rec.MainSeg = segPtr
+				s.engine.emitActivity(t, rec)
+			}
+			maTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
+			resume := func() { s.reviveTask(t) }
+
+			taskDir := filepath.Join(s.m.dir, "tasks", t.ID)
+			agentMsg := composeAgentMessage(agentMessage, req.Attachments, taskDir)
+			s.engine.BeginLLMCall(t.ID)
+			_, err := ma.Chat(ctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
+			s.engine.EndLLMCall(t.ID)
+			if err != nil && ctx.Err() == nil {
+				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "(Main Agent error:" + err.Error() + "）", MainSeg: segPtr})
+			}
+		}()
+		writeJSON(w, 202, map[string]any{"status": "accepted", "mode": "llm"})
+		return
+	}
+	reply := s.fallbackChat(t, req.Message)
+	s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", Summary: reply, MainSeg: segPtr})
+	s.finishTaskChat(t.ID, cancel)
+	writeJSON(w, 200, map[string]any{"reply": reply, "mode": "rule"})
+}
+
+func (s *Server) cancelTaskChat(taskID string, cause error) bool {
+	s.chatMu.Lock()
+	cancel := s.chatCancel[taskID]
+	if cancel != nil {
+		cancel(cause)
+	}
+	s.chatMu.Unlock()
+	return cancel != nil
+}
+
+func (s *Server) finishTaskChat(taskID string, cancel context.CancelCauseFunc) {
+	cancel(agent.AbortChatTurnFinished)
+	s.chatMu.Lock()
+	delete(s.chatBusy, taskID)
+	delete(s.chatCancel, taskID)
+	s.chatMu.Unlock()
+}
+
+func (s *Server) taskChatStatus(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.PathValue("id"))
+	if t == nil {
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
+	s.chatMu.Lock()
+	running := s.chatBusy[t.ID]
+	s.chatMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]bool{"running": running})
+}
+
+func (s *Server) stopChat(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.PathValue("id"))
+	if t == nil {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	if !s.cancelTaskChat(t.ID, agent.AbortChatStoppedByUser) {
+		writeJSON(w, 200, map[string]any{"status": "idle"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"status": "stopping"})
+}
+
+func (s *Server) fallbackChat(t *Task, msg string) string {
+	m := strings.TrimSpace(msg)
+	lower := strings.ToLower(m)
+	switch {
+	case strings.HasPrefix(m, "intention") || strings.HasPrefix(lower, "intent"):
+		text := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(m, "intention"), "intent"))
+		_, _ = t.Store.AddIntent(map[string]any{"summary": text}, 9, nil, "human")
+		return "A high priority intent has been injected:" + text
+	case strings.HasPrefix(m, "Tips") || strings.HasPrefix(lower, "hint"):
+		text := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(m, "Tips"), "hint"))
+		_, _ = t.Store.AddNode(db.KindHint, map[string]any{"text": text}, 0, "active", "human", nil)
+		return "The prompt has been recorded and planners will next read:" + text
+	default:
+		assetCounts, _ := s.m.Assets().CountsByType()
+		assets := 0
+		for _, c := range assetCounts {
+			assets += c
+		}
+		fnd, _ := t.Store.ListByKind(db.KindFinding, 1000)
+		fr, _ := t.Store.Frontier(1000)
+		return fmt.Sprintf("(Rule mode, LLM not configured) Current situation: Asset %d, pending intent %d, confirmed discovery %d.\nAvailable commands: \"Intention...\" to inject intent, \"Prompt...\" to give planner hints.", assets, len(fr), len(fnd))
+	}
+}
+
+func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeErr(w, 404, "no active task")
+		return
+	}
+	findings, _ := t.Store.ListByKind(db.KindFinding, 1000)
+	counts := map[string]int{}
+	for _, ty := range []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint"} {
+		ns, _ := s.m.Assets().QueryByType(ty, 100000, 0)
+		if len(ns) > 0 {
+			counts[ty] = len(ns)
+		}
+	}
+	md := report.Markdown(report.Input{
+		Title: t.Description, Goal: t.Goal, GeneratedAt: time.Now(),
+		AssetCounts: counts, Findings: findings,
+	})
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.WriteHeader(200)
+	_, _ = w.Write([]byte(md))
+}
+
+func (s *Server) getAudit(w http.ResponseWriter, r *http.Request) {
+	t := s.m.ResolveTask(r.URL.Query().Get("task"))
+	if t == nil {
+		writeJSON(w, 200, []any{})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"entries": t.Guard.Audit(), "attributions": t.Guard.Attributions()})
+}
+
+func (s *Server) gc(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"removed": 0})
+}
+
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(204)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]any{"error": msg})
+}
+
+func atoiDefault(s string, d int) int {
+	if n, err := strconv.Atoi(s); err == nil {
+		return n
+	}
+	return d
+}
