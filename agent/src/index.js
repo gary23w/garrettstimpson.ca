@@ -16,6 +16,7 @@
 import NDB_WASM from './neuron_core.wasm';   // CompiledWasm module (see wrangler.toml [[rules]])
 import { NeuronDB } from './neuron-db.mjs';  // the official typed binding over the wasm mem() FFI
 import { handleMcpRequest } from './mcp.mjs';
+import { accessPasswordMinimum } from './access-policy.mjs';
 import { garyToolCatalog, getGaryToolSpec, loadGaryToolCatalog, garyRuntimeConfigured, validateGaryArguments, collectGaryTargets, runGaryTool, parseGaryRouterObject, routeExplicitGaryCall } from './gary-tools.mjs';
 import {
   buildIntelPlan,
@@ -5927,7 +5928,8 @@ export default {
     const ACCESS_PW = String(env.ACCESS_PASSWORD || '');
     const ACCESS_USER = String(env.ACCESS_USER || '');
     if (ACCESS_PW || ACCESS_USER) {
-      if (ACCESS_PW.length < 16) return json({ ok: false, error: 'Access gate is disabled until ACCESS_PASSWORD is rotated to at least 16 characters.' }, 503);
+      const minimum = accessPasswordMinimum(env);
+      if (ACCESS_PW.length < minimum) return json({ ok: false, error: `Access gate is disabled until ACCESS_PASSWORD is rotated to at least ${minimum} characters.` }, 503);
       const cookie = request.headers.get('Cookie') || '';
       const token = (cookie.split(/;\s*/).find(c => c.startsWith('gsa_auth=')) || '').slice('gsa_auth='.length);
       const authed = await verifyAuthToken(env, ACCESS_USER, ACCESS_PW, token);
