@@ -1,11 +1,11 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-10-11T14:27:14Z
+GENERATED    : 2026-10-12T13:59:20Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 72
+TOTAL POSTS  : 73
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,268 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : Gary's 4tope and the natural geometry of persistent conversation
+DATE       : 2026-10-12
+URL        : https://garrettstimpson.ca/posts/2026/10/12/garys-4tope-persistent-conversation/
+CVE        : none
+CATEGORIES : research, ai
+TAGS       : garys-4tope, nl-veil, agent-memory, context-management, graph-algorithms, zig, benchmarks
+WORD_COUNT : 4311
+EXCERPT    : The formula, implementation, and reproducible benchmarks behind Gary's 4tope: protecting a dependency path and unfolding a conversation from its current step.
+</FRONTMATTER>
+<BODY>
+[Paper, reference code, and raw benchmark data on Hugging Face](https://huggingface.co/datasets/gary23w/garys-4tope) · [Download the PDF](https://huggingface.co/datasets/gary23w/garys-4tope/resolve/main/garys-4tope-paper.pdf?download=true)
+
+## Abstract
+
+I want a conversation to keep its working identity when a model's context window fills. Gary's 4tope approaches that problem through the structure of the work: which action produced an observation, which later action reused it, and which observations were replaced or led to a dead end. The implemented method builds a directed acyclic graph of a turn's working span. A longest weighted path identifies one critical chain to protect during pruning. A shortest-path tree rooted at the current step orders a bounded continuation assembled from existing text. The same idea appears in the tool tree, where the engine holds the catalogue and exposes a small view the model can navigate.
+
+## Why I approached chat as a geometric problem
+
+The thing that bothered me was watching a long task keep losing its own working shape. A file had been written. A result had ruled something out. The next action depended on a detail discovered several calls earlier. Then a boundary arrived and the engine asked a model to write a short account of what had happened. The account could sound perfectly reasonable while leaving out the detail that made the next step possible.
+
+The October 10 release record describes a concrete version of that problem: a tools array of about 405 KB, estimated at roughly 110,000 tokens, uploaded on each call with the full security catalogue attached. A 400,000-token spend ceiling was being reached after only three or four calls. Four stretches of work were then carried forward in roughly 180-word continuations. Those figures describe an observed application workload, with both tool-advertisement cost and context policy involved. They are not a controlled evaluation of the new graph algorithm. [1]
+
+I framed the conversation as something with structure beyond its order on the screen. An observation belongs to the action that requested it. A later action can depend on that observation. A failed attempt changes which route remains worth taking. A successful edit changes which version of a file is current. Flattening all of that into a fresh paragraph gives the writer another opportunity to change the shape.
+
+My question was practical: can the engine preserve the relations it already knows, then show the next model call an appropriate view from where the work stands? That became Gary's 4tope. The name and geometric framing are recorded in the source on October 10, 2026. The useful engineering contribution is the combination of a protected dependency path and a source-centred continuation view, wired into a running chat engine. [2]
+
+## What the name means geometrically
+
+A polytope generalizes familiar shapes into higher dimensions. A four-dimensional polytope has three-dimensional facets. Its geometric net, when an unfolding is available, lives in three dimensions; a drawing of it on a page is a further projection. A cube's two-dimensional net is the simpler analogy people already recognize. [3]
+
+The analogy I use is about adjacency and viewpoint. When a structure is too large to show whole, the choice of cut and layout determines which relations remain easy to follow. In a conversation, the important adjacency is the dependency between pieces of work. The current step is the source from which I want the next view to unfold.
+
+There is an important boundary to that analogy. The v1.1.16 code constructs a dependency graph. It does not assign four-dimensional coordinates, define polytope facets, or calculate continuous surface geodesics. Calling its output a net describes a graph layout inspired by geometric unfolding. The four continuation headings are not evidence that the implementation is literally a four-dimensional polytope. The executable mathematics is the pair of graph recurrences below. [2]
+
+![A dependency graph viewed through its critical path and continuation tree](/assets/4tope/graph-views.png)
+
+*Figure 1. Schematic views of the same working record. The arrows describe dependencies; this is not a coordinate embedding of a four-dimensional polytope.*
+
+## The working record becomes a dependency graph
+
+Let the working span be a sequence of messages, and let its graph be G=(V,E). A node records one user message, assistant step, assistant note, tool result, or engine message. The frontier f is the most recent assistant step or note. Each dependency points from a newer node to an older node. The resulting graph is acyclic, and the original message order already supplies a topological order.
+
+The implementation builds this graph from the engine's comma-joined message representation. `Graph.fromSpan` performs the message pass, records tool-call identities, adds dependencies, and marks superseded results. It is a reader for that engine representation, rather than a general conversation-file importer. [2]
+
+Dependencies have different origins:
+
+| Relation | How the reference implementation recognizes it | Critical-path weight |
+|---|---|---:|
+| Tool result to issuing step | Matching `tool_call_id` | 1 |
+| Step to a used result from the preceding round | Reuse of a distinctive token in the step's words or arguments | 2 |
+| Step to another result from the preceding round | Present in that round, without a detected reuse | 0 |
+| Step to preceding assistant step | The continuing sequence of actions | 1 |
+
+Distinctive-token matching is a heuristic, not access to a model's private reasoning. The code keeps tokens between 5 and 64 characters that contain a letter, retains useful path and identifier punctuation, and filters common words. Matching is case-insensitive. A repeated identifier can provide useful evidence of reuse; it does not prove semantic dependence. A relevant fact expressed with different words can be missed.
+
+A result can also become stale. A later identical call, or a later recognized file operation on the same path, supersedes an earlier result. Failures are identified from recognizable error text. That gives the engine a way to distinguish an established observation from a failed route, although both recognizers have limits discussed below.
+
+## The first formula protects one critical chain
+
+For a node v, define L(v) as the greatest cumulative dependency weight obtainable by walking backward from v. With an empty dependency set, its value is zero:
+
+![L(v) = max of zero and L(u) + w(v,u) over dependencies u of v.](/assets/4tope/equation-1.png)
+
+The engine processes nodes oldest first. Every value needed on the right is already available. It records the maximizing predecessor, then follows those predecessor links backward from f. This is the critical chain returned by `Graph.criticalChain`.
+
+Why does this work? Any path starting at v either stops there or first visits one of its dependencies u. Its remaining best score is L(u). Taking the maximum over those choices gives the best score at v. Acyclicity makes the recurrence evaluable in one pass, with time proportional to the nodes and dependency edges. Ties in the reference code prefer the newer dependency after a predecessor has been selected.
+
+Here is a small worked chain. A read is issued, its result is used by a later step, another result arrives, and the process continues to a frontier:
+
+| Node | Dependency used on this path | Weight | L |
+|---|---|---:|---:|
+| s₀ | No older dependency | — | 0 |
+| r₀ | Its issuing step s₀ | 1 | 1 |
+| s₁ | Reuses result r₀ | 2 | 3 |
+| r₁ | Its issuing step s₁ | 1 | 4 |
+| s₂ | Reuses result r₁ | 2 | 6 |
+| r₂ | Its issuing step s₂ | 1 | 7 |
+| f | Reuses result r₂ | 2 | 9 |
+
+The heavier reuse edges make this route outrank the bare step-to-step thread in this example. `protectedIds` extracts live, non-superseded tool-result identities on the selected chain. `compactWorking` passes those identities to `pruneToolResults`, which leaves those results unstubbed during that pruning attempt. [4]
+
+The scope of the guarantee matters. This protects one maximum-weight path. It does not compute the entire transitive dependency closure, protect every relevant branch, or guarantee that a later summary fold preserves everything on the path. If the protected span still exceeds the working budget, the engine can proceed to its existing folding machinery.
+
+## The second formula unfolds a view from the frontier
+
+Protection and presentation answer different questions. The first recurrence asks which path deserves protection during pruning. The second asks how far each piece of the record is from the frontier when constructing a continuation.
+
+For this view, the engine traverses the dependency graph in both directions. Let u∼ v mean the nodes are adjacent in that topology. With positive traversal costs, the shortest distance from the frontier is:
+
+![d(f) = 0; d(v) is the minimum of d(u) + c(u,v) over adjacent u.](/assets/4tope/equation-2.png)
+
+Equivalently, d(v) is the minimum sum of traversal costs over paths from f to v. Dijkstra's algorithm computes these distances and a parent for each reachable node. The shortest-path method is established graph mathematics; the particular event graph, costs, selection, and engine integration are the method being described here. [5]
+
+The current costs are deliberately simple:
+
+| Traversal | Base cost |
+|---|---:|
+| Reused result, issuing relation, or step thread | 1 |
+| Merely present result | 3 |
+| Additional cost to enter a superseded node | +4 |
+| Additional cost to enter a failed result | +1 |
+
+The penalty belongs to the destination node, so the topology is traversable both ways while the total cost need not be symmetric. These numbers express a policy: direct evidence should be close, a glance should be farther away, and stale or failed material should be approached with its status visible. They have not been optimized against a held-out task benchmark.
+
+The implementation reserves space for the frontier's words and the file ledger, then considers eligible nodes by increasing distance. It skips an item that will not fit and continues to smaller candidates. Superseded results, user and engine nodes, ordinary step narration, and empty result excerpts are excluded from this selection. Notes qualify only when they look like an existing distillation.
+
+Finally, a depth-first walk of the shortest-path tree lays out the selected established results. Failed results are rendered separately. A visited set prevents duplicate emission within the traversal. The chosen ordering gives each subtree a contiguous region of the walk, although omitted nodes and separately rendered failures mean the printed text is not a complete serialization of every dependency edge.
+
+This is a greedy, distance-guided view under a byte allowance. It is not a proof of optimal semantic retention for that allowance. A fact can be relevant and still fall outside the selected view.
+
+## What the next segment receives
+
+The continuation uses four existing labels:
+
+- **NEXT:** the frontier's current words, or a description of its last tool calls when it has no words.
+- **ON DISK:** the engine's verified file ledger.
+- **RULED OUT:** selected failed calls that have not been superseded.
+- **ESTABLISHED:** selected live evidence in the continuation tree's order.
+
+The release verification exercised a turn that wrote a file, read it back, attempted to read a missing specification, and crossed a spend ceiling set to 8,000 tokens. It reported this continuation, followed by the task continuing and finishing: [1]
+
+```text
+NEXT (the frontier, in its own last words): Reading the spec file missing-spec.md next.
+ON DISK: notes.md (22 B)
+RULED OUT (calls that failed; do not repeat them as they were):
+- r3 read_file {"path": "missing-spec.md"} -> not found
+ESTABLISHED (what the frontier rests on, nearest first, each derivation contiguous):
+- r2 read_file {"path": "notes.md"}: 1:xuv:gij→alpha ZEBRA-7781 line
+```
+
+That verification used a scripted model on a scratch server. It demonstrates the wiring and a controlled continuation case. It does not establish reliability across real hosted models or arbitrarily long tasks. The release record also notes that the first version of the check exposed an ON DISK clipping defect, which was fixed before the release.
+
+The text is taken from the existing record rather than written by a summarizing model. In the executable code, that means decoded, whitespace-normalized, clipped excerpts. Ordinary message excerpts are capped at 240 bytes, frontier text at 700 bytes, and tool arguments at 160 bytes; clipping can add an ellipsis. Avoiding a new paraphrase does not make those excerpts lossless copies of the full messages.
+
+## Where it was implemented
+
+The reference is the public `v1.1.16` tag, commit `a6b1b5d8c6e3a667e8d7436667b17ab16265fbda`. The geometric framing and tool tree were merged on October 10, after v1.1.15. Pinning this release keeps the discussion separate from subsequent application changes.
+
+| Location | Responsibility |
+|---|---|
+| `src/worker/chat/net.zig` | Graph construction, critical chain, protected identities, shortest-path selection, and continuation rendering |
+| `src/worker/chat/engine.zig` | Applies protection before pruning; creates the geometric handoff at engine cuts; retains summary fallbacks and banks observations |
+| `src/worker/chat/belt.zig` | Tool catalogue, bounded tree views, navigation, automatic opening, and learned walk state |
+| `src/worker/chat/context.zig` | Separates durable conversation storage from the bounded history supplied to a model |
+
+Two integration points are especially important. At the engine-cut path, the engine calls `Graph.fromSpan` and `unfold` before falling back to `turnHandoff`. During working-context maintenance, `compactWorking` builds the graph and passes the protected result identities into `pruneToolResults`. [4]
+
+The continuation allowance adapts to the replay window W, in bytes:
+
+![H(W) = max(max(512, min(1400, floor(W/8))), min(6144, floor(W/16))).](/assets/4tope/equation-3.png)
+
+The graph renderer receives H(W)-min(⌊ H(W)/4⌋,400), leaving room for the surrounding carry information. These are byte limits, not exact token counts. The language model's tokenizer determines how much inference context those bytes consume.
+
+`NL_HANDOFF=net` is the default behavior; `NL_HANDOFF=model` selects the model-written handoff. An empty or failed geometric rendering can also use that fallback. Tool findings and engine-observed progress are banked into neuron-db at step boundaries. The memory bank is selected observations and progress, not a guarantee that every byte of every tool result has been indexed. The transcript and file state remain separate sources of continuity.
+
+## The tool tree uses the same separation of responsibilities
+
+A large catalogue is another structure that a model should not have to see whole on every call. In the tool tree, the engine retains the catalogue, paths, visited information, and open groups. The model sees a local view and can use `open_tools` to navigate. [6]
+
+The reference defaults are seven displayed branches, four open groups, and a fallback search after four consecutive navigation rounds without a useful tool call. The engine can pre-open a likely group from the request. A known tool name can open its group and execute in the same round. Closing a group changes what is advertised; it does not remove a known tool from the underlying catalogue.
+
+In v1.1.16 the tree is opt-in with `NL_TOOL_MAP=1`. The release verification reports a scripted small-model run that opened file tools before the first call, navigated with `open_tools`, automatically opened a called tool's branch, and saved its state. The same release reported reducing the security schema from roughly 366 KB to 140 KB through typed schema cleanup and alias handling, about a 61.7% reduction calculated from those rounded figures. That schema reduction is a separate optimization, not a measured consequence of the 4tope graph. [1]
+
+The common design is useful: the engine keeps the larger structure while the model receives a bounded view appropriate to its immediate work. The tool catalogue and conversation history are different structures, and the tests for one do not validate all claims about the other.
+
+## Reproducible implementation benchmarks
+
+The new measurements were run on October 12, 2026 against source copied directly from the v1.1.16 Git objects. The package includes SHA-256 provenance, the unchanged modules, test output, the benchmark generator, and all 84 measured timing rows.
+
+The machine was an AMD Ryzen 7 7800X3D, 8 cores and 16 logical processors, running Windows x86-64. The compiler was Zig 0.16.0. Tests used ReleaseSafe; timings used ReleaseFast and the monotonic awake clock. Each case received three warm-up iterations followed by 21 measured iterations. No model, network request, or neuron-db call participates in the timed algorithm.
+
+The generator produces a linear sequence of lookup steps, each reusing the previous result's distinct identifier, followed by a frontier note. There are 2R+1 message nodes and 3R edges for R lookup rounds. This is a deliberately simple, sparse workload. It does not represent every graph shape an agent can produce.
+
+Each measurement covers graph construction, `protectedIds`, and `unfold` with a 1,400-byte allowance. Allocations are included; deallocation, fixture generation, compilation, and process startup are outside the timed interval. The table reports the median and full observed range of that combined operation.
+
+| Messages | Input bytes | Carry bytes | Median ms | Observed range ms |
+|---:|---:|---:|---:|---:|
+| 21 | 3,230 | 1,036 | 0.0177 | 0.0176–0.0182 |
+| 101 | 15,870 | 1,043 | 0.1098 | 0.1005–0.1170 |
+| 201 | 31,670 | 1,044 | 0.2607 | 0.2568–0.5628 |
+| 501 | 79,370 | 1,051 | 1.0997 | 1.0936–1.1409 |
+
+![Measured time for the reference graph implementation](/assets/4tope/benchmark-latency.png)
+
+*Figure 2. Median combined time with the observed minimum-to-maximum range. These timings measure the graph operations on synthetic spans, not end-to-end agent quality.*
+
+The carry stays small because it is a selected representation. That is not evidence that it preserves every fact from the larger input. In the 501-message case, 250 results belong to the protected critical chain, but the bounded handoff includes only a small portion of the available text. Protection at pruning time and inclusion in the carry are different outcomes.
+
+The graph's critical-path pass is O(V+E). The current shortest-path implementation uses dense vertex scanning and scans incoming dependencies rather than maintaining a precomputed incoming adjacency list. A conservative bound for that implementation is O(V²+VE), which behaves quadratically when the graph remains sparse with E=O(V). The source's simple O(V²) description should be read in that sparse-span setting. The measured growth gives a reason to keep graphs bounded or improve their indexing before claiming large-scale history performance.
+
+## Tests and observed boundaries
+
+The original graph module passed all 4 tests. They cover dependency construction, critical-path protection, supersession and failure handling, bounded rendering on the supplied fixtures, and its readers. The belt module passed all 35 tests, comprising 14 tool-tree tests and 21 imported context tests. The new verification module passed 8 tests: the 4 imported original graph tests plus 4 additional boundary cases. Those counts should not be added as independent tests.
+
+The boundary cases make the scope of the implementation easier to see:
+
+| Case | Reproduced result | Consequence |
+|---|---|---|
+| A 100-result critical chain with a 320-byte carry | All 100 results are in the protected set; the first result's identifier is absent from the carry | Pruning protection does not guarantee that every protected fact fits in a handoff |
+| A fact beyond the ordinary result excerpt | A distinct late marker is omitted | The current excerpt policy can lose a relevant fact without any model-written summary |
+| A valid read followed by a failed edit on the same path | The valid earlier read is marked superseded | Current supersession tests identity and order, without requiring the replacement operation to succeed |
+| A node with 65 selected sibling results and ample allowance | The renderer emits 64 evidence lines | A fixed 64-child traversal buffer limits wide tree rendering |
+
+These checks describe the unchanged release code. They are not patches. The latter two cases identify concrete implementation behavior worth improving, and the first two show why a universal retention claim would be too strong even if the graph routines were otherwise flawless.
+
+The v1.1.16 release record separately reports all nine gates of `scripts/check.ps1 -Full` passing and the two scripted end-to-end demonstrations. That is historical integration evidence from the release record. This paper's new local run is the smaller, reproducible module test and timing run described above. [1]
+
+## What I mean by removing finite chats
+
+I believe a useful assistant should let the same conversation continue as the work grows. The context window should determine the size of the current view, while durable state and retrieval preserve the larger working record. A user should not have to reconstruct the project every time that view changes.
+
+There are two meanings of compaction that need to stay separate. Model-written summarization rewrites a record into new prose. Selecting a bounded view also reduces what is shown, even when its excerpts come from original material. Gary's 4tope removes the additional model-written continuation call when the geometric handoff succeeds. It still performs selection, and the surrounding v1.1.16 engine still performs pruning and can call `summarizeWorkingSpan` when pruning is insufficient.
+
+A fixed-size prompt cannot encode every possible arbitrarily long history without loss. There are more possible histories than fixed-size views. An external archive and retrieval can change that engineering problem, but they do not make the prompt itself infinite or make retrieval infallible. Whether the necessary fact is stored, found, and presented remains observable behavior to test.
+
+My claim for the released implementation is therefore concrete: it uses recorded relationships to protect a dependency path and build a continuation without an extra summarizing inference on the successful path. My larger hypothesis is that this kind of geometry can support conversations that persist across many windows with less drift and repeated work. That hypothesis needs long-run task evidence. Completely eliminating compaction requirements is not a result established by this version.
+
+## The evaluation that should come next
+
+The next comparison should use the same model, task, tools, carry allowance, and overall inference budget across a recent-tail baseline, a model-summary baseline, and the geometric carry. A full-transcript condition can serve as a reference on tasks where it still fits. Once the transcript exceeds the model's window, that reference needs to be described as unavailable rather than silently given a larger budget.
+
+The tasks should require an old exact value, a changed file state, a corrected error, and dependencies across several branches. Multiple seeds and held-out tasks should report completion, exact-fact recovery, repeated tool calls, stale conclusions, total model calls, tokens, latency, and the number of context transitions. Keeping the task and cost controls visible is essential: a smaller tools schema or a larger spend ceiling can help independently of the graph.
+
+An ablation should remove the critical-path protection, replace semantic distance with recency, and remove supersession and failed-route handling in turn. That will show which part of the combined design contributes to an improvement. Wide graphs, long messages, paraphrased identifiers, unsuccessful file mutations, and repeated boundaries belong in the failure set as well as in ordinary tests.
+
+That is the evidence I want the method to stand on. The existing implementation and attached measurements are a starting point people can inspect and reproduce.
+
+## Relationship to earlier work
+
+The broader idea of continuing an agent beyond its immediate context window already has research behind it. MemGPT presents virtual context management using a hierarchy of memory tiers and movement between them. It evaluates document analysis and multi-session chat. That is relevant background for the distinction between a finite active view and longer-lived stored state. [7]
+
+A-MEM organizes agent memories through interconnected notes, dynamic linking, and updates to existing representations. Its focus is memory organization and evolution. Gary's 4tope, as implemented here, focuses on deterministic dependency-path protection and the rendering of a particular working span at a boundary. A broader comparison would be needed before making a claim that this combination is the first of its kind. [8]
+
+The longest-path recurrence on a DAG and Dijkstra's shortest paths are established methods. The geometric framing makes their complementary roles easier to see, while the event representation, weights, text policy, and engine integration determine what the system actually does. Those choices can be evaluated without treating the name as a proof.
+
+## Reproducing this paper
+
+The accompanying package contains the fixed reference modules, their MIT license, the source provenance manifest, `benchmark.zig`, `verification.zig`, and `run_benchmarks.py`. With Zig 0.16.0 installed, run:
+
+```text
+python run_benchmarks.py /path/to/zig
+```
+
+On Windows, supply the path to `zig.exe`. The script runs the module tests, compiles the timing program, and writes `benchmarks/timings.csv` and `benchmarks/results.json`. Timing values will vary across machines and operating conditions. The boundary assertions and source commit are the reproducible parts of the behavioral report.
+
+## References
+
+1. [NL-Veil v1.1.16 release record and scripted verification](https://github.com/gary23w/nl-veil/blob/v1.1.16/docs/release/RELEASE-v1.1.16.md).
+2. [Gary's 4tope reference source in net.zig](https://github.com/gary23w/nl-veil/blob/v1.1.16/src/worker/chat/net.zig), especially graph construction, `criticalChain`, `protectedIds`, and `unfold`.
+3. [Eric W. Weisstein, Polytope, Wolfram MathWorld](https://mathworld.wolfram.com/Polytope.html).
+4. [NL-Veil engine handoff integration](https://github.com/gary23w/nl-veil/blob/v1.1.16/src/worker/chat/engine.zig#L3988) and [working-context protection and folding](https://github.com/gary23w/nl-veil/blob/v1.1.16/src/worker/chat/engine.zig#L13064).
+5. [E. W. Dijkstra, A note on two problems in connexion with graphs, Numerische Mathematik 1, 269–271, 1959](https://doi.org/10.1007/BF01386390).
+6. [Tool-tree source in belt.zig](https://github.com/gary23w/nl-veil/blob/v1.1.16/src/worker/chat/belt.zig).
+7. [Charles Packer and colleagues, MemGPT: Towards LLMs as Operating Systems, 2023](https://arxiv.org/abs/2310.08560).
+8. [Wujiang Xu and colleagues, A-MEM: Agentic Memory for LLM Agents, 2025](https://arxiv.org/abs/2502.12110).
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-65660: The Latest Exploited Microsoft Bug Is One You Already Patched
 DATE       : 2026-10-11
@@ -80,7 +342,7 @@ The thing I keep coming back to is the label. We spend enormous energy on the wo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Day After: AI Companies Are War-Gaming Their Own Worst Headline
 DATE       : 2026-10-09
@@ -194,12 +456,12 @@ The labs are rehearsing the morning after. That is prudent, and it is also a tel
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-85880 and CVE-2026-81963: Two Windows Zero-Days Split The Estate, And Both Sides Were Exploited First
 DATE       : 2026-10-07
 URL        : https://garrettstimpson.ca/posts/2026/10/07/cve-2026-85880-alpc-cve-2026-81963-update-stack-zero-days/
-CVE        : CVE-2026-81963, cve-2026-81963, CVE-2026-85880, cve-2026-85880
+CVE        : cve-2026-81963, CVE-2026-81963, CVE-2026-85880, cve-2026-85880
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-85880, cve-2026-81963, alpc, windows-update-stack, privilege-escalation, zero-day, patch-tuesday, kev
 WORD_COUNT : 1538
@@ -295,12 +557,12 @@ The thing I keep coming back to is the split. Two zero-days, one release, divide
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Nobody Wrote About This: Command Injection in Schneider Electric NetBotz 5
 DATE       : 2026-09-18
 URL        : https://garrettstimpson.ca/posts/2026/09/18/cve-2026-13336-netbotz-5-backup-restore-command-injection/
-CVE        : CVE-2026-13336, cve-2026-13336, CVE-2026-13337, cve-2026-13337
+CVE        : cve-2026-13336, CVE-2026-13336, cve-2026-13337, CVE-2026-13337
 CATEGORIES : exploits, analysis, hardware
 TAGS       : cve-2026-13336, cve-2026-13337, netbotz, schneider-electric, ics, command-injection, hql-injection, threat-intel, patch-tuesday
 WORD_COUNT : 1189
@@ -381,7 +643,7 @@ The worm got the front pages. The camera in the wiring closet got one line in a 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : APT-C-60's 2026 Update: SpyGlace Through Proton Drive, mshta, and a Chain Built on Trusted Services
 DATE       : 2026-09-17
@@ -495,7 +757,7 @@ No CVE. No patch coming. The fix is deciding, in advance, how much you trust the
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Root on the Node Is Root in the Mesh: Spoofing SPIRE Workload Attestation With a Fake Cgroup
 DATE       : 2026-09-16
@@ -648,12 +910,12 @@ Root on the node was always game over for the node. The change is that the node 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : PaperCut's Pre-Auth RCE Hit Hundreds. Patching Is Not Recovery
 DATE       : 2026-09-13
 URL        : https://garrettstimpson.ca/posts/2026/09/13/papercut-preauth-rce-81578-82078/
-CVE        : cve-2026-81578, CVE-2026-81578, cve-2026-82078, CVE-2026-82078
+CVE        : CVE-2026-81578, cve-2026-81578, cve-2026-82078, CVE-2026-82078
 CATEGORIES : exploits, web, rce
 TAGS       : papercut, papercut-ng, papercut-mf, cve-2026-81578, cve-2026-82078, pre-auth-rce, java, database-driver, active-exploitation, greynoise, incident-response
 WORD_COUNT : 2819
@@ -947,7 +1209,7 @@ The September 10 update fixes PaperCut. It does not fix the seven minutes before
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Agent Tesla Doesn't Need VBA to Be Unpatchable. It Needs One Exception
 DATE       : 2026-09-13
@@ -1174,7 +1436,7 @@ The invoice is the story the attacker tells. The Office-to-process handoff is th
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away
 DATE       : 2026-09-08
@@ -1371,7 +1633,7 @@ The costume changes. The thing that brings it back does not.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Five Security Threats Almost Nobody Is Watching Yet
 DATE       : 2026-09-03
@@ -1584,7 +1846,7 @@ The practical review question is simple: when one layer authenticates a fact, wh
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Perfex CRM 3.4.x and Earlier: Unauthenticated to RCE in Three Quiet Steps
 DATE       : 2026-08-18
@@ -1921,7 +2183,7 @@ The boring bugs are the ones that kill you. Patch your Perfex, turn off the migr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-33185 Got Patched, But the Test-Email SSRF Path Is Only Half-Fixed
 DATE       : 2026-08-17
@@ -2069,7 +2331,7 @@ Each one is a small change. Together they close the gap that the CVE-2026-33185 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-99501: When pip install Steals Every SSH Key in Your Agent Through Docker BuildKit
 DATE       : 2026-08-04
@@ -2190,7 +2452,7 @@ Until then, treat `--mount=type=ssh` the way you would treat pasting your privat
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-66066: Reading a Rails Server's Environment Through an Uploaded 'Image'
 DATE       : 2026-08-04
@@ -2307,7 +2569,7 @@ Upgrading to 8.1.3.1 closes it. The part worth remembering is the shape of the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : shellDojo is live — train like they're already inside
 DATE       : 2026-08-03
@@ -2377,7 +2639,7 @@ If any of that sounds like your kind of Friday, the range is live at [shell-dojo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : the veil — v1.0.0-alpha.10
 DATE       : 2026-08-03
@@ -2466,7 +2728,7 @@ This is the final alpha, which means the road to beta starts now. If you run me,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CXL Memory — Disaggregated RAM with No Security Model
 DATE       : 2026-08-02
@@ -2772,7 +3034,7 @@ CXL is the future of data center memory. It's also a future where your data live
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Three Obscure Hardware Attack Vectors You've Never Heard Of
 DATE       : 2026-07-30
@@ -2830,7 +3092,7 @@ Each of these is obscure in its own way — but all three are real, weaponizable
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RowPress — When Leaving a DRAM Row Open Longer Causes Bit Flips (The Rowhammer Evolution Nobody Patched)
 DATE       : 2026-07-30
@@ -3063,7 +3325,7 @@ RowPress is that root cause exposed. And as of DDR5's third generation, it remai
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Platypus — Recovering AES Keys by Reading a Linux File (The RAPL Power Side Channel Nobody Knows About)
 DATE       : 2026-07-29
@@ -3301,7 +3563,7 @@ The Platypus attack is not the last power side channel. It is the first of a gen
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost Disk — NVMe SSD Controller Firmware Rootkits and the Persistent Implant Nobody Is Auditing
 DATE       : 2026-07-28
@@ -3570,7 +3832,7 @@ Until then, the most persistent, forensic-resistant implant isn't hiding in your
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GhostTouch — Injecting Fake Taps into Capacitive Touchscreens Using Electromagnetic Fields
 DATE       : 2026-07-27
@@ -3750,7 +4012,7 @@ A GhostTouch-class attack could be deployed today and no existing enterprise mob
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Light Commands — Laser-Based Audio Injection on Voice-Controllable Systems
 DATE       : 2026-07-26
@@ -3882,7 +4144,7 @@ The Light Commands team published their full paper, video demonstrations, and de
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows 11 DirectWrite Font Fuzzing — System Service Exception via Kernel Font Driver
 DATE       : 2026-07-26
@@ -4139,7 +4401,7 @@ The difference between a BSOD and a working remote code execution exploit is con
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows Kernel Object Namespace — Zero Isolation, Zero Audit, Zero Visibility
 DATE       : 2026-07-25
@@ -4313,7 +4575,7 @@ There is no built-in audit tool, no security baseline, no Group Policy, and no W
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop
 DATE       : 2026-07-18
@@ -4533,7 +4795,7 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
@@ -4734,7 +4996,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
@@ -4817,7 +5079,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
@@ -4929,7 +5191,7 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
@@ -4994,12 +5256,12 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
 URL        : https://garrettstimpson.ca/posts/2026/06/19/rogueplanet-cve-2026-50656-defender-toctou-lpe/
-CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, cve-2026-50656, CVE-2026-50656
+CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, CVE-2026-50656, cve-2026-50656
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-50656, windows-defender, lpe, toctou, oplock, ntfs-junction, nightmare-eclipse
 WORD_COUNT : 1305
@@ -5081,7 +5343,7 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing
 DATE       : 2026-06-18
@@ -5229,7 +5491,7 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag
 DATE       : 2026-06-16
@@ -5303,7 +5565,7 @@ I expect we will find out. Probably sooner than anyone wants.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
@@ -5429,7 +5691,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -5494,7 +5756,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -5557,12 +5819,12 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : CVE-2026-45247, cve-2026-45247
+CVE        : cve-2026-45247, CVE-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1214
@@ -5637,7 +5899,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
@@ -5710,7 +5972,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
@@ -5804,7 +6066,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
@@ -5868,7 +6130,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -5965,7 +6227,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -6047,7 +6309,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -6182,7 +6444,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="044" type="security-research-post">
+<DOCUMENT id="045" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
@@ -6268,12 +6530,12 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="045" type="security-research-post">
+<DOCUMENT id="046" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : CVE-2026-35616, cve-2026-35616
+CVE        : cve-2026-35616, CVE-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1182
@@ -6345,7 +6607,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="046" type="security-research-post">
+<DOCUMENT id="047" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -6441,12 +6703,12 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="047" type="security-research-post">
+<DOCUMENT id="048" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : CVE-2026-20817, cve-2026-20817
+CVE        : cve-2026-20817, CVE-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1052
@@ -6514,7 +6776,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="048" type="security-research-post">
+<DOCUMENT id="049" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -6596,7 +6858,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="049" type="security-research-post">
+<DOCUMENT id="050" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -6735,12 +6997,12 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="050" type="security-research-post">
+<DOCUMENT id="051" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -6825,12 +7087,12 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="051" type="security-research-post">
+<DOCUMENT id="052" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : CVE-2026-34926, cve-2026-34926
+CVE        : cve-2026-34926, CVE-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1153
@@ -6890,12 +7152,12 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="052" type="security-research-post">
+<DOCUMENT id="053" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : CVE-2026-46300, cve-2026-46300
+CVE        : cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1355
@@ -7000,7 +7262,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="053" type="security-research-post">
+<DOCUMENT id="054" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -7112,7 +7374,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="054" type="security-research-post">
+<DOCUMENT id="055" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -7182,7 +7444,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="055" type="security-research-post">
+<DOCUMENT id="056" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -7359,7 +7621,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="056" type="security-research-post">
+<DOCUMENT id="057" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -7453,7 +7715,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="057" type="security-research-post">
+<DOCUMENT id="058" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -7616,7 +7878,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="058" type="security-research-post">
+<DOCUMENT id="059" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -7774,7 +8036,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="059" type="security-research-post">
+<DOCUMENT id="060" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -7908,7 +8170,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="060" type="security-research-post">
+<DOCUMENT id="061" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -8130,7 +8392,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="061" type="security-research-post">
+<DOCUMENT id="062" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -8258,7 +8520,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="062" type="security-research-post">
+<DOCUMENT id="063" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -8465,7 +8727,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="063" type="security-research-post">
+<DOCUMENT id="064" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
@@ -8579,7 +8841,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="064" type="security-research-post">
+<DOCUMENT id="065" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -8763,12 +9025,12 @@ MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="065" type="security-research-post">
+<DOCUMENT id="066" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
+CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1499
@@ -8919,7 +9181,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="066" type="security-research-post">
+<DOCUMENT id="067" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -9072,7 +9334,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="067" type="security-research-post">
+<DOCUMENT id="068" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -9172,12 +9434,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="068" type="security-research-post">
+<DOCUMENT id="069" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : cve-2026-42945, CVE-2026-42945
+CVE        : CVE-2026-42945, cve-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1426
@@ -9323,7 +9585,7 @@ The full advisory is at F5's security portal (K000160932). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="069" type="security-research-post">
+<DOCUMENT id="070" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
@@ -9531,12 +9793,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="070" type="security-research-post">
+<DOCUMENT id="071" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -9646,12 +9908,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="071" type="security-research-post">
+<DOCUMENT id="072" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 913
@@ -9743,7 +10005,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="072" type="security-research-post">
+<DOCUMENT id="073" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -9890,5 +10152,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 72 documents — 2026-10-11T14:27:14Z
+END OF CORPUS — 73 documents — 2026-10-12T13:59:20Z
 ================================================================================
