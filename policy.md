@@ -22,7 +22,9 @@ The AI research assistant available on this site runs entirely within your brows
 
 ## Privacy
 
-This site does not use cookies, tracking pixels, or third-party analytics beyond optional Cloudflare Web Analytics (aggregate traffic data only — no fingerprinting, no personal identifiers). No account registration or personal data collection occurs here.
+This site uses Google Analytics 4 to measure visits, page views, traffic sources, and engagement. Google Analytics uses cookies to distinguish visitors and sessions and processes information such as browser and device details and approximate geographic location. This data helps us understand how readers use the site and improve its content. Google processes Analytics data under [Google's privacy policy](https://policies.google.com/privacy). You can limit Analytics collection with browser tracking controls or [Google's Analytics opt-out browser add-on](https://tools.google.com/dlpage/gaoptout).
+
+Optional Cloudflare Web Analytics provides aggregate traffic measurements without Analytics cookies. No account registration is required to read the site.
 
 ## Copyright & Attribution
 
