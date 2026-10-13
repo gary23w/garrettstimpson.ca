@@ -87,7 +87,8 @@ In `_config.yml`:
 
 - **Comments (Giscus):** enable GitHub **Discussions** on the repo, install the [giscus app](https://giscus.app), then paste the generated `repo_id` and `category_id` into the `giscus:` block. Comments render under each post once both are set.
 - **Agent link:** set `agent_url` to your deployed worker URL to show an "Agent" nav link + a home hero CTA.
-- **Analytics:** paste a Cloudflare Web Analytics token into `cf_analytics_token`.
+- **Google Analytics 4:** set `google_analytics` to the web stream's `G-` measurement ID (Google Analytics → Admin → Data streams → select the web stream). The Google tag loads on every page in production; development builds do not send Analytics events.
+- **Cloudflare Web Analytics (optional):** paste a beacon token into `cf_analytics_token`.
 
 ---
 

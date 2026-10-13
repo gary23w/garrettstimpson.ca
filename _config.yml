@@ -7,6 +7,9 @@ url: "https://garrettstimpson.ca"
 agent_url: ""   # deployed Agent Garrett worker URL (e.g. https://garrettstimpson-agent.<acct>.workers.dev)
 image: /assets/img/og-card.png   # default social/OG card (jekyll-seo-tag)
 
+# Google Analytics 4 — web stream measurement ID (production builds only)
+google_analytics: "G-HS4GJWTH0B"
+
 # Cloudflare Web Analytics — paste your beacon token here
 # Get it from: Cloudflare Dashboard → Analytics → Web Analytics → Add a site
 cf_analytics_token: ""
