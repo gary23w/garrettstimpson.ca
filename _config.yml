@@ -4,7 +4,7 @@ description: >-
   10+ years in offensive security.
 baseurl: ""
 url: "https://garrettstimpson.ca"
-agent_url: ""   # deployed Agent Garrett worker URL (e.g. https://garrettstimpson-agent.<acct>.workers.dev)
+agent_url: "https://agent.garrettstimpson.ca"   # Agent Garrett account and subscription dashboard
 image: /assets/img/og-card.png   # default social/OG card (jekyll-seo-tag)
 
 # Google Analytics 4 — web stream measurement ID (production builds only)
@@ -43,7 +43,7 @@ header_pages:
 exclude:
   - README.md
   - README
-  - agent/
+  - garrett/
   - broker/
   - build_llms.py
   - Gemfile

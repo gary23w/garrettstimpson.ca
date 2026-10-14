@@ -1,28 +1,20 @@
-name: Validate
+name: Keep Agent source private
 
-on:
-  push:
-    paths: ["agent/**", "broker/**"]
-  pull_request:
-    paths: ["agent/**", "broker/**"]
+on: [push, pull_request]
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  public-source-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      - name: Worker syntax
-        run: node --check agent/src/index.js
-      - name: Embedded client script
-        run: node agent/validate.js
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Broker syntax
-        run: python -m py_compile broker/app.py
+          fetch-depth: 0
+      - name: Reject Agent source in public history
+        run: |
+          if [ -n "$(git log --all --format=%H -- agent/ broker/)" ]; then
+            echo "Agent Garrett source belongs in the private garrett repository."
+            exit 1
+          fi
