@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-10-14T11:29:15Z
+GENERATED    : 2026-10-14T17:14:03Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
@@ -375,7 +375,7 @@ On Windows, supply the path to `zig.exe`. The script runs the module tests, comp
 TITLE      : CVE-2026-65660: The Latest Exploited Microsoft Bug Is One You Already Patched
 DATE       : 2026-10-11
 URL        : https://garrettstimpson.ca/posts/2026/10/11/cve-2026-65660-sharepoint-code-injection-exploited-after-disclosure/
-CVE        : CVE-2026-65660, cve-2026-65660
+CVE        : cve-2026-65660, CVE-2026-65660
 CATEGORIES : exploits, rce
 TAGS       : cve-2026-65660, sharepoint, rce, kev, n-day, patch-tuesday, webshell, viettel
 WORD_COUNT : 1175
@@ -554,7 +554,7 @@ The labs are rehearsing the morning after. That is prudent, and it is also a tel
 TITLE      : CVE-2026-85880 and CVE-2026-81963: Two Windows Zero-Days Split The Estate, And Both Sides Were Exploited First
 DATE       : 2026-10-07
 URL        : https://garrettstimpson.ca/posts/2026/10/07/cve-2026-85880-alpc-cve-2026-81963-update-stack-zero-days/
-CVE        : CVE-2026-81963, cve-2026-81963, cve-2026-85880, CVE-2026-85880
+CVE        : CVE-2026-81963, cve-2026-81963, CVE-2026-85880, cve-2026-85880
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-85880, cve-2026-81963, alpc, windows-update-stack, privilege-escalation, zero-day, patch-tuesday, kev
 WORD_COUNT : 1538
@@ -655,7 +655,7 @@ The thing I keep coming back to is the split. Two zero-days, one release, divide
 TITLE      : Nobody Wrote About This: Command Injection in Schneider Electric NetBotz 5
 DATE       : 2026-09-18
 URL        : https://garrettstimpson.ca/posts/2026/09/18/cve-2026-13336-netbotz-5-backup-restore-command-injection/
-CVE        : cve-2026-13336, CVE-2026-13336, CVE-2026-13337, cve-2026-13337
+CVE        : cve-2026-13336, CVE-2026-13336, cve-2026-13337, CVE-2026-13337
 CATEGORIES : exploits, analysis, hardware
 TAGS       : cve-2026-13336, cve-2026-13337, netbotz, schneider-electric, ics, command-injection, hql-injection, threat-intel, patch-tuesday
 WORD_COUNT : 1189
@@ -1008,7 +1008,7 @@ Root on the node was always game over for the node. The change is that the node 
 TITLE      : PaperCut's Pre-Auth RCE Hit Hundreds. Patching Is Not Recovery
 DATE       : 2026-09-13
 URL        : https://garrettstimpson.ca/posts/2026/09/13/papercut-preauth-rce-81578-82078/
-CVE        : cve-2026-81578, CVE-2026-81578, CVE-2026-82078, cve-2026-82078
+CVE        : cve-2026-81578, CVE-2026-81578, cve-2026-82078, CVE-2026-82078
 CATEGORIES : exploits, web, rce
 TAGS       : papercut, papercut-ng, papercut-mf, cve-2026-81578, cve-2026-82078, pre-auth-rce, java, database-driver, active-exploitation, greynoise, incident-response
 WORD_COUNT : 2819
@@ -2429,7 +2429,7 @@ Each one is a small change. Together they close the gap that the CVE-2026-33185 
 TITLE      : CVE-2026-99501: When pip install Steals Every SSH Key in Your Agent Through Docker BuildKit
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-99501-docker-buildkit-ssh-agent-hijack/
-CVE        : cve-2026-99501, CVE-2026-99501
+CVE        : CVE-2026-99501, cve-2026-99501
 CATEGORIES : exploits, supply-chain, devops
 TAGS       : cve-2026-99501, docker, buildkit, ssh-agent, supply-chain, pip, hijack
 WORD_COUNT : 1501
@@ -4893,7 +4893,7 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 TITLE      : ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
 URL        : https://garrettstimpson.ca/posts/2026/07/15/coldfusion-apsb26-68-cvss10-bonanza/
-CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48282, cve-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
+CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, cve-2026-48282, CVE-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
 CATEGORIES : exploits, web, vuln-research
 TAGS       : CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286, adobe, coldfusion, RCE, path-traversal, unrestricted-upload, CISA-KEV, watchtowr
 WORD_COUNT : 1843
@@ -5094,7 +5094,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
 URL        : https://garrettstimpson.ca/posts/2026/07/01/cve-2026-55200-libssh2-transport-read-oob-write/
-CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, cve-2026-55200, CVE-2026-55200
+CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, CVE-2026-55200, cve-2026-55200
 CATEGORIES : exploits, supply-chain
 TAGS       : cve-2026-55200, libssh2, ssh, integer-overflow, rce, curl, supply-chain
 WORD_COUNT : 1276
@@ -5177,7 +5177,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : CVE-2026-31429, cve-2026-31429
+CVE        : cve-2026-31429, CVE-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1277
@@ -5289,7 +5289,7 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : CVE-2026-23111, cve-2026-23111
+CVE        : cve-2026-23111, CVE-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 668
@@ -5354,7 +5354,7 @@ See full writeup at: https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
 URL        : https://garrettstimpson.ca/posts/2026/06/19/rogueplanet-cve-2026-50656-defender-toctou-lpe/
-CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, CVE-2026-50656, cve-2026-50656
+CVE        : CVE-2026-33825, CVE-2026-41091, CVE-2026-45498, cve-2026-50656, CVE-2026-50656
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-50656, windows-defender, lpe, toctou, oplock, ntfs-junction, nightmare-eclipse
 WORD_COUNT : 1305
@@ -5589,7 +5589,7 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 TITLE      : CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag
 DATE       : 2026-06-16
 URL        : https://garrettstimpson.ca/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/
-CVE        : CVE-2026-20182, cve-2026-20245, CVE-2026-20245, cve-2026-20262, CVE-2026-20262
+CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, cve-2026-20262, CVE-2026-20262
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, cve-2026-20262, cve-2026-20245, path-traversal, root, vmanage, zero-day
 WORD_COUNT : 1449
@@ -5917,7 +5917,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : cve-2026-45247, CVE-2026-45247
+CVE        : CVE-2026-45247, cve-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1214
@@ -6542,7 +6542,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1122
@@ -6628,7 +6628,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : CVE-2026-35616, cve-2026-35616
+CVE        : cve-2026-35616, CVE-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1182
@@ -6801,7 +6801,7 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : cve-2026-20817, CVE-2026-20817
+CVE        : CVE-2026-20817, cve-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1052
@@ -6874,7 +6874,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
-CVE        : CVE-2026-0257, cve-2026-0257
+CVE        : cve-2026-0257, CVE-2026-0257
 CATEGORIES : exploits, network-security
 TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
 WORD_COUNT : 1255
@@ -7095,7 +7095,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1297
@@ -8825,7 +8825,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1134
@@ -9891,7 +9891,7 @@ rmmod algif_aead 2>/dev/null
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1326
@@ -10245,5 +10245,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 74 documents — 2026-10-14T11:29:15Z
+END OF CORPUS — 74 documents — 2026-10-14T17:14:03Z
 ================================================================================
