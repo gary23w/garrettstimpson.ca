@@ -1,18 +1,37 @@
 ---
 layout: page
-title: About
+title: About Garrett Stimpson
+nav_title: About
+description: "Garrett Stimpson is a cybersecurity professional and software engineer in the Greater Toronto Area, with 10+ years across offensive and defensive security."
 permalink: /about/
 ---
 
-Garrett Stimpson is a certified cybersecurity professional with over 10 years of experience across offensive security, blue team operations, threat hunting, vulnerability research, and adversary simulation. His work is centred on understanding how attackers operate so defenders can identify, detect, and stop threats before they become incidents.
+Garrett Stimpson is a cybersecurity professional and software engineer based in the Greater Toronto Area, Canada. He has more than a decade of experience across offensive and defensive security, helping protect people and organizations in Canada and the United States.
 
-With expertise in web application security, kernel exploitation, cloud and container security, network protocols, and exploit development, Garrett approaches every vulnerability from both the offensive and defensive perspective. Every exploit is studied to understand not only how it works, but how it can be detected, prevented, and remediated.
+His background combines penetration testing and vulnerability research with Android development, backend systems, and Linux infrastructure. That combination connects two practical questions: how a weakness can be abused, and what evidence shows that the defensive change worked.
 
-This site documents technical research covering in-the-wild exploits, proof of concept analysis, reverse engineering, malware behaviour, detection engineering, and critical CVEs as they emerge. Every write-up includes technical analysis, defensive recommendations, detection opportunities, and practical guidance for security professionals responsible for protecting modern infrastructure.
+## Cybersecurity writing
 
-Garrett is committed to protecting digital identities, businesses, and critical systems from evolving cyber threats. He believes defenders should understand the same tools, techniques, and tradecraft used by attackers so they can build stronger detections, improve incident response, and reduce organisational risk.
+This site publishes Garrett's technical analysis and practical defensive guidance. Topics include vulnerability behaviour, proof-of-concept analysis, Linux and Windows security, software security, and incident response. Articles link to their technical sources and distinguish demonstrations from production incidents.
 
-Security is more than finding vulnerabilities. It is understanding how they are exploited, why they exist, and how to prevent them from being abused. Every article published here is written to help defenders strengthen their environments through technical knowledge, responsible research, and practical defensive strategies.
+Start with [When Is a Vulnerability Actually Fixed? An Evidence Checklist for Defenders]({{ '/posts/2026/10/15/vulnerability-remediation-evidence-checklist/' | relative_url }}), a practical workflow for checking remediation scope, running software, exposure, and recovery. It includes a reusable closure record and a clearly labelled hypothetical example.
 
-All research published on this site is intended for educational, defensive, and authorised security testing purposes. The techniques documented are provided to help the security community understand, detect, mitigate, and remediate real-world threats.
+For a recorded lab demonstration, see [Agent Garrett: Cloud Attack Response]({{ '/posts/2026/10/14/agent-garrett-cloud-attack-response/' | relative_url }}). The article describes an isolated, synthetic incident and the checks used after containment and remediation.
+
+## Software projects
+
+Garrett publishes code as [gary23w on GitHub](https://github.com/gary23w). His public projects include:
+
+- [neuron-db](https://github.com/gary23w/neuron-db), a Rust project for associative text memory without a separate embedding model.
+- [nl-veil](https://github.com/gary23w/nl-veil), a Zig project exploring coordinated AI agents and a shared steering interface.
+
+The repositories provide the current implementation and project documentation.
+
+## Professional profiles
+
+- [LinkedIn: Garrett Stimpson](https://www.linkedin.com/in/garrett-stimpson/)
+- [GitHub: gary23w](https://github.com/gary23w)
+- [about.me: Garrett Stimpson](https://about.me/garrettstimpson)
+
+Research and testing described on this site are intended for educational, defensive, and authorized security work. See the [research policy]({{ '/policy/' | relative_url }}) for scope and responsible use.
 

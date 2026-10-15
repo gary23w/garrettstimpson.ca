@@ -1,7 +1,7 @@
 title: Garrett Stimpson
 description: >-
-  In-the-wild exploits, PoC breakdowns, and vulnerability research.
-  10+ years in offensive security.
+  Cybersecurity research and practical defensive guidance by Garrett Stimpson,
+  a software engineer with 10+ years across offensive and defensive security.
 baseurl: ""
 url: "https://garrettstimpson.ca"
 agent_url: "https://agent.garrettstimpson.ca"   # Agent Garrett account and subscription dashboard
@@ -16,6 +16,14 @@ cf_analytics_token: ""
 
 author:
   name: Garrett Stimpson
+  url: "https://garrettstimpson.ca/about/"
+
+social:
+  name: Garrett Stimpson
+  links:
+    - https://www.linkedin.com/in/garrett-stimpson/
+    - https://github.com/gary23w
+    - https://about.me/garrettstimpson
 
 github_username: gary23w
 
