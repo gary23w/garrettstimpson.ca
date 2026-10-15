@@ -932,6 +932,29 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   border-radius: 7px !important; box-shadow: 0 0 26px rgba(0,255,65,0.06) !important;
 }
 .mcp-page { max-width: 900px !important; margin: 0 auto !important; }
+.mcp-page table {
+  width: 100% !important;
+  margin: 1.8em 0 !important;
+  border-collapse: collapse !important;
+  font-size: 13px !important;
+}
+.mcp-page table th,
+.mcp-page table td {
+  padding: 10px 14px !important;
+  border: 1px solid var(--border) !important;
+  text-align: left !important;
+  overflow-wrap: anywhere;
+}
+.mcp-page table th {
+  background: #061308 !important;
+  color: var(--green) !important;
+  font-weight: 700 !important;
+}
+.mcp-page table td {
+  background: var(--bg-card) !important;
+  color: var(--text) !important;
+}
+.mcp-page table tbody tr:nth-child(even) td { background: #0d190f !important; }
 .mcp-kicker {
   margin: 0 0 8px !important; color: var(--blue-accent) !important;
   font-size: 11px !important; letter-spacing: .12em !important; text-transform: uppercase !important;
