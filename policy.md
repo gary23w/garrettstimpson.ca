@@ -16,9 +16,9 @@ Techniques, proof-of-concept code, and methodology described here are documented
 
 **Use of any technique, code, or method described on this site against systems you do not own or have explicit written authorization to test is illegal and unethical.** The author accepts no responsibility for misuse of information published here.
 
-## Research Agent
+## Agent Garrett
 
-The AI research assistant available on this site runs entirely within your browser session. It does not store your queries, conversation history, or any personal data. Requests are processed by Cloudflare Workers AI and are subject to [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
+Agent Garrett is a separate subscription service at [agent.garrettstimpson.ca](https://agent.garrettstimpson.ca). Its authenticated backend maintains each deployed agent's workspace, tasks, findings, and evidence. Cloudflare runs the gateway and private execution service; connected model and intelligence providers receive the information needed for the features you choose. Keep client secrets and sensitive evidence within your engagement's approved data-handling rules.
 
 ## Privacy
 
