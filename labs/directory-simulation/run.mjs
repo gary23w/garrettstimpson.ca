@@ -19,11 +19,20 @@ export function verifyChain(recording) {
   return previous === recording.finalHash;
 }
 
-export function runScenario(name) {
+export function runScenario(name, policyOverrides = {}) {
   if (!['baseline', 'hardened'].includes(name)) throw new Error(`Unknown scenario: ${name}`);
-  const hardened = name === 'hardened';
+  const policy = {
+    directoryRead: true,
+    directWorkstationRoute: false,
+    delegatedMaintenanceIdentity: name === 'baseline',
+    adminManagementRoute: true,
+    maintenanceCanReadCanary: true,
+    maintenanceCanGrantContinuity: true,
+    detectorEnabled: true,
+    ...policyOverrides,
+  };
   const events = [];
-  const state = { identity: 'lab-analyst', canaryRead: false, durableAccess: false, alerted: false };
+  const state = { identity: 'lab-analyst', managementRouteOpen: false, canaryRead: false, durableAccess: false, alerted: false };
   function record(stage, actor, action, decision, evidence) {
     const previousHash = events.at(-1)?.hash ?? '0'.repeat(64);
     const payload = {
@@ -35,36 +44,37 @@ export function runScenario(name) {
 
   record('scope', 'controller', 'Load synthetic on-prem directory fixture', 'allowed',
     `${LAB}; 4 fictional hosts; no network access`);
-  record('discovery', state.identity, 'Read authorized directory metadata', 'allowed',
-    'Inventory: dc-01, admin-01, files-01, analyst-01');
-  record('segmentation', state.identity, 'Request direct path to files-01', 'blocked',
-    'Simulated Windows Defender Firewall rule denies workstation-to-file management flow');
-
-  if (hardened) {
-    record('identity', state.identity, 'Request delegated maintenance identity', 'blocked',
-      'Delegation removed; only a named, time-bound administrator may assume this role');
-    record('detection', 'lab-detector', 'Review blocked identity transition', 'alerted',
-      'Synthetic identity alert correlated with the blocked management request');
-    state.alerted = true;
-  } else {
-    record('identity', state.identity, 'Request delegated maintenance identity', 'allowed',
-      'Misconfigured lab delegation grants svc-inventory a maintenance role');
+  record('discovery', state.identity, 'Read authorized directory metadata', policy.directoryRead ? 'allowed' : 'blocked',
+    policy.directoryRead ? 'Inventory: dc-01, admin-01, files-01, analyst-01' : 'Directory read policy denies this identity');
+  if (policy.directoryRead) {
+    record('segmentation', state.identity, 'Request direct path to files-01', policy.directWorkstationRoute ? 'allowed' : 'blocked',
+      policy.directWorkstationRoute ? 'Simulated direct workstation route permits management traffic' : 'Simulated Windows Defender Firewall rule denies workstation-to-file management flow');
+    const delegated = policy.delegatedMaintenanceIdentity;
+    record('identity', state.identity, 'Request delegated maintenance identity', delegated ? 'allowed' : 'blocked',
+      delegated ? 'Misconfigured lab delegation grants svc-inventory a maintenance role' : 'Delegation removed; only a named, time-bound administrator may assume this role');
+    if (delegated) {
     state.identity = 'svc-inventory';
-    record('segmentation', state.identity, 'Use approved admin-01 management path', 'allowed',
-      'Simulated firewall permits admin-01-to-files-01 management traffic');
-    record('objective', state.identity, 'Access protected canary record', 'allowed',
-      'Synthetic canary label: FINANCE-QUARTERLY; no real files accessed');
-    state.canaryRead = true;
-    record('continuity', state.identity, 'Add durable LabContinuity role edge', 'allowed',
-      'Synthetic directory state now grants svc-inventory repeat access');
-    state.durableAccess = true;
-    record('detection', 'lab-detector', 'Correlate unusual role grant and protected read', 'alerted',
-      'Synthetic high-severity alert; the chain was not invisible to the detector');
-    state.alerted = true;
+      state.managementRouteOpen = policy.adminManagementRoute;
+      record('segmentation', state.identity, 'Use approved admin-01 management path', state.managementRouteOpen ? 'allowed' : 'blocked',
+        state.managementRouteOpen ? 'Simulated firewall permits admin-01-to-files-01 management traffic' : 'Simulated firewall denies admin-01-to-files-01 management traffic');
+      if (state.managementRouteOpen) {
+        state.canaryRead = policy.maintenanceCanReadCanary;
+        record('objective', state.identity, 'Access protected canary record', state.canaryRead ? 'allowed' : 'blocked',
+          state.canaryRead ? 'Synthetic canary label: FINANCE-QUARTERLY; no real files accessed' : 'Canary access policy denies the maintenance role');
+        if (state.canaryRead) {
+          state.durableAccess = policy.maintenanceCanGrantContinuity;
+          record('continuity', state.identity, 'Add durable LabContinuity role edge', state.durableAccess ? 'allowed' : 'blocked',
+            state.durableAccess ? 'Synthetic directory state now grants svc-inventory repeat access' : 'Continuity grant policy denies the maintenance role');
+        }
+      }
+    }
+    state.alerted = policy.detectorEnabled && (!delegated || state.durableAccess);
+    record('detection', 'lab-detector', delegated ? 'Correlate unusual role grant and protected read' : 'Review blocked identity transition', state.alerted ? 'alerted' : 'clear',
+      state.alerted ? (delegated ? 'Synthetic high-severity alert; the chain was not invisible to the detector' : 'Synthetic identity alert correlated with the blocked management request') : 'Synthetic detector threshold was not met');
   }
 
   const recording = {
-    kind: 'offline-directory-simulation', scenario: name, lab: LAB,
+    kind: 'offline-directory-simulation', scenario: name, lab: LAB, policy,
     limitations: 'Synthetic policy decisions only. No live directory, firewall, AI product, credentials, or persistence mechanism was tested.',
     outcome: {
       objectiveReached: state.canaryRead,
