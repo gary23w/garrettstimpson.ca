@@ -2,6 +2,15 @@
   "kind": "offline-directory-simulation",
   "scenario": "baseline",
   "lab": "corp.example.test",
+  "policy": {
+    "directoryRead": true,
+    "directWorkstationRoute": false,
+    "delegatedMaintenanceIdentity": true,
+    "adminManagementRoute": true,
+    "maintenanceCanReadCanary": true,
+    "maintenanceCanGrantContinuity": true,
+    "detectorEnabled": true
+  },
   "limitations": "Synthetic policy decisions only. No live directory, firewall, AI product, credentials, or persistence mechanism was tested.",
   "outcome": {
     "objectiveReached": true,

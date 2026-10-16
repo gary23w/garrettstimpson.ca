@@ -20,6 +20,8 @@ The exercise models a common assessment question: can a low-privilege identity r
 
 The baseline reached its synthetic objective and modeled repeat access. It did **not** evade the synthetic detector: the role change and protected read produced an alert. In the hardened rerun, removing the delegated identity prevented the rest of the path.
 
+The simulator evaluates each directory, firewall, canary, and role-grant gate. A separate test disables the management route while leaving the delegation mistake in place; the canary then remains unreachable. That checks the chain's dependency on the firewall policy rather than simply printing a fixed success story.
+
 ## Evidence
 
 - [Baseline terminal recording](recordings/baseline.txt) and [machine-readable events](recordings/baseline.json)
