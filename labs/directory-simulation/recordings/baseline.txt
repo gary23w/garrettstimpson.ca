@@ -1,0 +1,25 @@
+DIRECTORY LAB DEMO FOR AGENT GARRETT + NL-VEIL  |  BASELINE
+TARGET: corp.example.test  |  MODE: OFFLINE SIMULATION
+
+[2026-10-16T14:00:00.000Z] ALLOWED scope         Load synthetic on-prem directory fixture
+  evidence: corp.example.test; 4 fictional hosts; no network access
+[2026-10-16T14:00:30.000Z] ALLOWED discovery     Read authorized directory metadata
+  evidence: Inventory: dc-01, admin-01, files-01, analyst-01
+[2026-10-16T14:01:00.000Z] BLOCKED segmentation  Request direct path to files-01
+  evidence: Simulated Windows Defender Firewall rule denies workstation-to-file management flow
+[2026-10-16T14:01:30.000Z] ALLOWED identity      Request delegated maintenance identity
+  evidence: Misconfigured lab delegation grants svc-inventory a maintenance role
+[2026-10-16T14:02:00.000Z] ALLOWED segmentation  Use approved admin-01 management path
+  evidence: Simulated firewall permits admin-01-to-files-01 management traffic
+[2026-10-16T14:02:30.000Z] ALLOWED objective     Access protected canary record
+  evidence: Synthetic canary label: FINANCE-QUARTERLY; no real files accessed
+[2026-10-16T14:03:00.000Z] ALLOWED continuity    Add durable LabContinuity role edge
+  evidence: Synthetic directory state now grants svc-inventory repeat access
+[2026-10-16T14:03:30.000Z] ALERTED detection     Correlate unusual role grant and protected read
+  evidence: Synthetic high-severity alert; the chain was not invisible to the detector
+
+OBJECTIVE REACHED: YES
+DURABLE ACCESS SIMULATED: YES
+DETECTOR ALERTED: YES
+EVIDENCE SHA-256 CHAIN: 1d9c4bbb01d4b8ca295b6d954378c92de91c3b5eedcd5b5d239ec52204ef95e8
+LIMIT: Synthetic policy decisions only. No live directory, firewall, AI product, credentials, or persistence mechanism was tested.

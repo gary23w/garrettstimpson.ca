@@ -1,0 +1,64 @@
+{
+  "kind": "offline-directory-simulation",
+  "scenario": "hardened",
+  "lab": "corp.example.test",
+  "limitations": "Synthetic policy decisions only. No live directory, firewall, AI product, credentials, or persistence mechanism was tested.",
+  "outcome": {
+    "objectiveReached": false,
+    "durableAccessSimulated": false,
+    "detectorAlerted": true
+  },
+  "events": [
+    {
+      "time": "2026-10-16T14:00:00.000Z",
+      "stage": "scope",
+      "actor": "controller",
+      "action": "Load synthetic on-prem directory fixture",
+      "decision": "allowed",
+      "evidence": "corp.example.test; 4 fictional hosts; no network access",
+      "previousHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hash": "2ab71de492fddb0d49a1ef45888e9e8bd5203444234b0a0d4e48ec0caaa19aa6"
+    },
+    {
+      "time": "2026-10-16T14:00:30.000Z",
+      "stage": "discovery",
+      "actor": "lab-analyst",
+      "action": "Read authorized directory metadata",
+      "decision": "allowed",
+      "evidence": "Inventory: dc-01, admin-01, files-01, analyst-01",
+      "previousHash": "2ab71de492fddb0d49a1ef45888e9e8bd5203444234b0a0d4e48ec0caaa19aa6",
+      "hash": "f285981019f54b7bd2d5ad3a575a7455cd53e57272b0dd71692861c98c8e20ea"
+    },
+    {
+      "time": "2026-10-16T14:01:00.000Z",
+      "stage": "segmentation",
+      "actor": "lab-analyst",
+      "action": "Request direct path to files-01",
+      "decision": "blocked",
+      "evidence": "Simulated Windows Defender Firewall rule denies workstation-to-file management flow",
+      "previousHash": "f285981019f54b7bd2d5ad3a575a7455cd53e57272b0dd71692861c98c8e20ea",
+      "hash": "cb420d75007ded926329a848b7dec22638ad8e61f184dd5cc4c22ac40b55301b"
+    },
+    {
+      "time": "2026-10-16T14:01:30.000Z",
+      "stage": "identity",
+      "actor": "lab-analyst",
+      "action": "Request delegated maintenance identity",
+      "decision": "blocked",
+      "evidence": "Delegation removed; only a named, time-bound administrator may assume this role",
+      "previousHash": "cb420d75007ded926329a848b7dec22638ad8e61f184dd5cc4c22ac40b55301b",
+      "hash": "baf0e784f1faab52129f6a189e154b13f5ec92b57200954300027b429ffae64c"
+    },
+    {
+      "time": "2026-10-16T14:02:00.000Z",
+      "stage": "detection",
+      "actor": "lab-detector",
+      "action": "Review blocked identity transition",
+      "decision": "alerted",
+      "evidence": "Synthetic identity alert correlated with the blocked management request",
+      "previousHash": "baf0e784f1faab52129f6a189e154b13f5ec92b57200954300027b429ffae64c",
+      "hash": "f65bef65a3cc9af20555aca09f6b32bff8e9ca564d854f44ee42d77274d716fe"
+    }
+  ],
+  "finalHash": "f65bef65a3cc9af20555aca09f6b32bff8e9ca564d854f44ee42d77274d716fe"
+}

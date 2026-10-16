@@ -1,0 +1,94 @@
+{
+  "kind": "offline-directory-simulation",
+  "scenario": "baseline",
+  "lab": "corp.example.test",
+  "limitations": "Synthetic policy decisions only. No live directory, firewall, AI product, credentials, or persistence mechanism was tested.",
+  "outcome": {
+    "objectiveReached": true,
+    "durableAccessSimulated": true,
+    "detectorAlerted": true
+  },
+  "events": [
+    {
+      "time": "2026-10-16T14:00:00.000Z",
+      "stage": "scope",
+      "actor": "controller",
+      "action": "Load synthetic on-prem directory fixture",
+      "decision": "allowed",
+      "evidence": "corp.example.test; 4 fictional hosts; no network access",
+      "previousHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hash": "2ab71de492fddb0d49a1ef45888e9e8bd5203444234b0a0d4e48ec0caaa19aa6"
+    },
+    {
+      "time": "2026-10-16T14:00:30.000Z",
+      "stage": "discovery",
+      "actor": "lab-analyst",
+      "action": "Read authorized directory metadata",
+      "decision": "allowed",
+      "evidence": "Inventory: dc-01, admin-01, files-01, analyst-01",
+      "previousHash": "2ab71de492fddb0d49a1ef45888e9e8bd5203444234b0a0d4e48ec0caaa19aa6",
+      "hash": "f285981019f54b7bd2d5ad3a575a7455cd53e57272b0dd71692861c98c8e20ea"
+    },
+    {
+      "time": "2026-10-16T14:01:00.000Z",
+      "stage": "segmentation",
+      "actor": "lab-analyst",
+      "action": "Request direct path to files-01",
+      "decision": "blocked",
+      "evidence": "Simulated Windows Defender Firewall rule denies workstation-to-file management flow",
+      "previousHash": "f285981019f54b7bd2d5ad3a575a7455cd53e57272b0dd71692861c98c8e20ea",
+      "hash": "cb420d75007ded926329a848b7dec22638ad8e61f184dd5cc4c22ac40b55301b"
+    },
+    {
+      "time": "2026-10-16T14:01:30.000Z",
+      "stage": "identity",
+      "actor": "lab-analyst",
+      "action": "Request delegated maintenance identity",
+      "decision": "allowed",
+      "evidence": "Misconfigured lab delegation grants svc-inventory a maintenance role",
+      "previousHash": "cb420d75007ded926329a848b7dec22638ad8e61f184dd5cc4c22ac40b55301b",
+      "hash": "7e16a63417f3bd765b599f76ecc313eb64636416766795b1c906498e52d94acb"
+    },
+    {
+      "time": "2026-10-16T14:02:00.000Z",
+      "stage": "segmentation",
+      "actor": "svc-inventory",
+      "action": "Use approved admin-01 management path",
+      "decision": "allowed",
+      "evidence": "Simulated firewall permits admin-01-to-files-01 management traffic",
+      "previousHash": "7e16a63417f3bd765b599f76ecc313eb64636416766795b1c906498e52d94acb",
+      "hash": "2bc9a66f3790cf410deb5270b7f150024cc02fd56c939614fe4d018a9592c1ca"
+    },
+    {
+      "time": "2026-10-16T14:02:30.000Z",
+      "stage": "objective",
+      "actor": "svc-inventory",
+      "action": "Access protected canary record",
+      "decision": "allowed",
+      "evidence": "Synthetic canary label: FINANCE-QUARTERLY; no real files accessed",
+      "previousHash": "2bc9a66f3790cf410deb5270b7f150024cc02fd56c939614fe4d018a9592c1ca",
+      "hash": "0b5b22b9b86d024a918abbacd239fd9113e0597df5fe467f241b689de7af887a"
+    },
+    {
+      "time": "2026-10-16T14:03:00.000Z",
+      "stage": "continuity",
+      "actor": "svc-inventory",
+      "action": "Add durable LabContinuity role edge",
+      "decision": "allowed",
+      "evidence": "Synthetic directory state now grants svc-inventory repeat access",
+      "previousHash": "0b5b22b9b86d024a918abbacd239fd9113e0597df5fe467f241b689de7af887a",
+      "hash": "015725f833ebde2f63abbb4759a491dded77909ad81300732429f5e9a463dbe9"
+    },
+    {
+      "time": "2026-10-16T14:03:30.000Z",
+      "stage": "detection",
+      "actor": "lab-detector",
+      "action": "Correlate unusual role grant and protected read",
+      "decision": "alerted",
+      "evidence": "Synthetic high-severity alert; the chain was not invisible to the detector",
+      "previousHash": "015725f833ebde2f63abbb4759a491dded77909ad81300732429f5e9a463dbe9",
+      "hash": "1d9c4bbb01d4b8ca295b6d954378c92de91c3b5eedcd5b5d239ec52204ef95e8"
+    }
+  ],
+  "finalHash": "1d9c4bbb01d4b8ca295b6d954378c92de91c3b5eedcd5b5d239ec52204ef95e8"
+}

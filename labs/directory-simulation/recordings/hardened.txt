@@ -1,0 +1,19 @@
+DIRECTORY LAB DEMO FOR AGENT GARRETT + NL-VEIL  |  HARDENED
+TARGET: corp.example.test  |  MODE: OFFLINE SIMULATION
+
+[2026-10-16T14:00:00.000Z] ALLOWED scope         Load synthetic on-prem directory fixture
+  evidence: corp.example.test; 4 fictional hosts; no network access
+[2026-10-16T14:00:30.000Z] ALLOWED discovery     Read authorized directory metadata
+  evidence: Inventory: dc-01, admin-01, files-01, analyst-01
+[2026-10-16T14:01:00.000Z] BLOCKED segmentation  Request direct path to files-01
+  evidence: Simulated Windows Defender Firewall rule denies workstation-to-file management flow
+[2026-10-16T14:01:30.000Z] BLOCKED identity      Request delegated maintenance identity
+  evidence: Delegation removed; only a named, time-bound administrator may assume this role
+[2026-10-16T14:02:00.000Z] ALERTED detection     Review blocked identity transition
+  evidence: Synthetic identity alert correlated with the blocked management request
+
+OBJECTIVE REACHED: NO
+DURABLE ACCESS SIMULATED: NO
+DETECTOR ALERTED: YES
+EVIDENCE SHA-256 CHAIN: f65bef65a3cc9af20555aca09f6b32bff8e9ca564d854f44ee42d77274d716fe
+LIMIT: Synthetic policy decisions only. No live directory, firewall, AI product, credentials, or persistence mechanism was tested.
