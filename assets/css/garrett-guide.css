@@ -1,0 +1,7 @@
+.post-content .guide-chapters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:24px 0}
+.post-content .guide-chapters a{display:flex;align-items:baseline;gap:12px;padding:12px 14px;border:1px solid var(--border-dim);border-radius:6px;background:var(--bg-card);font-size:12px;line-height:1.65;text-decoration:none;color:var(--text)}
+.post-content .guide-chapters a:hover,.post-content .guide-chapters a:focus-visible{border-color:var(--green);color:var(--green);background:var(--green-glow)}
+.post-content .guide-chapters time{color:var(--green);font-size:11px;flex-shrink:0}
+.post-content .guide-downloads{font-size:12px}
+.post-content .garrett-walkthrough{scroll-margin-top:90px}
+@media(max-width:620px){.post-content .guide-chapters{grid-template-columns:1fr}}
