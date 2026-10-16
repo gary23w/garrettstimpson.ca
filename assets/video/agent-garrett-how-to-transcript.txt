@@ -1,0 +1,137 @@
+Start here / Your security operator in the cloud
+Agent Garrett helps you watch your website, follow identity exposure leads, and understand what needs attention. This walkthrough uses the real interface. The demonstration account and example incidents are simulated.
+
+Start here / Sign up or sign in
+Open agent dot garrett stimpson dot ca and choose Sign in. Cloudflare handles your account. New users create a Cloudflare account; returning users use their existing login.
+
+Start here / Your workspace, in plain English
+Finish Cloudflare’s verification and review the requested permissions. We skip private account entry in this recording. Your workspace brings together protection, conversations, activity, and settings.
+
+Start here / Follow the four-step guide
+Choose Get started, then Protect my website. The guide walks through your goal, your plan, your agent, and what you want to protect. No terminal or code is needed.
+
+Start here / Choose the plan for automatic protection
+For automatic protection, choose the paid Agent plan at four dollars and ninety-nine cents Canadian per month. The card-required three-day trial covers the MCP and backend API tools; automatic protection starts with paid access.
+
+Start here / Review billing securely
+The live app opens secure Stripe Checkout. Review the price and enter your own payment details there. This recording skips payment and continues with a sample paid plan.
+
+Deploy your agent / Choose your Cloudflare account
+Choose the Cloudflare account you want Garrett to connect to. If setup is incomplete, open Cloudflare, finish its free Workers setup, and check again. You do not need to transfer a domain.
+
+Deploy your agent / Name your cloud operator
+Give the agent a name you will recognize, such as My security operator. Check Cloudflare setup. Garrett hosts the agent backend; your account receives a small connection Worker.
+
+Deploy your agent / Deploy and confirm readiness
+Select Deploy instance. On a new real workspace, the first build can take several minutes. Wait for the ready state, or use Check agent readiness to try again.
+
+Protect your website / Add the website that matters to you
+Continue to Put Garrett to work. Enter a website you own or manage. Your public website address tells Garrett exactly what to watch.
+
+Protect your website / Choose your checks and schedule
+Watch checks public availability and selected changes. Investigate adds bounded evidence gathering. Here we choose Investigate, a five-minute schedule, and text that should appear. Confirm you are authorized to monitor the site.
+
+Protect your website / Start recurring protection
+Select Start protecting my website. Garrett schedules cloud checks. The saved baseline here is sample data; your account shows the observations from its own checks.
+
+Protect your website / Read the last check and next wake
+Open Websites to review the mode, last check, next wake, and recorded activity. A successful check is a last-known observation. Look at the timestamp when deciding what it means.
+
+Protect your website / Choose whether Garrett may recover a version
+For a supported Cloudflare website Worker, open Protection settings and choose Handle. This adds a specific recovery action: restoring a healthy version you approve after a newer deployment repeatedly returns server errors.
+
+Protect your website / Approve only the healthy Worker version
+Load eligible website Workers and select the one serving your site. Read the approval carefully. Garrett verifies the healthy version before saving permission to restore it.
+
+Protect your website / Save the recovery boundary
+Save the mode and check that the approved healthy version is listed. Handle does not edit your site or remove intruders. It recovers the approved Worker version and checks the result.
+
+Set up alerts / Hear from Garrett while you are away
+Open Email alerts. Enter an address you control and turn on service alerts. This is how Garrett can tell you when a website needs attention or an investigation has an update.
+
+Set up alerts / Confirm the address in your inbox
+Save your email preferences, then open the confirmation link sent to your inbox. Alerts stay off until you confirm. We skip inbox access in this recording.
+
+Set up alerts / Test the notification path
+After confirmation, check that Email alerts are on and send a test. Accepted means the sending service accepted the email. Check your inbox and spam folder to confirm delivery.
+
+Protect your identity / Watch the digital interests you choose
+Open Identity protection and add a monitoring target. You can watch an email address, full name, username, company, or domain. Add only your own identity or one you are authorized to represent.
+
+Protect your identity / Understand ownership and search consent
+Enter the address and read the ownership consent. Public leak-post search has a separate opt-in because it sends the target to that search provider. Here, we leave that optional search off.
+
+Protect your identity / Verify before monitoring begins
+Choose Verify and protect this address, then confirm address ownership through the email link. A saved target is not the same as a completed source check. Check its status and coverage.
+
+Protect your identity / Review a lead before drawing conclusions
+After verification, new leads appear under Findings, attribution and activity. This sample notice demonstrates the review screen. An exact mention is a lead to investigate; it does not establish a breach or who caused it.
+
+Protect your identity / Work the response and track follow-up
+Review the containment checklist and removal-request draft. Use official service channels to change passwords, revoke sessions, or request removal. Record actions you actually completed. Garrett can recheck sources, but a missing mention does not prove every copy was erased.
+
+See tater-tot work / Give the operator a clear objective
+Open Agent tasks and create a runtime task. Tater-tot is Garrett’s persistent work cycle: recall useful context, choose an allowed action, inspect the result, measure progress, and remember what it learned.
+
+See tater-tot work / Say what a useful result should contain
+Ask for a report supported by evidence. For example: review my saved website findings and assets, explain what needs attention, and separate confirmed observations from unanswered questions. The task tools define which saved evidence it may read.
+
+See tater-tot work / The cloud schedule continues without your browser
+Save the task. Automatic work normally advances one step per five-minute heartbeat. You can leave this page. For the next example, we advance the sample task so you can see each stage.
+
+See tater-tot work / Pick a tool, then inspect what it returned
+Open the task context. The sample cycle chooses a findings tool, records the intent before execution, and saves the returned evidence. A separate measurement step assesses what that evidence supports.
+
+See tater-tot work / Read the evidence behind the answer
+Expand Observed tool evidence. This is where you check the actual result behind a summary. A tool error, missing source, or old observation should remain visible as a gap.
+
+See tater-tot work / Keep useful context between iterations
+Open Extended memory. Owner notes and useful observations stay with this agent context. The next iteration can recall them instead of beginning from scratch.
+
+See tater-tot work / Tell Garrett what matters to you
+Save a short memory note about your priorities, expected evidence, and existing approval boundaries. Notes guide the work; they do not expand the agent’s permissions.
+
+See tater-tot work / Pause a task when priorities change
+You remain in control. Pause task stops its scheduled progress. Pausing this task does not pause separate website or identity monitors; those have their own controls.
+
+See tater-tot work / Saved context remains available
+The saved priorities are still here after the pause. Memory is useful context, not independent proof. Check the source and timestamp before treating a saved observation as current.
+
+See tater-tot work / Resume, measure, and stop for review
+Resume the task when you are ready. In this sample, a second evidence step leads to owner review. Tasks also stop at their limits or after repeated lack of progress. More activity alone is not success.
+
+A sample incident / From a server error to an approved recovery
+Here is a shortened, scripted incident replay. A newer deployment repeatedly returns server errors. The healthy version was already approved, so the sample recovery restores that version and schedules follow-up checks.
+
+A sample incident / Follow the investigation and action receipts
+Open Evidence and activity, then Agent memory and evidence. Review the observations, chosen actions, recovery receipt, and remaining uncertainty. This is how you inspect what the operator did.
+
+A sample incident / Check the retest before calling it recovered
+The sample follow-up probes returned HTTP two hundred and the expected text. That supports recovered availability at that time. It does not establish attribution or prove that an intruder was removed.
+
+A sample incident / See the work in one timeline
+Live activity brings tool starts, returned results, measurements, and updates together. Filters help you focus. Reading these saved logs does not itself wake the agent container or invoke the model.
+
+Talk to your operator / Ask in plain English
+Open Chat and choose the website, task, or general workspace you want to discuss. Shared contexts keep the conversation attached to the relevant evidence.
+
+Talk to your operator / Ask what changed and what needs attention
+A useful question is: explain the latest evidence, what you checked, what changed, and what still needs my attention. You do not need to know tool names to ask.
+
+Talk to your operator / Read the answer with its limits
+The sample answer explains the recorded retest and the next useful owner actions. It distinguishes saved evidence from a new live check. Ask for observation times and unresolved gaps.
+
+Talk to your operator / Use deliberate controls to schedule work
+Workspace details explains the workflow and offers task controls. Chat uses read-only evidence tools. Starting a task or changing protection settings is a deliberate action; conversation does not silently broaden recovery approval.
+
+Optional: connect more tools / Use the toolkit when you need it
+You can also connect NL-Veil or another MCP client with an instance URL and key. The documentation describes the one hundred and sixty-six tool catalog. Dashboard protection works without an API key or an open AI app.
+
+Your 24/7 setup checklist / Confirm the cloud operator is on watch
+Before leaving, confirm the correct website and mode, a recent check, the next scheduled wake, verified email alerts, and the identity targets you intended to watch. Review any source-coverage gaps.
+
+Your 24/7 setup checklist / Each monitor has its own pause control
+Pause a website here when you want its checks to stop. The card shows that the next wake is paused. Use the corresponding controls for identity monitors and agent tasks.
+
+Your 24/7 setup checklist / Close your browser; keep authorized cloud work running
+Resume and confirm the next wake. Your computer can be off while enabled cloud checks continue within your plan and allowances. Garrett protects configured websites and digital identities; it is not a device-wide firewall or a guarantee of complete internet coverage.
