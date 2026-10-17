@@ -3,13 +3,13 @@ _site/
 .jekyll-cache/
 .jekyll-metadata
 .sass-cache/
-# Python (broker)
+# Python tooling
 __pycache__/
 *.pyc
 .venv/
-# Node (agent dev)
-agent/node_modules/
-agent/.wrangler/
+# Node tooling
+node_modules/
+.wrangler/
 # OS
 .DS_Store
 Thumbs.db
