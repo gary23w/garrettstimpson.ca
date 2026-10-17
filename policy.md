@@ -20,6 +20,14 @@ Techniques, proof-of-concept code, and methodology described here are documented
 
 Agent Garrett is a separate subscription service at [agent.garrettstimpson.ca](https://agent.garrettstimpson.ca). Its authenticated backend maintains each deployed agent's workspace, tasks, findings, and evidence. Cloudflare runs the gateway and private execution service; connected model and intelligence providers receive the information needed for the features you choose. Keep client secrets and sensitive evidence within your engagement's approved data-handling rules.
 
+Agent Garrett can be connected to your existing, authorized workflows and can help assess findings, coordinate defensive work, and act as a security-engineering intermediary. It is intended to support your security efforts—not to replace your judgment, your security team, or other professional advice appropriate to your situation.
+
+**Agent Garrett does not and cannot guarantee complete immunity from cyberattacks, data loss, service disruption, or any other digital threat.** No security product or service can eliminate all risk. Agent Garrett will make reasonable and EXTENSIVE efforts to help protect your digital interests and assets, but its effectiveness depends on factors including your configuration, integrations, permissions, available information, and the threats you face. It may not identify or stop every threat, and its recommendations or actions may be incomplete, delayed, or unsuitable for your circumstances.
+
+Your needs and the defenses required depend on your systems, the sensitivity and value of your assets, your risk tolerance, and any legal, contractual, or regulatory obligations that apply to you. Agent Garrett alone may not provide the level of protection you need. You are responsible for determining whether additional safeguards, qualified security professionals, incident-response support, or other services are appropriate, and for reviewing and authorizing actions taken in your environment.
+
+**By using Agent Garrett, you agree to these terms.** You remain responsible for using the service only with systems and data you are authorized to access, for configuring connected workflows and permissions appropriately, and for decisions made based on its findings or recommendations.
+
 ## Privacy
 
 This site uses Google Analytics 4 to measure visits, page views, traffic sources, and engagement. Google Analytics uses cookies to distinguish visitors and sessions and processes information such as browser and device details and approximate geographic location. This data helps us understand how readers use the site and improve its content. Google processes Analytics data under [Google's privacy policy](https://policies.google.com/privacy). You can limit Analytics collection with browser tracking controls or [Google's Analytics opt-out browser add-on](https://tools.google.com/dlpage/gaoptout).
