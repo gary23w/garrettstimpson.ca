@@ -1,0 +1,22 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:08.000
+Start with a goal. NL-VEIL drives Agent Garrett's MCP tools.
+
+00:00:08.000 --> 00:00:17.000
+First: file_analyze. The Worker captures the complete installer in Cloudflare R2 and records its hash.
+
+00:00:17.000 --> 00:00:27.000
+Next, stored_sample_inspect lists 1,387 archive entries. The evidence points to a Python module: remote_admin.
+
+00:00:27.000 --> 00:00:36.000
+The next tool call dissects that module: 114 code objects, Telegram configuration, and credential-access commands.
+
+00:00:36.000 --> 00:00:49.000
+A focused call traces the browser extractors, encoded text, and memory buffer into Telegram's document-send arguments. Each result determines the next step.
+
+00:00:49.000 --> 00:00:56.000
+These results help defenders detect threats and protect users, accounts, and private information.
+
+00:00:56.000 --> 00:01:00.000
+Agent Garrett. Protect people.

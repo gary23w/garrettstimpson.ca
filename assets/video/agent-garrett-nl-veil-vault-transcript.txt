@@ -1,0 +1,26 @@
+AGENT GARRETT — NL-VEIL AND CLOUDFLARE VAULT ANALYSIS
+
+A 60-second reconstruction based on verified MCP results. The harness view is reconstructed, the bot/admin IDs are fictional, and the token is withheld. Static analysis. Film duration is not a performance benchmark.
+
+0–8 seconds: GOAL
+Start with a goal. NL-VEIL drives Agent Garrett's MCP tools.
+
+8–17 seconds: CAPTURE
+First: file_analyze. The Worker captures the complete installer in Cloudflare R2 and records its hash.
+
+17–27 seconds: UNPACK
+Next, stored_sample_inspect lists 1,387 archive entries. The evidence points to a Python module: remote_admin.
+
+27–36 seconds: DISSECT
+The next tool call dissects that module: 114 code objects, Telegram configuration, and credential-access commands.
+
+36–49 seconds: TRACE
+A focused call traces the browser extractors, encoded text, and memory buffer into Telegram's document-send arguments. Each result determines the next step.
+
+49–56 seconds: RESULTS
+These results help defenders detect threats and protect users, accounts, and private information.
+
+56–60 seconds: PROTECT
+Agent Garrett. Protect people.
+
+No human operator, live credential delivery, affected victim, victim recovery, or takedown was verified.
