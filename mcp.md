@@ -14,7 +14,7 @@ description: Connect Agent Garrett security tools to NL-Veil or another MCP clie
 
 ## What the connection provides
 
-The current backend catalog contains **166 tools**: 94 research and analysis tools and 72 native agent tools. Available tools depend on the deployment and any optional provider or broker integration. The main groups are:
+The backend catalog checked on **21 October 2026** contains **171 tools**: 99 research and analysis tools and 72 native agent tools. Available tools depend on the deployment, account permissions, and any optional provider or broker integration. The main groups are:
 
 | Work | Examples |
 | --- | --- |
