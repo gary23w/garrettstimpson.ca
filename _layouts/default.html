@@ -68,6 +68,10 @@
             {%- endif -%}
           {%- endfor -%}
 
+          {%- if site.discord_url -%}
+          <a class="page-link" href="{{ site.discord_url | escape }}" target="_blank" rel="noopener noreferrer" title="Join the Agent Garrett community">Discord</a>
+          {%- endif -%}
+
           {%- if site.agent_url and site.agent_url != "" -%}
           <a class="page-link agent-link" href="{{ site.agent_url }}" target="_blank" rel="noopener" title="Chat with Agent Garrett">&#9099; Agent</a>
           {%- endif -%}
@@ -110,6 +114,9 @@
             </li>
             {%- endif -%}
             <li><a href="https://www.linkedin.com/in/garrett-stimpson/" rel="me"><span>Garrett Stimpson on LinkedIn</span></a></li>
+            {%- if site.discord_url -%}<li><a href="{{ site.discord_url | escape }}"><span>join Agent Garrett on Discord</span></a></li>{%- endif -%}
+            {%- if site.twitch_url -%}<li><a href="{{ site.twitch_url | escape }}"><span>watch on Twitch</span></a></li>{%- endif -%}
+            {%- if site.youtube_url -%}<li><a href="{{ site.youtube_url | escape }}"><span>watch on YouTube</span></a></li>{%- endif -%}
             <li><a href="{{ '/about/' | relative_url }}"><span>about Garrett Stimpson</span></a></li>
             <li><a href="{{ '/feed.xml' | relative_url }}"><span>rss / feed.xml</span></a></li>
           </ul>
@@ -131,7 +138,7 @@
     if (!canvas) return;
     var ctx = canvas.getContext('2d');
     var cols, drops, animId;
-    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    var chars = '01アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホ';
     var nameDrop = 'Garrett Stimpson';
 
     function resize() {
