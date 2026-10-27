@@ -1,4 +1,5 @@
 <!-- Cloudflare Web Analytics -->
+{% if page.robots %}<meta name="robots" content="{{ page.robots | escape }}">{% endif %}
 {% if site.cf_analytics_token and site.cf_analytics_token != "" %}
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js"
         data-cf-beacon='{"token": "{{ site.cf_analytics_token }}"}'></script>
