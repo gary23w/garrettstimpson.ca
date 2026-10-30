@@ -900,8 +900,14 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 /* ============================================================
    AGENT LINK / HERO CTA
    ============================================================ */
-.site-nav .agent-link { color: var(--blue-accent) !important; border-color: var(--border) !important; }
-.site-nav .agent-link:hover { color: var(--bg) !important; background: var(--blue-accent) !important; box-shadow: 0 0 12px rgba(0,212,255,0.4) !important; }
+.site-nav .agent-link,
+.site-nav .agent-link:hover {
+  color: var(--blue-accent) !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.site-nav .agent-link:hover { text-shadow: 0 0 8px rgba(0,212,255,0.5) !important; }
 .site-nav .mcp-link {
   color: var(--green) !important;
   border-color: rgba(0,255,65,0.35) !important;
