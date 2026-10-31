@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing"
+seo_title: "The Embedded Controller Attack Surface Nobody Is Auditing"
 date: 2026-06-18
 categories: [hardware-security, firmware]
 tags: [Embedded-Controller, EC, ACPI, SPI-flash, firmware-persistence, JTAG, SMM]

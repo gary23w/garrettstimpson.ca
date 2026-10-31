@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection"
+seo_title: "VoidStealer Steals Chrome's App-Bound Key via Breakpoint"
 date: 2026-06-02
 categories: [malware, analysis]
 tags: [VoidStealer, ABE-bypass, infostealer, hardware-breakpoint, debugger, chrome, mitre-attack, windows]

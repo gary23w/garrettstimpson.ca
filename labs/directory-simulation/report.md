@@ -1,3 +1,10 @@
+---
+layout: doc
+title: "On-prem directory lab: recorded simulation"
+description: "Recorded baseline and hardened runs of a deterministic, offline policy simulation of a fictional on-prem directory. No live infrastructure was contacted."
+last_modified_at: 2026-10-16
+---
+
 # On-prem directory lab: recorded simulation
 
 **Run date:** 2026-10-16

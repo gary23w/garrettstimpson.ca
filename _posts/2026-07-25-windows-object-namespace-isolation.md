@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Windows Kernel Object Namespace — Zero Isolation, Zero Audit, Zero Visibility"
+seo_title: "Windows Kernel Object Namespace: Zero Isolation or Audit"
 date: 2026-07-25
 categories: [windows, kernel, security-research, dacl, lateral-movement]
 tags: [Windows, kernel-objects, NULL-DACL, BaseNamedObjects, session-isolation, DACL, named-objects, cross-component-attack, PoC]

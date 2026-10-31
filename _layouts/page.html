@@ -1,0 +1,16 @@
+---
+layout: default
+---
+{%- comment -%} minima 2.5.1's page layout plus the build-time table of contents (set `toc: false` to skip it). {%- endcomment -%}
+<article class="post">
+
+  <header class="post-header">
+    <h1 class="post-title">{{ page.title | escape }}</h1>
+  </header>
+
+  <div class="post-content">
+    {%- unless page.toc == false -%}{%- include post-toc.html html=content -%}{%- endunless -%}
+    {{ content }}
+  </div>
+
+</article>

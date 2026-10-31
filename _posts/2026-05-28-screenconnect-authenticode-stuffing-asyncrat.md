@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers"
+seo_title: "How Attackers Weaponize Signed ScreenConnect Installers"
 date: 2026-05-28
 categories: [malware, analysis]
 tags: [connectwise, screenconnect, asyncrat, authenticode, lolbas, rmm-abuse, mitre-attack]

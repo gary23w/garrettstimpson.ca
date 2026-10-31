@@ -1,0 +1,28 @@
+---
+layout: default
+---
+{%- include topic-posts.html slug=page.topic -%}
+<article class="post topic-page">
+  <header class="post-header">
+    <a class="post-back" href="{{ '/topics/' | relative_url }}">&larr; all topics</a>
+    <h1 class="post-title">{{ page.title | escape }}</h1>
+    <p class="topic-intro">{{ topic_entry.description | escape }} {{ topic_posts.size }} posts, newest first.</p>
+  </header>
+
+  <ul class="post-list">
+    {%- for post in topic_posts -%}
+    <li class="post-card">
+      <a class="post-card-link" href="{{ post.url | relative_url }}">
+        <div class="post-card-meta">
+          <span class="post-date">{{ post.date | date: "%Y.%m.%d" }}</span>
+          <span class="post-read">~{{ post.content | number_of_words | divided_by: 200 | plus: 1 }} min</span>
+        </div>
+        <h2 class="post-card-title">{{ post.title | escape }}</h2>
+        {%- if post.excerpt -%}
+        <p class="post-card-excerpt">{{ post.excerpt | strip_html | strip_newlines | truncate: 200 }}</p>
+        {%- endif -%}
+      </a>
+    </li>
+    {%- endfor -%}
+  </ul>
+</article>

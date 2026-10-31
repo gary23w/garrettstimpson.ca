@@ -20,6 +20,15 @@ cf_analytics_token: ""
 author:
   name: Garrett Stimpson
   url: "https://garrettstimpson.ca/about/"
+  # Person entity for structured data (_includes/seo.html); wording from about.md.
+  description: "Cybersecurity professional and software engineer based in the Greater Toronto Area, Canada."
+  location: "Greater Toronto Area, Canada"
+  knows_about:
+    - Penetration testing
+    - Vulnerability research
+    - Android development
+    - Backend systems
+    - Linux infrastructure
 
 social:
   name: Garrett Stimpson
@@ -37,6 +46,10 @@ theme: minima
 minima:
   skin: dark
 
+# Minified CSS output (jekyll-sass-converter)
+sass:
+  style: compressed
+
 plugins:
   - jekyll-feed
   - jekyll-seo-tag
@@ -47,6 +60,7 @@ permalink: /posts/:year/:month/:day/:title/
 header_pages:
   - about.md
   - policy.md
+  - topics/index.md
   - tags.md
   - search.md
 

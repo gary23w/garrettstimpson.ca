@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You"
+seo_title: "Lumma Stealer Is Back, Now Using Windows Terminal"
 date: 2026-05-29
 categories: [malware, analysis]
 tags: [lumma-stealer, clickfix, infostealer, windows-terminal, mitre-attack, castleloader]

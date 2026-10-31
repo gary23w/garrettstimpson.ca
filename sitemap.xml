@@ -1,0 +1,37 @@
+---
+layout: null
+sitemap: false
+---
+{%- comment -%}
+  Replaces jekyll-sitemap's output (the plugin skips generation when this file exists)
+  so listing pages carry the date of their newest post and noindex pages stay out.
+  Pages set last_modified_at when their content changes.
+{%- endcomment -%}
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+{%- assign sitemap_latest = site.posts.first.date %}
+{%- for sitemap_page in site.html_pages %}
+  {%- if sitemap_page.sitemap == false or sitemap_page.url == "/404.html" %}{% continue %}{% endif %}
+  {%- if sitemap_page.robots and sitemap_page.robots contains "noindex" %}{% continue %}{% endif %}
+  {%- assign sitemap_lastmod = sitemap_page.last_modified_at %}
+  {%- if sitemap_page.url == "/" or sitemap_page.url == "/tags/" or sitemap_page.url == "/topics/" %}
+    {%- assign sitemap_lastmod = sitemap_latest %}
+  {%- elsif sitemap_page.layout == "topic" %}
+    {%- include topic-posts.html slug=sitemap_page.topic %}
+    {%- assign sitemap_lastmod = topic_posts.first.date %}
+  {%- endif %}
+  <url>
+    <loc>{{ sitemap_page.url | absolute_url | xml_escape }}</loc>
+    {%- if sitemap_lastmod %}
+    <lastmod>{{ sitemap_lastmod | date_to_xmlschema }}</lastmod>
+    {%- endif %}
+  </url>
+{%- endfor %}
+{%- for sitemap_post in site.posts %}
+  {%- if sitemap_post.sitemap == false %}{% continue %}{% endif %}
+  <url>
+    <loc>{{ sitemap_post.url | absolute_url | xml_escape }}</loc>
+    <lastmod>{{ sitemap_post.last_modified_at | default: sitemap_post.date | date_to_xmlschema }}</lastmod>
+  </url>
+{%- endfor %}
+</urlset>

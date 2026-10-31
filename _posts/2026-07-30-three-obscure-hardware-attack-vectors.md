@@ -2,8 +2,8 @@
 layout: post
 title: "Three Obscure Hardware Attack Vectors You've Never Heard Of"
 date: 2026-07-30
-categories: hardware, exploits, vuln-research
-tags: hardware-hacking, GhostWrite, RISC-V, T-Head, CVE-2024-27907, TPM, SPI-sniffing, Prime+Abort, CPU-side-channel, Intel-TSX, physical-attack
+categories: [hardware, exploits, vuln-research]
+tags: [hardware-hacking, GhostWrite, RISC-V, T-Head, CVE-2024-27907, TPM, SPI-sniffing, Prime+Abort, CPU-side-channel, Intel-TSX, physical-attack]
 excerpt: "GhostWrite, TPM SPI bus sniffing, and Prime+Abort — three wildly different hardware attacks that most defenders never even knew existed."
 ---
 

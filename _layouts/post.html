@@ -1,15 +1,17 @@
 ---
 layout: default
 ---
-<article class="post" itemscope itemtype="https://schema.org/BlogPosting">
+{%- include page-topics.html -%}
+<article class="post">
   <header class="post-header">
     <a class="post-back" href="{{ '/' | relative_url }}">&larr; all research</a>
-    <h1 class="post-title" itemprop="name headline">{{ page.title | escape }}</h1>
+    <h1 class="post-title">{{ page.title | escape }}</h1>
     <div class="post-meta">
-      <span class="post-author" itemprop="author" itemscope itemtype="https://schema.org/Person">By <a href="{{ '/about/' | absolute_url }}" itemprop="url"><span itemprop="name">{{ page.author | default: site.author.name | escape }}</span></a></span>
-      <span class="post-date"><time datetime="{{ page.date | date_to_xmlschema }}" itemprop="datePublished">{{ page.date | date: "%Y.%m.%d" }}</time></span>
+      <span class="post-author">By <a href="{{ '/about/' | absolute_url }}" rel="author">{{ page.author | default: site.author.name | escape }}</a></span>
+      <span class="post-date"><time datetime="{{ page.date | date_to_xmlschema }}">{{ page.date | date: "%Y.%m.%d" }}</time></span>
+      {%- if page.last_modified_at -%}<span class="post-date post-updated">updated <time datetime="{{ page.last_modified_at | date_to_xmlschema }}">{{ page.last_modified_at | date: "%Y.%m.%d" }}</time></span>{%- endif -%}
       <span class="post-read">~{{ page.content | number_of_words | divided_by: 200 | plus: 1 }} min read</span>
-      {%- if page.categories.size > 0 -%}<span class="post-cats">{{ page.categories | join: " / " }}</span>{%- endif -%}
+      {%- if page_topics.size > 0 -%}<span class="post-cats">{%- for topic in page_topics -%}<a href="{{ '/topics/' | append: topic.slug | append: '/' | relative_url }}">{{ topic.name }}</a>{%- unless forloop.last %} / {% endunless -%}{%- endfor -%}</span>{%- endif -%}
     </div>
     {%- if page.tags.size > 0 -%}
     <div class="post-tags">{%- for tag in page.tags -%}<span class="tag">{{ tag }}</span>{%- endfor -%}</div>
@@ -24,7 +26,8 @@ layout: default
     </div>
   </header>
 
-  <div class="post-content" itemprop="articleBody">
+  <div class="post-content">
+    {%- include post-toc.html html=content -%}
     {{ content }}
   </div>
 

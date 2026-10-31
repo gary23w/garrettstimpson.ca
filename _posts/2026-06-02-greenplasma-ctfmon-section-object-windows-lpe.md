@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it"
+seo_title: "GreenPlasma: A SYSTEM Shell Hiding Inside CTFMON"
 date: 2026-06-02
 categories: [exploits, windows]
 tags: [greenplasma, ctfmon, lpe, windows, section-objects, nightmare-eclipse]

@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "RowPress — When Leaving a DRAM Row Open Longer Causes Bit Flips (The Rowhammer Evolution Nobody Patched)"
+seo_title: "RowPress: DRAM Bit Flips From Rows Held Open Longer"
 date: 2026-07-30
 categories: [hardware, exploits, cpu-architecture, memory-attacks]
 tags: [RowPress, Rowhammer, DRAM, bit-flip, memory-corruption, privilege-escalation, DDR4, DDR5, physical-attack, CVE-2023-28962]

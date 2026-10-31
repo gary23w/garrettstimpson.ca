@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "How to Use Agent Garrett: Your Security Operator in the Cloud"
+seo_title: "How to Use Agent Garrett: Security Operator in the Cloud"
 date: 2026-10-16 09:00:00 -0400
 author: Garrett Stimpson
 permalink: /posts/2026/10/16/how-to-use-agent-garrett/
@@ -9,6 +10,10 @@ tags: [agent-garrett, getting-started, website-protection, identity-monitoring, 
 excerpt: "An 11-minute video guide to signing in, deploying your agent, protecting a website, setting up alerts, and following Garrett's persistent work cycle. No terminal required."
 description: "Learn to set up Agent Garrett for recurring cloud security checks, verified email alerts, identity monitoring, approved website recovery, and evidence-backed conversations."
 image: /assets/img/agent-garrett-how-to-poster.png
+video:
+  url: /assets/video/agent-garrett-how-to.mp4
+  poster: /assets/img/agent-garrett-how-to-poster.png
+  duration: PT11M14S
 ---
 
 You should be able to put a security tool to work without learning a terminal first. This walkthrough starts at the sign-in screen and follows the setup through to an agent watching a website from the cloud.

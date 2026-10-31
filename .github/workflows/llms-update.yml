@@ -23,18 +23,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Regenerate llms.txt
+      - name: Regenerate llms.txt and llms-full.txt
         run: python3 build_llms.py
 
       - name: Commit and push if changed
         run: |
           git config user.name  "gary23w"
           git config user.email "garystimpson03@gmail.com"
-          git add llms.txt
+          git add llms.txt llms-full.txt
           if git diff --cached --quiet; then
-            echo "llms.txt unchanged — nothing to commit."
+            echo "llms files unchanged — nothing to commit."
           else
-            COUNT=$(grep -c '<DOCUMENT' llms.txt || true)
+            COUNT=$(grep -c '<DOCUMENT' llms-full.txt || true)
             git commit -m "chore(llms): regenerate corpus — ${COUNT} documents"
             git pull --rebase origin main
             git push
