@@ -52,6 +52,9 @@ This file returns a monotonically increasing 32-bit counter representing the tot
 
 ---
 
+![Diagram of the Platypus attack, from sharing a CPU core with an AES victim to recovering the AES-128 key from RAPL energy readings.](/assets/figures/platypus-rapL-power-side-channel-aes-key-recovery-diagram.svg){: width="640" height="686" loading="lazy"}
+*RAPL power side-channel attack on AES, as described in this post.*
+
 ## The Mechanism: Why Power Consumption Leaks Secrets
 
 The central insight behind every power side channel is that **different CPU instructions consume measurably different amounts of power**, and those differences correlate with the data being processed.
@@ -229,3 +232,8 @@ The Platypus attack is not the last power side channel. It is the first of a gen
 *CVE-2020-8694, CVE-2020-8695. National Vulnerability Database.*
 *Screaming Channels (CHES 2019) — related work on wireless SoC power side channels.*
 *Hertzbleed (USENIX Security 2022) — related work on frequency-scaling side channels.*
+
+## Sources
+
+- [NVD: CVE-2020-8694](https://nvd.nist.gov/vuln/detail/CVE-2020-8694)
+- [NVD: CVE-2020-8695](https://nvd.nist.gov/vuln/detail/CVE-2020-8695)

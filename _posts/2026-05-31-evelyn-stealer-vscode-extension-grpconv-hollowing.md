@@ -26,6 +26,9 @@ There is also a second delivery path. A ClickFix-style variant uses malvertising
 
 ---
 
+![Step diagram of the Evelyn Stealer chain from a trojan VS Code extension through grpconv.exe hollowing to FTP exfiltration.](/assets/figures/evelyn-stealer-vscode-extension-grpconv-hollowing-diagram.svg){: width="640" height="582" loading="lazy"}
+*Evelyn Stealer infection chain, as described in this post.*
+
 ## What Makes It Work
 
 The piece worth your attention is the injection target. `grpconv.exe` is the Program Group Converter, a signed Microsoft binary left over from the Windows 9x to NT migration. On a normal box it runs approximately never. So when Evelyn picks it as the host for process hollowing (T1055.012), the attacker gets a payload running under a trusted, signed image name. The cost is that anything spawning or writing into `grpconv.exe` is, by itself, an anomaly. The malware traded stealth on the image name for a giant tell on the behavior. I will take that trade as a defender every single time.
@@ -130,3 +133,10 @@ rule Evelyn_Stealer_Behavioral_Strings {
 On the prevention side, the boring controls are the ones that bite here. Lock VS Code extension installs to an allowlist and block sideloaded VSIX. Application control that denies `grpconv.exe` execution outright costs you nothing and removes the host. Constrained Language Mode and PowerShell script-block logging turn the downloader stage loud. And tell your developers, plainly, that their workstation is part of the software supply chain now. A theme extension is an executable with their cloud tokens in reach.
 
 Commodity stealer, clever delivery. The part that should stick with you is the audience. Attackers are spending real effort to land on developer machines specifically, and the marketplace you trust for tooling is now an initial-access vector. Treat it like one.
+
+## Sources
+
+- [From Extension to Infection: An In-Depth Analysis of the Evelyn Stealer Campaign Targeting Software Developers (Trend Micro)](https://www.trendmicro.com/en/research/26/a/analysis-of-the-evelyn-stealer-campaign.html)
+- [Evelyn Stealer Malware Abuses VS Code Extensions to Steal Developer Credentials and Crypto (The Hacker News)](https://thehackernews.com/2026/01/evelyn-stealer-malware-abuses-vs-code.html)
+- [Researchers Find Malicious VS Code, Go, npm, and Rust Packages Stealing Developer Data (The Hacker News)](https://thehackernews.com/2025/12/researchers-find-malicious-vs-code-go.html)
+- [Process Injection: Process Hollowing (T1055.012) (MITRE ATT&CK)](https://attack.mitre.org/techniques/T1055/012/)

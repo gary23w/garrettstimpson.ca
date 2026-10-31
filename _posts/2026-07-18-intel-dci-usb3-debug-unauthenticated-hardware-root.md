@@ -32,6 +32,9 @@ Intel took that interface and routed it through the laptop's own USB-C or USB3-A
 
 The protocol is called **USB3-Debug** (or DCI-OB, "on-board"). It's a USB Physical Layer variant that tunnels JTAG traffic over the USB3 SuperSpeed differential pairs. The same cable you use to charge your phone can, with the right PD handshake, give an attacker direct hardware access to your machine's CPU.
 
+![Six-step diagram of the Intel DCI attack path, from plugging a USB-C cable into a sleeping laptop to leaving with no trace.](/assets/figures/intel-dci-usb3-debug-unauthenticated-hardware-root-diagram.svg){: width="640" height="686" loading="lazy"}
+*Physical attack path through Intel DCI, as described in this post.*
+
 ## Why Nobody Talks About It
 
 Here's the thing: OEMs don't document this feature. You will not find "DCI Debug Port" in the user manual for a ThinkPad X1 Carbon or a Dell Latitude 7490. You won't find a switch for it in the BIOS setup menu. Intel publishes the details in their PCH datasheets and EDS (External Design Specification) documents, but those are thick, boring, and behind NDAs or restricted access walls. The security community has known about DCI since at least 2017, but knowledge of it never really crossed over from the hardware hacker fringe into mainstream defensive security.
@@ -211,3 +214,9 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 *— Garrett Stimpson*
 
 *Thanks to Eric Sesterhenn, Fabian Berg, and the REhints team for the original research and open-source tools that made this accessible to the community.*
+
+## Sources
+
+- [Intel SA-00079](https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00079.html)
+- [Black Hat 2017 — DCI talk by Eric Sesterhenn & Fabian Berg](https://www.blackhat.com/us-17/briefings.html#direct-connect-interface-the-intels-hidden-debug-port)
+- [TcDci — open-source DCI implementation on GitHub](https://github.com/REhints/TcDci)

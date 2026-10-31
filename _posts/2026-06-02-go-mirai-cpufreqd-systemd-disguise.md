@@ -13,6 +13,9 @@ On June 1st a reporter going by NullBlue67 dropped two ELF binaries onto Malware
 
 What caught my eye is the rest of the tag set: `go`, `http-flood`, `cpufreqd-disguise`. This is not the usual C-compiled Mirai droplet that a thousand IoT cameras already host. It is a Go program, and the honeypot operator left a comment that fills in the gaps nicely. Captured over SSH, origin Spain, internal module name `c2c/cmd/agent`, HTTP flood implemented with the `fasthttp` library, and persistence through a systemd unit pretending to be `cpufreqd`. Go 1.26.3. Debug info not stripped. That last detail is going to matter.
 
+![Step diagram of the Go Mirai variant from SSH entry through cpufreqd systemd persistence to C2-driven HTTP floods.](/assets/figures/go-mirai-cpufreqd-systemd-disguise-diagram.svg){: width="640" height="478" loading="lazy"}
+*Go Mirai cpufreqd variant attack chain, as described in this post.*
+
 ## What makes it work
 
 Start with how it stays alive. The bot installs itself as a systemd service, and it picks the name `cpufreqd` on purpose. `cpufreqd` is a real, old Linux daemon that adjusts CPU frequency based on policy. Most admins have heard the name, few have it actually installed, and almost nobody audits it. So a unit file sitting at `/etc/systemd/system/cpufreqd.service` or under `/usr/lib/systemd/system/` reads as boring infrastructure. That is the whole trick. MITRE files this under T1543.002 (Create or Modify System Process: Systemd Service) combined with T1036.005 (Masquerading: Match Legitimate Name or Location). Systemd executes whatever `ExecStart` points at on every boot, runs it as root if the unit lives in the system directories, and restarts it for you if it dies. The attacker gets free reliability engineering from the OS.
@@ -125,3 +128,7 @@ On the host, Sysmon for Linux is your friend. Event ID 1 (process creation) catc
 Watch the systemd directories directly. An auditd watch on `/etc/systemd/system/` and `/usr/lib/systemd/system/` flags new `.service` files as they are written. Then verify ownership: a real distro daemon belongs to a package, so `dpkg -S /etc/systemd/system/cpufreqd.service` or `rpm -qf` returning "no package owns" on something claiming to be `cpufreqd` is your tell. There are public Sigma rules for systemd service creation under the auditd category that map cleanly onto this. For mitigation, the boring advice is the advice that works: kill password SSH and use keys, put fail2ban or equivalent in front of the daemon, and filter egress so a compromised host cannot reach arbitrary C2 or pour L7 floods outward. The bot needs the network to matter. Take the network away.
 
 This one is not sophisticated. It is a clean example of where commodity Linux malware is heading, though: Go for portability, a legitimate service name for cover, and a fast HTTP library doing the loud work. The unstripped symbols are a gift. Read them while they last.
+
+## Sources
+
+- [bazaar.abuse.ch/sample/5bf67d64e94a8ed6b81a0855fee52626eb0f4caf1772518fc240](https://bazaar.abuse.ch/sample/5bf67d64e94a8ed6b81a0855fee52626eb0f4caf1772518fc2404883030451c2/)

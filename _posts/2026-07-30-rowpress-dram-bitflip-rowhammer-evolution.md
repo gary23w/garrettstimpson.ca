@@ -41,6 +41,9 @@ RowPress shows that TRR and RFM are looking at the wrong signal.
 
 ---
 
+![Diagram of RowPress, from holding a DRAM aggressor row open to bit flips in adjacent victim rows that TRR does not catch.](/assets/figures/rowpress-dram-bitflip-rowhammer-evolution-diagram.svg){: width="640" height="582" loading="lazy"}
+*RowPress bit-flip mechanism, as described in this post.*
+
 ## The RowPress Mechanism
 
 ### What Changes
@@ -224,3 +227,7 @@ RowPress is that root cause exposed. And as of DDR5's third generation, it remai
 *Frigo et al. "TRRespass: Exploiting the Many Sides of Target Row Refresh." IEEE S&P 2020.*
 *Jattke et al. "Blacksmith: Rowhammering at Scale via Determinized Row Activation." IEEE S&P 2023.*
 *Micron TN-04-81. "DDR5 RFM and RFMn Guidelines." Technical Note.*
+
+## Sources
+
+- [NVD: CVE-2023-28962](https://nvd.nist.gov/vuln/detail/CVE-2023-28962)

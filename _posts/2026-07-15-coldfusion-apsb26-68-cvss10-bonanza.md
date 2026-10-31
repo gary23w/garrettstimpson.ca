@@ -80,6 +80,9 @@ The researchers described it in characteristically blunt terms during their July
 
 > *"We can write a file anywhere on the filesystem. Since ColdFusion serves CFM templates from its web root, we can simply write a .cfm shell and execute it."*
 
+![Diagram of the CVE-2026-48282 attack chain, from an unauthenticated RDS FILEIO request to a .cfm shell and remote code execution.](/assets/figures/coldfusion-apsb26-68-cvss10-bonanza-diagram.svg){: width="640" height="582" loading="lazy"}
+*Attack chain for CVE-2026-48282, as described in this post.*
+
 ## The Unrestricted Upload: CVE-2026-48276
 
 While CVE-2026-48282 is the headline grabber due to confirmed active exploitation, CVE-2026-48276 is arguably worse in coverage. It is an unrestricted file upload vulnerability (CWE-434) in a different code path that also allows an unauthenticated attacker to upload a file with a dangerous type.
@@ -192,3 +195,12 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 ---
 
 *Based on analysis from [watchTowr Labs](https://labs.watchtowr.com/its-37oc-and-all-we-can-think-about-is-coldfusion-adobe-coldfusion-security-bulletin-apsb26-68-cve-bonanza/), [KEVIntel](https://kevintel.io), [Resecurity](https://www.resecurity.com/blog/article/cve-2026-48282-adobe-coldfusion-rds-path-traversal-leading-to-rce), [Hive Pro](https://www.hivepro.com/threat-advisory/coldfusion-path-traversal-cve-2026-48282-under-active-attack), [BleepingComputer](https://www.bleepingcomputer.com/news/security/max-severity-adobe-coldfusion-flaw-now-exploited-in-attacks/), and [CISA](https://www.cisa.gov/news-events/alerts/2026/07/07/cisa-adds-one-known-exploited-vulnerability-catalog).*
+
+## Sources
+
+- [watchTowr Labs](https://labs.watchtowr.com/its-37oc-and-all-we-can-think-about-is-coldfusion-adobe-coldfusion-security-bulletin-apsb26-68-cve-bonanza/)
+- [KEVIntel](https://kevintel.io)
+- [Resecurity](https://www.resecurity.com/blog/article/cve-2026-48282-adobe-coldfusion-rds-path-traversal-leading-to-rce)
+- [Hive Pro](https://www.hivepro.com/threat-advisory/coldfusion-path-traversal-cve-2026-48282-under-active-attack)
+- [BleepingComputer](https://www.bleepingcomputer.com/news/security/max-severity-adobe-coldfusion-flaw-now-exploited-in-attacks/)
+- [CISA](https://www.cisa.gov/news-events/alerts/2026/07/07/cisa-adds-one-known-exploited-vulnerability-catalog)

@@ -37,6 +37,9 @@ The controller's firmware — the **Flash Translation Layer (FTL)** management c
 
 That firmware update pathway is the entry point.
 
+![Diagram of an NVMe firmware implant, from OS-level firmware download and commit to read interception, host DMA and a hidden enclave.](/assets/figures/nvme-ssd-controller-firmware-rootkit-persistent-implant-diagram.svg){: width="640" height="686" loading="lazy"}
+*SSD controller firmware implant chain, as described in this post.*
+
 ## The Firmware Update Attack Surface
 
 The NVMe specification defines the Firmware Download and Firmware Commit commands:
@@ -254,9 +257,16 @@ Until then, the most persistent, forensic-resistant implant isn't hiding in your
 
 *References:*
 - *Cai, A. et al. "Evil Maid Just Got Worse: SSD Firmware Attacks." (2015)*
-- *OpenSSD Project / Cosmos+ OpenSSD, https://openssd-project.org/*
+- *OpenSSD Project / Cosmos+ OpenSSD, <https://openssd-project.org/*>
 - *Withers, A. "NVMe Firmware Security Analysis." (2022)*
 - *NVMe Express Base Specification, Rev 2.0c — Section 8.10: Firmware Update Commands*
 - *DMTF DSP0274 — Security Protocol and Data Model (SPDM) Specification*
 - *TCG Storage Architecture Core Specification 2.0*
 - *Zheng, Y. et al. "Your SSD Is Not Yours — DMA Attacks via NVMe Controller." (NDSS 2024 Workshop)*
+
+## Sources
+
+- [Pandora's Box in Your SSD: The Untold Dangers of NVMe (arXiv)](https://arxiv.org/abs/2411.00439)
+- [Self-Encrypting Deception: Weaknesses in the Encryption of Solid State Drives (IEEE S&P 2019)](https://research.ou.nl/en/publications/self-encrypting-deception-weaknesses-in-the-encryption-of-solid-s/)
+- [Forensic Issues and Techniques to Improve Security in SSD with Flex Capacity Feature (arXiv)](https://arxiv.org/abs/2112.13923)
+- [include/linux/nvme.h (Linux kernel)](https://raw.githubusercontent.com/torvalds/linux/master/include/linux/nvme.h)

@@ -30,6 +30,9 @@ CAPE sandbox analysis: [https://www.capesandbox.com/analysis/68500/](https://www
 
 ---
 
+![Six-step diagram of the ClearFake Go DLL from a fake update and rundll32 launch through ntdll unhooking and sandbox exit.](/assets/figures/clearfake-golang-dll-ntdll-unhook-diagram.svg){: width="640" height="686" loading="lazy"}
+*ClearFake Go DLL execution and evasion chain, as described in this post.*
+
 ## What Makes It Work
 
 ClearFake is a JavaScript-based distribution framework, active since mid-2023, that operates by injecting malicious scripts into compromised WordPress sites. The victim visits a normal-looking website, gets served a fake "Your browser is out of date" or fake reCAPTCHA overlay, and is prompted to download an "update." As of early 2025, ClearFake had infected roughly 9,300 sites and upgraded its payload obfuscation by routing stage-two JavaScript through Binance Smart Chain contracts, making infrastructure takedowns harder. Recent campaigns have also converged with the ClickFix technique, prompting PowerShell execution instead of a direct download.
@@ -213,3 +216,8 @@ Kernel-level detection: Monitor for `NtMapViewOfSection` calls where the source 
 **Mitigation:** The ntdll unhooking bypass is not fully preventable from userland. The architectural answer is kernel-level monitoring via ETW (Event Tracing for Windows) providers that watch section mapping operations, or a driver-based EDR component that hooks at a level the userland DLL cannot reach. For environments without kernel-level EDR, constrain rundll32 execution via WDAC or AppLocker to signed, known DLLs only — that kills this delivery method before the DLL even loads.
 
 The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar Stealer, and multiple loaders through a network of 9,000+ compromised WordPress sites. Blocking the delivery layer (WordPress site compromise cleanup, browser-level script blocking) is more scalable than trying to catch each new dropper variant, especially when the dropper is this good at hiding.
+
+## Sources
+
+- [bazaar.abuse.ch/sample/2f6435c735dc6361121d8b675cc954e42dc53dd9eb64029bfee9](https://bazaar.abuse.ch/sample/2f6435c735dc6361121d8b675cc954e42dc53dd9eb64029bfee9f53d3853073f/)
+- [capesandbox.com/analysis/68500](https://www.capesandbox.com/analysis/68500/)

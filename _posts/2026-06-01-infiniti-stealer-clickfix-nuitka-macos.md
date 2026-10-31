@@ -21,6 +21,9 @@ C2 panel: `Infiniti-stealer[.]com`
 
 Apple's built-in XProtect did not flag the early samples, which is the usual reason these families stay alive. The Malwarebytes writeup by Stefan Dasic is the primary source here, with binary analysis credited to Marcelo Rivero.
 
+![Step diagram of the Infiniti Stealer chain from a fake Cloudflare CAPTCHA paste through a Nuitka-compiled payload to credential theft.](/assets/figures/infiniti-stealer-clickfix-nuitka-macos-diagram.svg){: width="640" height="582" loading="lazy"}
+*Infiniti Stealer infection chain, as described in this post.*
+
 ## What makes it work
 
 The delivery half is pure social engineering. ClickFix does not exploit a bug. It exploits you. MITRE tracks it as T1204.004, Malicious Copy and Paste, added to ATT&CK in March 2025 once this stopped being a curiosity and became a wave.
@@ -87,3 +90,7 @@ On the file side, the IOCs are concrete. The dropper drops a debug log at `/tmp/
 Mitigations are mostly about the human in the loop. No legitimate CAPTCHA has ever asked anyone to open Terminal and paste a command. Say that to your users until they are sick of hearing it. For fleets, restrict who can run `xattr` and `curl | bash` patterns where you can, keep XProtect and the OS current so the platform-level ClickFix mitigations from Tahoe stay in force, and treat any developer machine with loose `.env` hygiene as a credential-leak waiting to happen. The fix for the Terminal-paste vector exists at the OS level now. The fix for the people pasting commands is education, and that one never fully ships.
 
 Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-intel/2026/03/infiniti-stealer-a-new-macos-infostealer-using-clickfix-and-python-nuitka](https://www.malwarebytes.com/blog/threat-intel/2026/03/infiniti-stealer-a-new-macos-infostealer-using-clickfix-and-python-nuitka)
+
+## Sources
+
+- [malwarebytes.com/blog/threat-intel/2026/03/infiniti-stealer-a-new-macos-info](https://www.malwarebytes.com/blog/threat-intel/2026/03/infiniti-stealer-a-new-macos-infostealer-using-clickfix-and-python-nuitka)

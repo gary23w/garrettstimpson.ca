@@ -49,6 +49,9 @@ KERNELBASE.dll  ← Base kernel services
 
 A crash in any layer is a potential entry point. A **controlled** crash — an integer overflow leading to a heap buffer under-allocation leading to a controlled write — is remote code execution.
 
+![Diagram of the font fuzzing pipeline, from seed fonts and mutators through GDI harnesses to a KERNELBASE.dll overflow and bugcheck.](/assets/figures/directwrite-font-fuzz-windows-bsod-diagram.svg){: width="640" height="686" loading="lazy"}
+*Font fuzzing pipeline and crash chain, as described in this post.*
+
 ## The Fuzzing Pipeline
 
 I built a three-stage pipeline targeting the full Windows font stack:
@@ -248,3 +251,8 @@ The difference between a BSOD and a working remote code execution exploit is con
 *This research was conducted on a local Windows 11 machine for educational and defensive purposes. The fuzzing pipeline is designed to find vulnerabilities so they can be reported and fixed — not to develop weaponised exploits. All findings will be responsibly disclosed to Microsoft.*
 
 *The fontfuzz pipeline source code is not published with this post. It is retained for further research and responsible disclosure coordination.*
+
+## Sources
+
+- [NVD: CVE-2023-36710](https://nvd.nist.gov/vuln/detail/CVE-2023-36710)
+- [NVD: CVE-2021-24093](https://nvd.nist.gov/vuln/detail/CVE-2021-24093)

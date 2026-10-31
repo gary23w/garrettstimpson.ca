@@ -186,6 +186,9 @@ if __name__ == "__main__":
     main()
 ```
 
+![Malvertising chain model: cloaked redirect, decoded ClickFix command and three hunt rule hits](/assets/figures/malvertising-spyware-paid-ads-deep-dive-poc-output.svg){: width="1053" height="385" loading="lazy"}
+*Output of the PoC model above, run on 2026-10-31 with Python 3.13.14.*
+
 Running it produces:
 
 ```
@@ -227,10 +230,18 @@ Because the delivery is social engineering rather than exploitation, traditional
 
 ## Sources
 
-- Cloudforce One, malvertising dropper campaign research: https://blog.cloudflare.com
-- Elastic Security Labs, OXLOADER and CastleStealer Russian malvertising disclosure: https://www.elastic.co/security-labs
-- Palo Alto Unit 42, "Fix the Click: Preventing the ClickFix Attack Vector": https://unit42.paloaltonetworks.com/preventing-clickfix-attack-vector/
-- Netskope, "Lumma Stealer: Fake CAPTCHAs and New Techniques to Evade Detection": https://www.netskope.com/blog/lumma-stealer-fake-captchas-new-techniques-to-evade-detection
-- Cloudflare, "Loot, load, and repeat: dissecting the Lumma Stealer playbook": https://blog.cloudflare.com
-- eSentire, "Lumma Stealer ClickFix Distribution": https://www.esentire.com/security-advisories/lumma-stealer-clickfix-distribution
-- NHIMG, "Malvertising and SEO Poisoning Guide: Fake Downloads": https://nhimg.org/malvertising-and-seo-poisoning-guide
+- [Cloudforce One, malvertising dropper campaign research](https://blog.cloudflare.com)
+- [Elastic Security Labs, OXLOADER and CastleStealer Russian malvertising disclosure](https://www.elastic.co/security-labs)
+- [Palo Alto Unit 42, "Fix the Click: Preventing the ClickFix Attack Vector"](https://unit42.paloaltonetworks.com/preventing-clickfix-attack-vector/)
+- [Netskope, "Lumma Stealer: Fake CAPTCHAs and New Techniques to Evade Detection"](https://www.netskope.com/blog/lumma-stealer-fake-captchas-new-techniques-to-evade-detection)
+- [Cloudflare, "Loot, load, and repeat: dissecting the Lumma Stealer playbook"](https://blog.cloudflare.com)
+- [eSentire, "Lumma Stealer ClickFix Distribution"](https://www.esentire.com/security-advisories/lumma-stealer-clickfix-distribution)
+- [NHIMG, "Malvertising and SEO Poisoning Guide: Fake Downloads"](https://nhimg.org/malvertising-and-seo-poisoning-guide)
+
+## Sources
+
+- [Lost in relocation: analysis of a new loader distributing CASTLESTEALER (Elastic Security Labs)](https://www.elastic.co/security-labs/oxloader-malware-loader-infostealer)
+- [Lumma Stealer: Breaking down the delivery techniques and capabilities of a prolific infostealer (Microsoft Threat Intelligence)](https://www.microsoft.com/en-us/security/blog/2025/05/21/lumma-stealer-breaking-down-the-delivery-techniques-and-capabilities-of-a-prolific-infostealer/)
+- [Loot, load, and repeat: dissecting the Lumma Stealer playbook (Cloudflare Cloudforce One)](https://www.cloudflare.com/cloudforce-one/research/loot-load-repeat-dissecting-the-lumma-stealer-playbook)
+- [Large scale Google Ads campaign targets utility software (Malwarebytes)](https://www.malwarebytes.com/blog/news/2024/10/large-scale-google-ads-campaign-targets-utility-software)
+- [Acquire Infrastructure: Malvertising (T1583.008) (MITRE ATT&CK)](https://attack.mitre.org/techniques/T1583/008/)

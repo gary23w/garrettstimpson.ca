@@ -13,7 +13,7 @@ excerpt: "A fresh Prometei ELF hit MalwareBazaar this morning with the same UPX-
 **Family:** Prometei  
 **First seen:** 2026-05-28 08:21 UTC  
 **Reporter:** c2hunter  
-**MalwareBazaar:** https://bazaar.abuse.ch/sample/4d039c8a8570724cee76221274efc873d8a5f552dc4336160e08bd47db2651aa/
+**MalwareBazaar:** <https://bazaar.abuse.ch/sample/4d039c8a8570724cee76221274efc873d8a5f552dc4336160e08bd47db2651aa/>
 
 ---
 
@@ -24,6 +24,9 @@ This morning a fresh Prometei ELF landed on MalwareBazaar alongside two companio
 Prometei is a cross-platform botnet that first surfaced in July 2020 and has been under active development since at least 2016. It targets both Linux and Windows, mines Monero using XMRig, steals credentials, and maintains long-term persistence through a modular architecture. Unit 42 documented a significant resurgence starting in March 2025, and based on what's still flowing into threat feeds six months later, the operators are not slowing down. This latest ELF is version three or four of the Linux variant, packed with a technique that has been tripping up analysts repeatedly.
 
 ---
+
+![Six-step diagram of Prometei on Linux from SSH brute-force and a UPX JSON trailer to cron persistence and Monero mining.](/assets/figures/prometei-botnet-linux-upx-json-trick-diagram.svg){: width="640" height="686" loading="lazy"}
+*Prometei Linux infection chain, as described in this post.*
 
 ## What Makes It Work
 
@@ -198,3 +201,10 @@ For network-based detection, the C2 IP `152.36.128.18` hitting `/cgi-bin/p.cgi` 
 Disable SSH password authentication entirely. Key-based auth removes the brute-force vector in one change. Patch MS17-010 if any Windows boxes remain unpatched (they do, I keep seeing them in engagements). Monitor CPU usage anomalies for unexpected spikes, which are often the first observable sign of a miner on a system that has not been fully hardened. And build that JSON trailer check into your malware pipeline so UPX-packed samples with appended config blobs do not slip through unpacked.
 
 The campaign is active. The technique is reproducible across new variants. Worth making sure your detections cover this specific packing pattern.
+
+## Sources
+
+- [Resurgence of the Prometei Botnet (Palo Alto Networks Unit 42)](https://unit42.paloaltonetworks.com/prometei-botnet-2025-activity/)
+- [Prometei Evolves: Stairwell identifies new variants and publishes 3 new YARA rules](https://stairwell.com/resources/prometei-evolves-stairwell-identifies-new-variants-and-publishes-3-new-yara-rules/)
+- [Prometei botnet and its quest for Monero (Cisco Talos)](https://blog.talosintelligence.com/prometei-botnet-and-its-quest-for-monero/)
+- [Prometei botnet improves modules and exhibits new capabilities in recent updates (Cisco Talos)](https://blog.talosintelligence.com/prometei-botnet-improves/)
