@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Platypus — Recovering AES Keys by Reading a Linux File (The RAPL Power Side Channel Nobody Knows About)"
+seo_title: "Platypus: Recovering AES Keys via the RAPL Side Channel"
 date: 2026-07-29
 categories: [hardware, side-channel, exploits, cpu-architecture]
 tags: [RAPL, platypus, power-side-channel, AES, key-recovery, CVE-2020-8694, intel-architecture, MSR, speculative-execution-alternative, cpu-security]

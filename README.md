@@ -11,7 +11,7 @@ In-the-wild exploit analysis, CVE breakdowns, and offensive security research.
 
 - **`/` (Jekyll site)** — the blog: dark terminal theme, matrix rain, responsive nav, post cards, tags, full-text search, reading progress, code-copy, share buttons, Giscus comments, RSS, and an Open Graph card.
 - **Agent Garrett** — the subscription security service is linked from the site as a separate product.
-- **`llms.txt`** — a RAG corpus of every post, rebuilt daily by GitHub Actions.
+- **`llms.txt`** — a short Markdown index of the site (topics and every post), and **`llms-full.txt`** — the full text of every post, both rebuilt daily by GitHub Actions.
 
 ---
 
@@ -28,10 +28,10 @@ In `_config.yml`:
 ## How the corpus works
 
 ```
-_posts/*.md  ──► build_llms.py ──► llms.txt   (GitHub Action, daily)
+_posts/*.md  ──► build_llms.py ──► llms.txt + llms-full.txt   (GitHub Action, daily)
 ```
 
-`llms.txt` is a structured `<DOCUMENT>`-delimited format — chunk by document for embeddings, or inject as context as-is.
+`llms.txt` follows the llms.txt proposal: an H1, a one-line summary and linked sections. `llms-full.txt` is a structured `<DOCUMENT>`-delimited corpus — chunk by document for retrieval, or inject as context as-is.
 
 ---
 

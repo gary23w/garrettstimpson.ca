@@ -1,8 +1,9 @@
 ---
-layout: page
+layout: doc
 title: On-prem directory lab
 permalink: /directory-lab/
 description: A transparent, reproducible offline directory assessment simulation for Agent Garrett and NL-Veil.
+last_modified_at: 2026-10-16
 ---
 
 # A directory assessment you can inspect
@@ -25,7 +26,7 @@ This is a model of decisions and evidence handling. It is **not** a live penetra
 
 The baseline path reached its synthetic objective **and was detected**. The hardened rerun stopped before the protected record. That gives an assessor both an outcome and a control change to retest.
 
-The [source, report, text recordings, and hash-linked JSON evidence](https://github.com/gary23w/garrettstimpson.ca/tree/main/labs/directory-simulation) are available for review. Run the lab locally with Node.js 22 or newer; it does not open sockets or alter the machine's directory or firewall.
+The [source, report, text recordings, and hash-linked JSON evidence](https://github.com/gary23w/garrettstimpson.ca/tree/main/labs/directory-simulation) are available for review, along with the rendered [simulation overview]({{ '/labs/directory-simulation/' | relative_url }}) and [recorded report]({{ '/labs/directory-simulation/report/' | relative_url }}). Run the lab locally with Node.js 22 or newer; it does not open sockets or alter the machine's directory or firewall.
 
 ## What Garrett contributes to a real engagement
 

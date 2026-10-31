@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Agent Tesla Doesn't Need VBA to Be Unpatchable. It Needs One Exception"
+seo_title: "Agent Tesla Doesn't Need VBA. It Needs One Exception"
 date: 2026-09-13
 categories: [malware, email, defense]
 tags: [agent-tesla, vba, macros, malspam, phishing, microsoft-office, powershell, amsi, obfuscation, vba-stomping, mark-of-the-web, attack-surface-reduction]

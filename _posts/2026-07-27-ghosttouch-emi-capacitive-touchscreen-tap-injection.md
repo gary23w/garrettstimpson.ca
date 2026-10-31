@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "GhostTouch — Injecting Fake Taps into Capacitive Touchscreens Using Electromagnetic Fields"
+seo_title: "GhostTouch: Injecting Fake Taps Into Touchscreens via EMI"
 date: 2026-07-27
 categories: [hardware, exploits, iot, side-channels]
 tags: [ghosttouch, electromagnetic, capacitive-touchscreen, CCS, smartphone, hardware-attack, EM-injection, touch-controller, physical-attack, ITO]

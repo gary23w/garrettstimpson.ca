@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR"
+seo_title: "ClearFake's Go-Compiled DLL Unhooks ntdll to Blind EDR"
 date: 2026-05-29
 categories: [malware, analysis]
 tags: [clearfake, golang, dll, ntdll-unhooking, evasion, rundll32, mitre-attack]

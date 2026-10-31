@@ -1,0 +1,13 @@
+{%- comment -%}
+  Sets `page_topics` to the _data/topics.yml entries whose categories overlap
+  the given post's (include.post, default: page). The first entry is primary.
+{%- endcomment -%}
+{%- assign topics_post = include.post | default: page -%}
+{%- assign page_topics = "" | split: "" -%}
+{%- for topic in site.data.topics -%}
+  {%- assign topic_hit = false -%}
+  {%- for cat in topics_post.categories -%}
+    {%- if topic.categories contains cat -%}{%- assign topic_hit = true -%}{%- endif -%}
+  {%- endfor -%}
+  {%- if topic_hit -%}{%- assign page_topics = page_topics | push: topic -%}{%- endif -%}
+{%- endfor -%}

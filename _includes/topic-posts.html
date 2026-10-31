@@ -1,0 +1,13 @@
+{%- comment -%}
+  Sets `topic_posts` to the posts (newest first) whose categories overlap the
+  categories of the _data/topics.yml entry with slug include.slug.
+{%- endcomment -%}
+{%- assign topic_entry = site.data.topics | where: "slug", include.slug | first -%}
+{%- assign topic_posts = "" | split: "" -%}
+{%- for topic_post in site.posts -%}
+  {%- assign topic_post_hit = false -%}
+  {%- for cat in topic_post.categories -%}
+    {%- if topic_entry.categories contains cat -%}{%- assign topic_post_hit = true -%}{%- endif -%}
+  {%- endfor -%}
+  {%- if topic_post_hit -%}{%- assign topic_posts = topic_posts | push: topic_post -%}{%- endif -%}
+{%- endfor -%}

@@ -2,6 +2,9 @@
 layout: page
 title: Search
 permalink: /search/
+description: "Search the research posts on garrettstimpson.ca by title, tag or keyword."
+sitemap: false
+robots: noindex, follow
 ---
 
 <input id="site-search" class="search-box" type="search" placeholder="search research — title, tag, or keyword…" autocomplete="off" autofocus>

@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "The Ghost Disk — NVMe SSD Controller Firmware Rootkits and the Persistent Implant Nobody Is Auditing"
+seo_title: "The Ghost Disk: NVMe SSD Controller Firmware Rootkits"
 date: 2026-07-28
 categories: [hardware, exploits, forensics, defense]
 tags: [NVMe, SSD, firmware-rootkit, persistent-implant, DMA-attack, PCIe, storage-forensics, bus-master, FTL, NAND]

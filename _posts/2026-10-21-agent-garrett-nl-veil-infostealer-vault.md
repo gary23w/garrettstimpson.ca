@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Inside the Infostealer: Agent Garrett, NL-VEIL, and the Cloudflare Vault"
+seo_title: "Inside the Infostealer: NL-VEIL and the Cloudflare Vault"
 date: 2026-10-21 17:00:00 -0400
 author: Garrett Stimpson
 permalink: /posts/2026/10/21/agent-garrett-nl-veil-infostealer-vault/
@@ -9,6 +10,10 @@ tags: [agent-garrett, nl-veil, mcp, malware-analysis, infostealer, cloudflare, i
 excerpt: "A 92.5 MB installer, 1,387 archive entries, and a credential-output path to Telegram. A closer look at the real MCP calls behind Agent Garrett's latest case film."
 description: "Follow Agent Garrett's private Cloudflare vault analysis of a suspicious PDF-viewer installer, presented through an NL-VEIL harness with real MCP results and a 60-second video."
 image: /assets/img/agent-garrett-nl-veil-vault-poster.png
+video:
+  url: /assets/video/agent-garrett-nl-veil-vault.mp4
+  poster: /assets/img/agent-garrett-nl-veil-vault-poster.png
+  duration: PT1M
 ---
 
 A suspicious download rarely introduces itself as a credential stealer. It gives you an ordinary reason to trust it: open a document, install a viewer, get back to work. The person clicking it has something else to do. That is the opening these campaigns depend on.
@@ -20,7 +25,7 @@ I wanted to know what was inside it, what it was built to collect, and where tha
 Here is the one-minute version. The rest of this post opens up the steps that go by quickly on screen.
 
 <figure class="agent-demo" style="margin: 2rem 0;">
-  <video controls playsinline preload="metadata" width="1920" height="1080" poster="{{ '/assets/img/agent-garrett-nl-veil-vault-poster.png' | relative_url }}" aria-label="Agent Garrett MCP investigation presented through an NL-VEIL harness, from a goal prompt to Cloudflare vault analysis" style="display:block; width:100%; height:auto; border:1px solid var(--border); border-radius:10px; background:#020705;">
+  <video controls playsinline preload="metadata" width="1920" height="1080" poster="{{ '/assets/img/agent-garrett-nl-veil-vault-poster.webp' | relative_url }}" aria-label="Agent Garrett MCP investigation presented through an NL-VEIL harness, from a goal prompt to Cloudflare vault analysis" style="display:block; width:100%; height:auto; border:1px solid var(--border); border-radius:10px; background:#020705;">
     <source src="{{ '/assets/video/agent-garrett-nl-veil-vault.mp4' | relative_url }}" type="video/mp4">
     <track kind="captions" src="{{ '/assets/video/agent-garrett-nl-veil-vault.vtt' | relative_url }}" srclang="en" label="English">
     Your browser does not support this video. <a href="{{ '/assets/video/agent-garrett-nl-veil-vault.mp4' | relative_url }}">Download the MP4</a>.

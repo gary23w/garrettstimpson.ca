@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop"
+seo_title: "Intel DCI / USB3-Debug: The $30 Hardware Root on Laptops"
 date: 2026-07-18
 categories: [hardware, exploits, vuln-research]
 tags: [DCI, USB3-Debug, Intel, PCH, hardware-hacking, JTAG, DMA, physical-attack, firmware, CVE-2017-5691]

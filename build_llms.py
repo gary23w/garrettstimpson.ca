@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-build_llms.py  —  Rebuilds llms.txt from _posts/ directory.
+build_llms.py  —  Rebuilds llms.txt and llms-full.txt from _posts/.
 Run locally or via GitHub Actions.
 
-Output format: structured plain-text corpus optimised for LLM inference
-and fine-tuning data. One <DOCUMENT> block per post, full content preserved.
+llms.txt      : short Markdown index in the llms.txt proposal format
+                (H1, summary, linked sections), pointing at llms-full.txt.
+llms-full.txt : structured plain-text corpus for LLM retrieval. One
+                <DOCUMENT> block per post, full content preserved.
 """
 import os, re, sys
 from datetime import datetime, timezone
@@ -13,8 +15,12 @@ from pathlib import Path
 SITE_URL    = "https://garrettstimpson.ca"
 AUTHOR      = "Garrett Stimpson"
 REPO        = "https://github.com/gary23w/garrettstimpson.ca"
+SITE_DESC   = ("Cybersecurity research and practical defensive guidance by Garrett Stimpson, "
+               "a software engineer with 10+ years across offensive and defensive security.")
 POSTS_DIR   = Path(__file__).parent / "_posts"
+TOPICS_FILE = Path(__file__).parent / "_data" / "topics.yml"
 OUTPUT_FILE = Path(__file__).parent / "llms.txt"
+FULL_FILE   = Path(__file__).parent / "llms-full.txt"
 
 PERMALINK_TPL = "{site}/posts/{year}/{month}/{day}/{slug}/"
 
@@ -80,15 +86,53 @@ def list_tags(val) -> str:
     return str(val)
 
 
-def build_corpus(posts_dir: Path) -> str:
+def load_posts(posts_dir: Path) -> list[dict]:
     posts = sorted(
         [p for p in posts_dir.glob("*.md")],
         key=lambda p: p.name,
         reverse=True          # newest first
     )
-
     parsed = [parse_post(p) for p in posts]
-    parsed = [p for p in parsed if p]
+    return [p for p in parsed if p]
+
+
+def load_topics(path: Path) -> list[dict]:
+    """Read slug/name/description from _data/topics.yml (flat entries only)."""
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8")
+    pattern = re.compile(r"^- slug: (\S+)\r?\n  name: (.+?)\r?\n  description: (.+?)\r?$", re.M)
+    return [{"slug": m[0], "name": m[1].strip(), "description": m[2].strip()}
+            for m in pattern.findall(text)]
+
+
+def build_index(parsed: list[dict], topics: list[dict]) -> str:
+    """llms.txt: H1, blockquote summary, then linked sections."""
+    lines = [f"# {AUTHOR}", "", f"> {SITE_DESC}", ""]
+    lines.append("Vulnerability research, exploit breakdowns and malware analysis. "
+                 f"The full text of every post is in [llms-full.txt]({SITE_URL}/llms-full.txt).")
+    lines.append("")
+    lines.append("## About")
+    lines.append("")
+    lines.append(f"- [About {AUTHOR}]({SITE_URL}/about/): background, software projects and professional profiles")
+    lines.append(f"- [Research policy]({SITE_URL}/policy/): educational and defensive use, privacy and vulnerability disclosure")
+    lines.append("")
+    if topics:
+        lines.append("## Topics")
+        lines.append("")
+        for t in topics:
+            lines.append(f"- [{t['name']}]({SITE_URL}/topics/{t['slug']}/): {t['description']}")
+        lines.append("")
+    lines.append("## Posts")
+    lines.append("")
+    for post in parsed:
+        note = f": {post['excerpt']}" if post["excerpt"] else ""
+        lines.append(f"- [{post['title']}]({post['url']}){note}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_corpus(parsed: list[dict]) -> str:
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -106,7 +150,6 @@ def build_corpus(posts_dir: Path) -> str:
     lines.append(f"               red-team, CVE-analysis, PoC-breakdown")
     lines.append("")
     lines.append("FORMAT: Each <DOCUMENT> block contains a complete research post.")
-    lines.append("        Use as-is for RAG retrieval or chunk per block for fine-tuning.")
     lines.append("        CVE fields are extracted from body text automatically.")
     lines.append("=" * 80)
     lines.append("")
@@ -148,6 +191,10 @@ if __name__ == "__main__":
         print(f"ERROR: _posts/ not found at {POSTS_DIR}", file=sys.stderr)
         sys.exit(1)
 
-    corpus = build_corpus(POSTS_DIR)
-    OUTPUT_FILE.write_text(corpus, encoding="utf-8")
-    print(f"✓ llms.txt written — {len(corpus):,} bytes")
+    parsed = load_posts(POSTS_DIR)
+    corpus = build_corpus(parsed)
+    FULL_FILE.write_text(corpus, encoding="utf-8")
+    print(f"✓ llms-full.txt written — {len(corpus):,} bytes")
+    index = build_index(parsed, load_topics(TOPICS_FILE))
+    OUTPUT_FILE.write_text(index, encoding="utf-8")
+    print(f"✓ llms.txt written — {len(index):,} bytes")

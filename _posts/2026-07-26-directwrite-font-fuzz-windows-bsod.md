@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Windows 11 DirectWrite Font Fuzzing — System Service Exception via Kernel Font Driver"
+seo_title: "Windows 11 DirectWrite Font Fuzzing via Kernel Font Driver"
 date: 2026-07-26
 categories: [windows, kernel, vulnerability-research, exploit-development]
 tags: [DirectWrite, font-parsing, BSOD, fontdrvhost, KERNELBASE, TrueType, OpenType, fuzzing, integer-overflow, EoP, RCE, Windows-11]

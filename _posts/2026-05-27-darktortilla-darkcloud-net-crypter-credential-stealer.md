@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email"
+seo_title: "DarkTortilla Wraps DarkCloud: .NET Crypter and Stealer"
 date: 2026-05-27
 categories: [malware, analysis]
 tags: [darktortilla, darkcloud, dotnet, infostealer, reflective-loading, mitre-attack]

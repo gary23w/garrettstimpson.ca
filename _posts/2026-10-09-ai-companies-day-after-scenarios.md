@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "The Day After: AI Companies Are War-Gaming Their Own Worst Headline"
+seo_title: "The Day After: AI Companies War-Game Their Worst Headline"
 date: 2026-10-09
 categories: [analysis, ai]
 tags: [ai-safety, ai-policy, agentic-ai, risk-forecast, openai, anthropic, incident-response]

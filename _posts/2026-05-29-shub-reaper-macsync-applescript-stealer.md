@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today"
+seo_title: "SHub Reaper Lives On: MacSync Shell Script on MalwareBazaar"
 date: 2026-05-29
 categories: [malware, analysis]
 tags: [macsync, shub-reaper, macos, stealer, applescript, mitre-attack, launchagent, clickfix]

@@ -2,9 +2,11 @@
 layout: page
 title: Tags
 permalink: /tags/
+toc: false
+description: "Every tag used across the research posts on garrettstimpson.ca, each linked to the posts that use it. Browse by topic for the main research areas."
 ---
 
-<p class="text-muted">Browse research by topic — {{ site.tags | size }} tags across {{ site.posts | size }} posts.</p>
+<p class="text-muted">Browse research by topic — {{ site.tags | size }} tags across {{ site.posts | size }} posts. For the main research areas, see <a href="{{ '/topics/' | relative_url }}">topics</a>.</p>
 
 {%- assign sorted_tags = site.tags | sort -%}
 

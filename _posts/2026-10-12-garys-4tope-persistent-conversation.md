@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Gary's 4tope and the natural geometry of persistent conversation"
+seo_title: "Gary's 4tope: The Geometry of Persistent Conversation"
 date: 2026-10-12
 categories: [research, ai]
 tags: [garys-4tope, nl-veil, agent-memory, context-management, graph-algorithms, zig, benchmarks]
@@ -33,7 +34,7 @@ The analogy I use is about adjacency and viewpoint. When a structure is too larg
 
 There is an important boundary to that analogy. The v1.1.16 code constructs a dependency graph. It does not assign four-dimensional coordinates, define polytope facets, or calculate continuous surface geodesics. Calling its output a net describes a graph layout inspired by geometric unfolding. The four continuation headings are not evidence that the implementation is literally a four-dimensional polytope. The executable mathematics is the pair of graph recurrences below. [2]
 
-![A dependency graph viewed through its critical path and continuation tree](/assets/4tope/graph-views.png)
+![A dependency graph viewed through its critical path and continuation tree](/assets/4tope/graph-views.png){: width="1738" height="1100" loading="lazy"}
 
 *Figure 1. Schematic views of the same working record. The arrows describe dependencies; this is not a coordinate embedding of a four-dimensional polytope.*
 
@@ -60,7 +61,7 @@ A result can also become stale. A later identical call, or a later recognized fi
 
 For a node v, define L(v) as the greatest cumulative dependency weight obtainable by walking backward from v. With an empty dependency set, its value is zero:
 
-![L(v) = max of zero and L(u) + w(v,u) over dependencies u of v.](/assets/4tope/equation-1.png)
+![L(v) = max of zero and L(u) + w(v,u) over dependencies u of v.](/assets/4tope/equation-1.png){: width="1459" height="118" loading="lazy"}
 
 The engine processes nodes oldest first. Every value needed on the right is already available. It records the maximizing predecessor, then follows those predecessor links backward from f. This is the critical chain returned by `Graph.criticalChain`.
 
@@ -88,7 +89,7 @@ Protection and presentation answer different questions. The first recurrence ask
 
 For this view, the engine traverses the dependency graph in both directions. Let u∼ v mean the nodes are adjacent in that topology. With positive traversal costs, the shortest distance from the frontier is:
 
-![d(f) = 0; d(v) is the minimum of d(u) + c(u,v) over adjacent u.](/assets/4tope/equation-2.png)
+![d(f) = 0; d(v) is the minimum of d(u) + c(u,v) over adjacent u.](/assets/4tope/equation-2.png){: width="1167" height="138" loading="lazy"}
 
 Equivalently, d(v) is the minimum sum of traversal costs over paths from f to v. Dijkstra's algorithm computes these distances and a parent for each reachable node. The shortest-path method is established graph mathematics; the particular event graph, costs, selection, and engine integration are the method being described here. [5]
 
@@ -148,7 +149,7 @@ Two integration points are especially important. At the engine-cut path, the eng
 
 The continuation allowance adapts to the replay window W, in bytes:
 
-![H(W) = max(max(512, min(1400, floor(W/8))), min(6144, floor(W/16))).](/assets/4tope/equation-3.png)
+![H(W) = max(max(512, min(1400, floor(W/8))), min(6144, floor(W/16))).](/assets/4tope/equation-3.png){: width="1566" height="107" loading="lazy"}
 
 The graph renderer receives H(W)-min(⌊ H(W)/4⌋,400), leaving room for the surrounding carry information. These are byte limits, not exact token counts. The language model's tokenizer determines how much inference context those bytes consume.
 
@@ -181,7 +182,7 @@ Each measurement covers graph construction, `protectedIds`, and `unfold` with a 
 | 201 | 31,670 | 1,044 | 0.2607 | 0.2568–0.5628 |
 | 501 | 79,370 | 1,051 | 1.0997 | 1.0936–1.1409 |
 
-![Measured time for the reference graph implementation](/assets/4tope/benchmark-latency.png)
+![Measured time for the reference graph implementation](/assets/4tope/benchmark-latency.png){: width="1686" height="769" loading="lazy"}
 
 *Figure 2. Median combined time with the observed minimum-to-maximum range. These timings measure the graph operations on synthetic spans, not end-to-end agent quality.*
 

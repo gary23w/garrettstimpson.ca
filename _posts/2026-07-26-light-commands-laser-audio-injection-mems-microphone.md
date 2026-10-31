@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Light Commands — Laser-Based Audio Injection on Voice-Controllable Systems"
+seo_title: "Light Commands: Laser-Based Audio Injection Attacks"
 date: 2026-07-26
 categories: [hardware, exploits, iot, side-channels]
 tags: [light-commands, laser, MEMS, microphone, voice-assistant, Amazon-Alexa, Google-Assistant, Apple-Siri, audio-injection, USENIX, physical-attack]

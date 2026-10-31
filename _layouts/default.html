@@ -12,9 +12,10 @@
   <!-- Google Fonts: JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,700;1,400&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,700;1,400&display=swap"></noscript>
 
-  {%- seo -%}
+  {%- include seo.html -%}
   <link rel="stylesheet" href="{{ "/assets/css/style.css" | relative_url }}?v={{ site.time | date: '%s' }}">
   {%- feed_meta -%}
   {% if site.plugins contains 'jekyll-seo-tag' %}{% else %}<title>{{ page.title | default: site.title }}</title>{% endif %}
@@ -119,7 +120,7 @@
         </div>
 
         <div class="footer-col">
-          <p style="font-size:11px;color:#2a3d2a;">
+          <p style="font-size:11px;color:var(--text-faint);">
             All research for educational &amp; defensive purposes.
           </p>
         </div>
@@ -159,12 +160,19 @@
       animId = requestAnimationFrame(draw);
     }
 
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (reduceMotion && reduceMotion.matches) return;
+
     resize();
     draw();
     window.addEventListener('resize', function() {
       cancelAnimationFrame(animId);
       resize();
       draw();
+    });
+    document.addEventListener('visibilitychange', function() {
+      cancelAnimationFrame(animId);
+      if (!document.hidden) draw();
     });
   })();
   </script>
@@ -184,6 +192,7 @@
     var blocks=document.querySelectorAll('div.highlight, figure.highlight, pre.highlight');
     blocks.forEach(function(b){
       if(b.querySelector('.code-copy')) return;
+      if(b.parentElement && b.parentElement.closest('div.highlight, figure.highlight')) return; /* one button per block */
       var btn=document.createElement('button'); btn.className='code-copy'; btn.type='button'; btn.textContent='copy';
       btn.addEventListener('click',function(){
         var code=b.querySelector('code')||b.querySelector('pre')||b;
@@ -193,22 +202,6 @@
       b.style.position='relative';
       b.appendChild(btn);
     });
-  })();
-  </script>
-
-  <!-- Post table of contents -->
-  <script>
-  (function(){
-    var content=document.querySelector('.post-content'); if(!content) return;
-    var heads=content.querySelectorAll('h2, h3'); if(heads.length<3) return;
-    var toc=document.createElement('nav'); toc.className='post-toc';
-    var html='<span class="toc-title">// contents</span><ul>';
-    heads.forEach(function(h,i){
-      if(!h.id){ h.id='s-'+i+'-'+(h.textContent||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40); }
-      html+='<li class="toc-'+h.tagName.toLowerCase()+'"><a href="#'+h.id+'">'+(h.textContent||'')+'</a></li>';
-    });
-    html+='</ul>'; toc.innerHTML=html;
-    content.insertBefore(toc, content.firstChild);
   })();
   </script>
 

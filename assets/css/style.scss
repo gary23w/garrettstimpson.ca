@@ -23,9 +23,10 @@
   --border:       rgba(0, 255, 65, 0.18);
   --border-dim:   rgba(0, 255, 65, 0.07);
   --text:         #c8d8c8;
-  --text-muted:   #5a7a5a;
-  --text-faint:   #2a3d2a;
-  --font-mono:    'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
+  --text-muted:   #668866;   /* 4.7:1 or better on the dark surfaces (WCAG AA) */
+  --text-faint:   #5f805f;
+  /* Fallbacks with JetBrains Mono's 0.6em advance come first, so the web-font swap does not rewrap lines (CLS). */
+  --font-mono:    'JetBrains Mono', 'Fira Code', 'Courier New', 'Cascadia Code', monospace;
   --font-sans:    'JetBrains Mono', monospace;
 }
 
@@ -346,7 +347,7 @@ pre code {
 
 /* Syntax highlight overrides */
 .highlight { background: var(--bg-code) !important; }
-.highlight .c, .highlight .c1, .highlight .cm { color: #3a7a3a !important; font-style: italic; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #4a964a !important; font-style: italic; }
 .highlight .k, .highlight .kd, .highlight .kn { color: var(--green) !important; font-weight: bold; }
 .highlight .s, .highlight .s1, .highlight .s2 { color: #90e890 !important; }
 .highlight .n, .highlight .nx { color: #c8f0c8 !important; }
@@ -356,6 +357,15 @@ pre code {
 .highlight .p  { color: #88aa88 !important; }
 .highlight .nb { color: #00aacc !important; }
 .highlight .err { background: #300 !important; color: var(--red-alert) !important; }
+/* minima's light-theme token colours that are unreadable on the dark code background */
+.highlight .nc, .highlight .kt, .highlight .kc, .highlight .kp, .highlight .kr { color: var(--blue-accent) !important; }
+.highlight .nt { color: #00aacc !important; }
+.highlight .nn, .highlight .gp, .highlight .go, .highlight .w { color: #88aa88 !important; }
+.highlight .na, .highlight .no, .highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi, .highlight .bp { color: #5fd7c7 !important; }
+.highlight .m, .highlight .mh, .highlight .mo, .highlight .il { color: #ffcc44 !important; }
+.highlight .sb, .highlight .sc, .highlight .sd, .highlight .se, .highlight .sh, .highlight .si, .highlight .sx, .highlight .sr { color: #90e890 !important; }
+.highlight .ni, .highlight .ss { color: #d7a0e8 !important; }
+.highlight .ne { color: var(--red-alert) !important; }
 
 /* ============================================================
    HOME PAGE — POST LIST
@@ -581,6 +591,7 @@ table tr:nth-child(even),
   display: block !important;
   margin: 1.8em auto !important;
   box-shadow: 0 0 20px rgba(0, 255, 65, 0.08) !important;
+  height: auto !important;
 }
 
 /* ============================================================
@@ -737,6 +748,7 @@ table tr:nth-child(even),
 }
 .hero-desc { color: var(--text) !important; font-size: 14px !important; margin: 0 0 16px 0 !important; max-width: 70ch !important; }
 .hero-meta { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; }
+h2.hero-meta { font-size: inherit !important; font-weight: 400 !important; margin: 0 !important; line-height: inherit !important; letter-spacing: normal !important; text-shadow: none !important; }
 .hero-meta span { font-size: 11px !important; color: var(--green-dim) !important; letter-spacing: 0.05em !important; }
 
 .post-list-heading {
@@ -796,6 +808,9 @@ table tr:nth-child(even),
 .post-meta .post-date { color: var(--green-dim) !important; }
 .post-meta .post-read { color: var(--text-muted) !important; }
 .post-meta .post-cats { color: var(--blue-accent) !important; text-transform: uppercase !important; letter-spacing: 0.05em !important; }
+.post-meta .post-cats a { color: inherit !important; text-decoration: none !important; border-bottom: 1px dotted currentColor !important; }
+.post-meta .post-cats a:hover { color: var(--green) !important; }
+.post-meta .post-updated { color: var(--text-muted) !important; }
 .post-nav {
   display: flex !important; gap: 12px !important; flex-wrap: wrap !important;
   margin-top: 48px !important; padding-top: 24px !important; border-top: 1px solid var(--border) !important;
@@ -824,7 +839,7 @@ table tr:nth-child(even),
   font-family: var(--font-mono) !important; font-size: 10px !important;
   color: var(--text-muted) !important; background: rgba(0,0,0,0.65) !important;
   border: 1px solid var(--border) !important; border-radius: 3px !important;
-  padding: 2px 8px !important; cursor: pointer !important; opacity: 0 !important;
+  padding: 4px 10px !important; min-height: 24px !important; min-width: 44px !important; cursor: pointer !important; opacity: 0 !important;
   transition: opacity .15s, color .15s, border-color .15s !important; z-index: 5 !important;
 }
 div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight:hover .code-copy { opacity: 1 !important; }
@@ -1086,7 +1101,7 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   background: none;
   border: none;
   cursor: pointer;
-  color: #444;
+  color: #767676;
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1;
@@ -1127,3 +1142,23 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   line-height: 1.6;
   opacity: 0.85;
 }
+
+/* ============================================================
+   TOPIC HUBS
+   ============================================================ */
+.topic-intro { color: var(--text) !important; margin: 0 0 8px 0 !important; }
+.topic-page .post-card-title { font-size: 1.05em !important; }
+.topic-list { list-style: none !important; margin: 24px 0 0 0 !important; padding: 0 !important; }
+.topic-item { border-left: 2px solid var(--border) !important; padding: 4px 0 4px 16px !important; margin-bottom: 22px !important; }
+.topic-item p { margin: 6px 0 0 0 !important; }
+.topic-name { font-size: 1.05em !important; margin: 0 !important; }
+.topic-name a { color: var(--green) !important; text-decoration: none !important; }
+.topic-name a:hover { text-shadow: 0 0 6px rgba(0, 255, 65, 0.4) !important; }
+
+/* ============================================================
+   RENDERING: skip layout/paint of off-screen list items and code
+   blocks until they are scrolled near (long lists, /tags/, /commands/)
+   ============================================================ */
+.post-list > .post-card:nth-child(n+4) { content-visibility: auto; contain-intrinsic-size: auto 210px; }
+ul.tag-posts { content-visibility: auto; contain-intrinsic-size: auto 90px; }
+.post-content div.highlighter-rouge { content-visibility: auto; contain-intrinsic-size: auto 160px; }

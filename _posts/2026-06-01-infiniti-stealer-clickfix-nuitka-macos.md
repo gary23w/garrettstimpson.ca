@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS"
+seo_title: "Infiniti Stealer: ClickFix Meets a Nuitka macOS Stealer"
 date: 2026-06-01
 categories: [malware, analysis]
 tags: [infiniti-stealer, nukechain, clickfix, macos, stealer, nuitka, mitre-attack]

@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window"
+seo_title: "ColdFusion APSB26-68: Seven CVSS 10.0 Flaws"
 date: 2026-07-15
 categories: [exploits, web, vuln-research]
 tags: [CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286, adobe, coldfusion, RCE, path-traversal, unrestricted-upload, CISA-KEV, watchtowr]

@@ -7,6 +7,10 @@ tags: [agent-garrett, incident-response, cloud-security, nl-veil, ai-agents]
 excerpt: "I gave Agent Garrett a cloud incident with symptoms, not an attack map. Here is how it investigated, contained the compromise, and handled a follow-up probe in NL-Veil."
 description: "A recorded Agent Garrett incident-response exercise in NL-Veil: evidence gathering, cloud containment, eradication, retesting, and infrastructure tracking."
 image: /assets/img/agent-garrett-incident-promo-poster.png
+video:
+  url: /assets/video/agent-garrett-cloud-attack-response.mp4
+  poster: /assets/img/agent-garrett-incident-promo-poster.png
+  duration: PT1M3S
 ---
 
 An incident rarely arrives with a neat diagram of how the attacker got in. It starts with an application behaving strangely and a few signals that may or may not be related. That is the situation I wanted Agent Garrett to face.
@@ -14,7 +18,7 @@ An incident rarely arrives with a neat diagram of how the attacker got in. It st
 For this exercise, I gave it a short alert: the cloud-hosted `orders-api` was throwing errors, a service identity was being used in an unusual way, and outbound traffic needed a closer look. I did **not** give it the attack sequence or tell it which controls had failed. Agent Garrett had to find those answers in the evidence, through its connection in the NL-Veil desktop app.
 
 <figure class="agent-demo">
-  <video controls playsinline preload="metadata" width="1920" height="1080" poster="{{ '/assets/img/agent-garrett-incident-promo-poster.png' | relative_url }}" aria-label="Agent Garrett cloud attack response simulation in NL-Veil">
+  <video controls playsinline preload="metadata" width="1920" height="1080" poster="{{ '/assets/img/agent-garrett-incident-promo-poster.webp' | relative_url }}" aria-label="Agent Garrett cloud attack response simulation in NL-Veil">
     <source src="{{ '/assets/video/agent-garrett-cloud-attack-response.mp4' | relative_url }}" type="video/mp4">
     Your browser does not support this video. <a href="{{ '/assets/video/agent-garrett-cloud-attack-response.mp4' | relative_url }}">Download the demo</a>.
   </video>

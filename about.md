@@ -4,6 +4,8 @@ title: About Garrett Stimpson
 nav_title: About
 description: "Garrett Stimpson is a cybersecurity professional and software engineer in the Greater Toronto Area, with 10+ years across offensive and defensive security."
 permalink: /about/
+seo_type: ProfilePage
+last_modified_at: 2026-10-15
 ---
 
 Garrett Stimpson is a cybersecurity professional and software engineer based in the Greater Toronto Area, Canada. He has more than a decade of experience across offensive and defensive security, helping protect people and organizations in Canada and the United States.

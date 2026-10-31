@@ -1,0 +1,18 @@
+# Intrinsic size and alt text for share images, keyed by site path.
+# Used by _includes/seo.html for og:image:* tags and ImageObject markup.
+/assets/img/og-card.png:
+  width: 1200
+  height: 630
+  alt: "Garrett Stimpson: in-the-wild exploits, PoC breakdowns and vulnerability research"
+/assets/img/agent-garrett-how-to-poster.png:
+  width: 1920
+  height: 1080
+  alt: "How to use Agent Garrett: narrated walkthrough video"
+/assets/img/agent-garrett-incident-promo-poster.png:
+  width: 1920
+  height: 1080
+  alt: "Agent Garrett cloud attack response demo video"
+/assets/img/agent-garrett-nl-veil-vault-poster.png:
+  width: 1920
+  height: 1080
+  alt: "Agent Garrett, NL-VEIL and the Cloudflare vault video"

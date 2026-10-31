@@ -1,3 +1,11 @@
+---
+layout: doc
+title: "Agent Garrett: personal defense and authorized assessment cases"
+seo_title: "Agent Garrett: Personal Defense and Assessment Cases"
+description: "Agent Garrett is meant to run through the local NL-Veil harness for personal and local defense, with Garrett's MCP extension as the cloud backend."
+last_modified_at: 2026-10-09
+---
+
 # Agent Garrett: personal defense and authorized assessment cases
 
 **Agent Garrett is intended to be fully interfaced through the local [NL-Veil harness](https://github.com/gary23w/nl-veil) for personal and local defense. This is the strongly recommended way to use it.** Keep device access, evidence collection and remediation close to the user, and use Garrett's MCP extension as the dedicated cloud analysis and testing backend. The browser chat is useful for supplied evidence and remote intelligence; the local harness makes a response actionable on the user's device.
