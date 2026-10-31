@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-10-31T15:43:37Z
+GENERATED    : 2026-10-31T18:31:43Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
@@ -238,7 +238,7 @@ CVE-2026-111497 property demonstrated: an unchecked return value plus a signed 3
 TITLE      : The Sixteen-Bit Lie: Zephyr's Bluetooth Classic L2CAP Overflow Nobody Paged About (CVE-2025-12035)
 DATE       : 2026-10-27
 URL        : https://garrettstimpson.ca/posts/2026/10/27/zephyr-bluetooth-classic-l2cap-integer-overflow-cve-2025-12035/
-CVE        : cve-2025-12035, CVE-2025-12035
+CVE        : CVE-2025-12035, cve-2025-12035
 CATEGORIES : exploits, embedded, vuln-research
 TAGS       : zephyr, bluetooth, l2cap, cve, integer-overflow, embedded, firmware
 WORD_COUNT : 1482
@@ -881,7 +881,7 @@ The uncomfortable summary: the most widely deployed code paths are not the ones 
 TITLE      : PHP2Shell: The Fatal-Error Bug That Turns a Crashed Request Into a Shell (CVE-2026-109618 / CVE-2026-109619)
 DATE       : 2026-10-23
 URL        : https://garrettstimpson.ca/posts/2026/10/23/php2shell-fatal-error-use-after-free-cve-2026-109618/
-CVE        : cve-2026-109618, CVE-2026-109618, cve-2026-109619, CVE-2026-109619
+CVE        : CVE-2026-109618, cve-2026-109618, cve-2026-109619, CVE-2026-109619
 CATEGORIES : exploits, web, vuln-research
 TAGS       : php, php2shell, cve-2026-109618, cve-2026-109619, use-after-free, rce, memory-safety, patching
 WORD_COUNT : 2195
@@ -1087,7 +1087,7 @@ And a note on how this was found: AI-assisted discovery, coordinated disclosure,
 TITLE      : TETRA:BURST and the TEA1 Backdoor: How Police Radio Encryption Was Quietly Downgraded to 32 Bits for Decades
 DATE       : 2026-10-21
 URL        : https://garrettstimpson.ca/posts/2026/10/21/tetra-burst-tea1-backdoor-cve-2022-24402/
-CVE        : CVE-2022-24400, CVE-2022-24401, cve-2022-24402, CVE-2022-24402, CVE-2022-24403, CVE-2022-24404
+CVE        : CVE-2022-24400, CVE-2022-24401, CVE-2022-24402, cve-2022-24402, CVE-2022-24403, CVE-2022-24404
 CATEGORIES : radio-security, cryptography, critical-infrastructure
 TAGS       : tetra, tea1, cve-2022-24402, midnight-blue, cryptography, backdoor, critical-infrastructure, sdr
 WORD_COUNT : 2457
@@ -2130,7 +2130,7 @@ On Windows, supply the path to `zig.exe`. The script runs the module tests, comp
 TITLE      : CVE-2026-65660: The Latest Exploited Microsoft Bug Is One You Already Patched
 DATE       : 2026-10-11
 URL        : https://garrettstimpson.ca/posts/2026/10/11/cve-2026-65660-sharepoint-code-injection-exploited-after-disclosure/
-CVE        : cve-2026-65660, CVE-2026-65660
+CVE        : CVE-2026-65660, cve-2026-65660
 CATEGORIES : exploits, rce
 TAGS       : cve-2026-65660, sharepoint, rce, kev, n-day, patch-tuesday, webshell, viettel
 WORD_COUNT : 1293
@@ -2326,7 +2326,7 @@ The labs are rehearsing the morning after. That is prudent, and it is also a tel
 TITLE      : CVE-2026-85880 and CVE-2026-81963: Two Windows Zero-Days Split The Estate, And Both Sides Were Exploited First
 DATE       : 2026-10-07
 URL        : https://garrettstimpson.ca/posts/2026/10/07/cve-2026-85880-alpc-cve-2026-81963-update-stack-zero-days/
-CVE        : cve-2026-81963, CVE-2026-81963, CVE-2026-85880, cve-2026-85880
+CVE        : CVE-2026-81963, cve-2026-81963, CVE-2026-85880, cve-2026-85880
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-85880, cve-2026-81963, alpc, windows-update-stack, privilege-escalation, zero-day, patch-tuesday, kev
 WORD_COUNT : 1635
@@ -2819,7 +2819,7 @@ Root on the node was always game over for the node. The change is that the node 
 TITLE      : PaperCut's Pre-Auth RCE Hit Hundreds. Patching Is Not Recovery
 DATE       : 2026-09-13
 URL        : https://garrettstimpson.ca/posts/2026/09/13/papercut-preauth-rce-81578-82078/
-CVE        : cve-2026-81578, CVE-2026-81578, cve-2026-82078, CVE-2026-82078
+CVE        : CVE-2026-81578, cve-2026-81578, cve-2026-82078, CVE-2026-82078
 CATEGORIES : exploits, web, rce
 TAGS       : papercut, papercut-ng, papercut-mf, cve-2026-81578, cve-2026-82078, pre-auth-rce, java, database-driver, active-exploitation, greynoise, incident-response
 WORD_COUNT : 2985
@@ -4169,7 +4169,7 @@ The boring bugs are the ones that kill you. Patch your Perfex, turn off the migr
 TITLE      : CVE-2026-33185 Got Patched, But the Test-Email SSRF Path Is Only Half-Fixed
 DATE       : 2026-08-17
 URL        : https://garrettstimpson.ca/posts/2026/08/17/cve-2026-33185-test-email-ssrf-half-fixed/
-CVE        : cve-2026-33185, CVE-2026-33185
+CVE        : CVE-2026-33185, cve-2026-33185
 CATEGORIES : exploits, web, ssrf
 TAGS       : discourse, ssrf, smtp, pop3, dns-rebinding, cloudflare, web-security
 WORD_COUNT : 2082
@@ -4322,13 +4322,13 @@ Each one is a small change. Together they close the gap that the CVE-2026-33185 
 
 <DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
-TITLE      : CVE-2026-99501: When pip install Steals Every SSH Key in Your Agent Through Docker BuildKit
+TITLE      : When pip install Steals Every SSH Key in Your Agent Through Docker BuildKit
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-99501-docker-buildkit-ssh-agent-hijack/
-CVE        : cve-2026-99501, CVE-2026-99501
+CVE        : cve-2026-99501
 CATEGORIES : exploits, supply-chain, devops
-TAGS       : cve-2026-99501, docker, buildkit, ssh-agent, supply-chain, pip, hijack
-WORD_COUNT : 1599
+TAGS       : docker, buildkit, ssh-agent, supply-chain, pip, hijack
+WORD_COUNT : 1567
 EXCERPT    : BuildKit's --mount=type=ssh forwards your SSH agent socket into every RUN step. It was built for git clone. A compromised pip package installed during that same RUN step can reach through the socket and sign whatever it wants with every key you have loaded.
 </FRONTMATTER>
 <BODY>
@@ -4374,8 +4374,8 @@ for key in identities:
 
 That is the whole attack. A malicious `setup.py` runs those 150 lines during `pip install`, and the build completes normally. The developer never sees a warning. The image builds, the layer gets cached, and every SSH key that was loaded in the agent at the time has now signed whatever payload the attacker chose.
 
-![Five-step diagram of CVE-2026-99501, where an SSH-mounted BuildKit RUN step lets a compromised pip package sign payloads with every agent key.](/assets/figures/cve-2026-99501-docker-buildkit-ssh-agent-hijack-diagram.svg){: width="640" height="582" loading="lazy"}
-*Agent-hijack chain for CVE-2026-99501, as described in this post.*
+![Five-step diagram of the BuildKit SSH agent hijack, where an SSH-mounted RUN step lets a compromised pip package sign payloads with every agent key.](/assets/figures/cve-2026-99501-docker-buildkit-ssh-agent-hijack-diagram.svg){: width="640" height="582" loading="lazy"}
+*Agent-hijack chain in Docker BuildKit, as described in this post.*
 
 ## What you lose
 
@@ -4435,13 +4435,11 @@ BuildKit's SSH mount was designed with a mental model that treats the RUN instru
 
 Until then, treat `--mount=type=ssh` the way you would treat pasting your private key into a shell script that also runs `curl | bash`. In a supply-chain sense, that is exactly what it does.
 
-**PoC repository:** [github.com/gary23w/CVE-2026-99501-POC](https://github.com/gary23w/CVE-2026-99501-POC)  
 **BuildKit SSH mount docs:** [Docker BuildKit --mount=type=ssh](https://docs.docker.com/build/building/secrets/#ssh-mounts)  
 **SSH agent protocol:** [draft-miller-ssh-agent-04](https://datatracker.ietf.org/doc/html/draft-miller-ssh-agent-04)
 
 ## Sources
 
-- [github.com/gary23w/CVE-2026-99501-POC](https://github.com/gary23w/CVE-2026-99501-POC)
 - [Docker BuildKit --mount=type=ssh](https://docs.docker.com/build/building/secrets/#ssh-mounts)
 - [draft-miller-ssh-agent-04](https://datatracker.ietf.org/doc/html/draft-miller-ssh-agent-04)
 </BODY>
@@ -6881,7 +6879,7 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 TITLE      : ColdFusion APSB26-68: Six CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
 URL        : https://garrettstimpson.ca/posts/2026/07/15/coldfusion-apsb26-68-cvss10-bonanza/
-CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48282, cve-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
+CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, cve-2026-48282, CVE-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
 CATEGORIES : exploits, web, vuln-research
 TAGS       : CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286, adobe, coldfusion, RCE, path-traversal, unrestricted-upload, CISA-KEV, watchtowr
 WORD_COUNT : 1994
@@ -7092,7 +7090,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
 URL        : https://garrettstimpson.ca/posts/2026/07/01/cve-2026-55200-libssh2-transport-read-oob-write/
-CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, CVE-2026-55200, cve-2026-55200
+CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, cve-2026-55200, CVE-2026-55200
 CATEGORIES : exploits, supply-chain
 TAGS       : cve-2026-55200, libssh2, ssh, integer-overflow, rce, curl, supply-chain
 WORD_COUNT : 1392
@@ -7186,7 +7184,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : CVE-2026-31429, cve-2026-31429
+CVE        : cve-2026-31429, CVE-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1370
@@ -7481,7 +7479,7 @@ URL        : https://garrettstimpson.ca/posts/2026/06/18/embedded-controller-bli
 CVE        : none
 CATEGORIES : hardware-security, firmware
 TAGS       : Embedded-Controller, EC, ACPI, SPI-flash, firmware-persistence, JTAG, SMM
-WORD_COUNT : 1388
+WORD_COUNT : 1177
 EXCERPT    : Your laptop has a second computer inside it — running its own CPU, firmware, and debug ports — that can read your keystrokes, rewrite your BIOS, and survives every OS reinstall. Nobody is looking at it.
 </FRONTMATTER>
 <BODY>
@@ -7564,17 +7562,6 @@ To remove an EC-based implant, you need to either flash the EC firmware external
 
 Here's the detail that keeps me up: virtually every shipping laptop has JTAG or Serial Wire Debug (SWD) pins on the EC that are **not fused** on production units. The datasheets for the Nuvoton NPCX series document an OTP bit called `JTAG_EN` — once blown, the JTAG interface is permanently disabled. Units without it blown accept full debugger connections over the physical pins, giving an attacker with screwdriver access full EC register read/write, firmware dump, and firmware upload.
 
-## Autonomous EC Exploitation (2025 Proof-of-Concept)
-
-In early 2025, I developed a PoC that targets the Nuvoton NPCT750 (a TPM 2.0 chip with an embedded security controller). The key innovation: rather than attacking the main CPU's SPI controller, the attack uses a **malicious USB-C charger** (a USB-PD sink device programmed with Raspberry Pi Pico firmware) that connects to the JTAG pins of the EC exposed through a debug header on the motherboard edge. The Pico:
-
-1. Enumerates the EC via SWD
-2. Dumps the EC flash (512 KB — takes ~30 seconds at 1 MHz SWO speed)
-3. Patches the EC firmware's keyboard scan handler to XOR every keystroke with 0x80 before sending it to the OS (keyboard ghosting attack visible only to the attacker who can decode the XOR)
-4. Maintains a Bluetooth Low Energy (BLE) GATT server — the exfiltrated keystrokes are broadcast over BLE in the scan response packets, appearing as normal BLE advertisements to nearby Windows/macOS devices (which ignore them)
-
-The entire attack fits in a USB-C charging block. The victim sees a working laptop that charges normally. All keystrokes — including passwords, 2FA codes typed in, BitLocker recovery keys — are broadcast to anyone with a $20 nRF52840 dongle within 100 meters.
-
 ## Mitigations
 
 - **Blow the JTAG fuses** — Every EC datasheet documents an OTP bit for debug port disable. OEMs must set this before shipping. If you're building a security-focused deployment, open the chassis and verify with a logic analyzer that the SWD pins return `0xFF` when probed.
@@ -7606,7 +7593,7 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 TITLE      : CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag
 DATE       : 2026-06-16
 URL        : https://garrettstimpson.ca/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/
-CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, CVE-2026-20262, cve-2026-20262
+CVE        : CVE-2026-20182, cve-2026-20245, CVE-2026-20245, cve-2026-20262, CVE-2026-20262
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, cve-2026-20262, cve-2026-20245, path-traversal, root, vmanage, zero-day
 WORD_COUNT : 1620
@@ -7691,7 +7678,7 @@ I expect we will find out. Probably sooner than anyone wants.
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
 URL        : https://garrettstimpson.ca/posts/2026/06/14/itscape-kvm-arm64-guest-host-escape-cve-2026-46316/
-CVE        : cve-2026-46316, CVE-2026-46316
+CVE        : CVE-2026-46316, cve-2026-46316
 CATEGORIES : exploits, linux-kernel
 TAGS       : CVE-2026-46316, KVM, arm64, UAF, guest-escape, cloud-security
 WORD_COUNT : 1646
@@ -7827,7 +7814,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
 URL        : https://garrettstimpson.ca/posts/2026/06/07/cve-2026-20245-cisco-sdwan-manager-root-rce/
-CVE        : CVE-2026-20127, CVE-2026-20182, CVE-2026-20245, cve-2026-20245
+CVE        : CVE-2026-20127, CVE-2026-20182, cve-2026-20245, CVE-2026-20245
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, command-injection, zero-day, root, mandiant
 WORD_COUNT : 1289
@@ -7903,7 +7890,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
 URL        : https://garrettstimpson.ca/posts/2026/06/07/cve-2026-20230-cisco-unified-cm-webdialer-ssrf-root/
-CVE        : CVE-2025-20309, CVE-2026-20045, CVE-2026-20230, cve-2026-20230
+CVE        : CVE-2025-20309, CVE-2026-20045, cve-2026-20230, CVE-2026-20230
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, unified-cm, ssrf, file-write, root, webdialer
 WORD_COUNT : 1327
@@ -7977,7 +7964,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : CVE-2026-45247, cve-2026-45247
+CVE        : cve-2026-45247, CVE-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1390
@@ -8150,7 +8137,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
 URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
-CVE        : CVE-2022-0492, cve-2022-0492
+CVE        : cve-2022-0492, CVE-2022-0492
 CATEGORIES : exploits, linux
 TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
 WORD_COUNT : 1367
@@ -8665,7 +8652,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1188
@@ -8758,7 +8745,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : cve-2026-35616, CVE-2026-35616
+CVE        : CVE-2026-35616, cve-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1271
@@ -9268,7 +9255,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1371
@@ -9440,7 +9427,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : cve-2026-46300, CVE-2026-46300
+CVE        : CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1432
@@ -10222,7 +10209,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/
-CVE        : CVE-2026-43284, CVE-2026-43500, cve-2026-46300, CVE-2026-46300
+CVE        : CVE-2026-43284, CVE-2026-43500, CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux
 TAGS       : CVE-2026-46300, linux-kernel, LPE, page-cache, ESP-in-TCP, XFRM, PoC
 WORD_COUNT : 1682
@@ -10390,7 +10377,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/cve-2026-2005-postgresql-pgcrypto-heap-overflow-rce/
-CVE        : CVE-2026-2005, cve-2026-2005
+CVE        : cve-2026-2005, CVE-2026-2005
 CATEGORIES : exploits, database
 TAGS       : CVE-2026-2005, postgresql, pgcrypto, heap-overflow, RCE, PoC
 WORD_COUNT : 1553
@@ -11432,7 +11419,7 @@ MITRE ATT&CK coverage for this sample: T1027 (MBA string obfuscation), T1055 (pr
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
+CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1585
@@ -11760,7 +11747,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : CVE-2026-46333, cve-2026-46333
+CVE        : cve-2026-46333, CVE-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 1020
@@ -12646,5 +12633,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 84 documents — 2026-10-31T15:43:37Z
+END OF CORPUS — 84 documents — 2026-10-31T18:31:43Z
 ================================================================================
