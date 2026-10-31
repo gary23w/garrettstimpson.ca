@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-10-31T18:32:45Z
+GENERATED    : 2026-10-31T18:33:17Z
 AUTHOR       : Garrett Stimpson
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
@@ -238,7 +238,7 @@ CVE-2026-111497 property demonstrated: an unchecked return value plus a signed 3
 TITLE      : The Sixteen-Bit Lie: Zephyr's Bluetooth Classic L2CAP Overflow Nobody Paged About (CVE-2025-12035)
 DATE       : 2026-10-27
 URL        : https://garrettstimpson.ca/posts/2026/10/27/zephyr-bluetooth-classic-l2cap-integer-overflow-cve-2025-12035/
-CVE        : cve-2025-12035, CVE-2025-12035
+CVE        : CVE-2025-12035, cve-2025-12035
 CATEGORIES : exploits, embedded, vuln-research
 TAGS       : zephyr, bluetooth, l2cap, cve, integer-overflow, embedded, firmware
 WORD_COUNT : 1482
@@ -659,7 +659,7 @@ Because the delivery is social engineering rather than exploitation, traditional
 TITLE      : The Bug in the Tiny TCP/IP Stack Inside Everything: lwIP's 6LoWPAN Double Free (CVE-2026-91018)
 DATE       : 2026-10-26
 URL        : https://garrettstimpson.ca/posts/2026/10/26/lwip-6lowpan-double-free-cve-2026-91018/
-CVE        : cve-2026-91018, CVE-2026-91018
+CVE        : CVE-2026-91018, cve-2026-91018
 CATEGORIES : embedded-security, memory-safety, vuln-research
 TAGS       : lwip, 6lowpan, cve-2026-91018, double-free, embedded, iot, iec-62443, network-stack
 WORD_COUNT : 2280
@@ -2436,7 +2436,7 @@ The thing I keep coming back to is the split. Two zero-days, one release, divide
 TITLE      : Nobody Wrote About This: Command Injection in Schneider Electric NetBotz 5
 DATE       : 2026-09-18
 URL        : https://garrettstimpson.ca/posts/2026/09/18/cve-2026-13336-netbotz-5-backup-restore-command-injection/
-CVE        : CVE-2026-13336, cve-2026-13336, CVE-2026-13337, cve-2026-13337
+CVE        : cve-2026-13336, CVE-2026-13336, cve-2026-13337, CVE-2026-13337
 CATEGORIES : exploits, analysis, hardware
 TAGS       : cve-2026-13336, cve-2026-13337, netbotz, schneider-electric, ics, command-injection, hql-injection, threat-intel, patch-tuesday
 WORD_COUNT : 1320
@@ -4169,7 +4169,7 @@ The boring bugs are the ones that kill you. Patch your Perfex, turn off the migr
 TITLE      : CVE-2026-33185 Got Patched, But the Test-Email SSRF Path Is Only Half-Fixed
 DATE       : 2026-08-17
 URL        : https://garrettstimpson.ca/posts/2026/08/17/cve-2026-33185-test-email-ssrf-half-fixed/
-CVE        : CVE-2026-33185, cve-2026-33185
+CVE        : cve-2026-33185, CVE-2026-33185
 CATEGORIES : exploits, web, ssrf
 TAGS       : discourse, ssrf, smtp, pop3, dns-rebinding, cloudflare, web-security
 WORD_COUNT : 2082
@@ -7184,7 +7184,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : cve-2026-31429, CVE-2026-31429
+CVE        : CVE-2026-31429, cve-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1370
@@ -7814,7 +7814,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
 URL        : https://garrettstimpson.ca/posts/2026/06/07/cve-2026-20245-cisco-sdwan-manager-root-rce/
-CVE        : CVE-2026-20127, CVE-2026-20182, CVE-2026-20245, cve-2026-20245
+CVE        : CVE-2026-20127, CVE-2026-20182, cve-2026-20245, CVE-2026-20245
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, command-injection, zero-day, root, mandiant
 WORD_COUNT : 1289
@@ -8240,7 +8240,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/yellowkey-cve-2026-45585-bitlocker-winre-txf-bypass/
-CVE        : CVE-2026-45585, cve-2026-45585
+CVE        : cve-2026-45585, CVE-2026-45585
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-45585, bitlocker, winre, transactional-ntfs, physical-access
 WORD_COUNT : 1231
@@ -8745,7 +8745,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : cve-2026-35616, CVE-2026-35616
+CVE        : CVE-2026-35616, cve-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1271
@@ -8934,7 +8934,7 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : CVE-2026-20817, cve-2026-20817
+CVE        : cve-2026-20817, CVE-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1111
@@ -9014,7 +9014,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
-CVE        : CVE-2026-0257, cve-2026-0257
+CVE        : cve-2026-0257, CVE-2026-0257
 CATEGORIES : exploits, network-security
 TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
 WORD_COUNT : 1371
@@ -11419,7 +11419,7 @@ MITRE ATT&CK coverage for this sample: T1027 (MBA string obfuscation), T1055 (pr
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
+CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1585
@@ -12017,7 +12017,7 @@ The full advisory is at F5's security portal (K000161019). Fixed packages are av
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1567
@@ -12633,5 +12633,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 84 documents — 2026-10-31T18:32:45Z
+END OF CORPUS — 84 documents — 2026-10-31T18:33:17Z
 ================================================================================
