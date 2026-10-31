@@ -7,7 +7,6 @@ url: "https://garrettstimpson.ca"
 agent_url: "https://agent.garrettstimpson.ca"   # Agent Garrett account and subscription dashboard
 discord_url: "https://discord.gg/UkYYtJtE49"
 twitch_url: "https://www.twitch.tv/gary23w"
-youtube_url: "https://www.youtube.com/channel/UCaEF7HTazfuCtiMJfq9jvSA"
 image: /assets/img/og-card.png   # default social/OG card (jekyll-seo-tag)
 
 # Google Analytics 4 — web stream measurement ID (production builds only)
