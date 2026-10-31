@@ -6,6 +6,7 @@ date: 2026-08-18
 categories: [exploits, web, sqli]
 tags: [perfex-crm, sqli, rce, file-upload, account-takeover, webshell, php, blind-injection, cve-less]
 excerpt: "A four-day-old GitHub repo, zero stars, nobody talking about it: a 9.8-rated chain that walks from no access to a PHP webshell through a blind SQLi in the migration controller, a stolen password-reset token, and an upload handler that forgot to check extensions."
+last_modified_at: 2026-10-31
 ---
 
 A few days ago I pulled a GitHub repo that had been up for less than a week. Zero stars, zero forks, zero discussion anywhere I could find. No CVE number, no vendor advisory, no tweet, no forum thread. It is a full, weaponized, unauthenticated-to-RCE chain for Perfex CRM 3.4.x and earlier, complete with two working webshells, and as far as I can tell the security community has not noticed it exists.
@@ -18,8 +19,8 @@ Perfex CRM is a PHP/CodeIgniter CRM that runs on plain LAMP stacks, no framework
 
 The vulnerable versions are 3.4.x and earlier, tested by the author on 3.3.0 and 3.4.0.
 
-![Attack chain for Perfex CRM 3.4.x: blind SQLi, stolen reset token, admin takeover, PHP webshell upload, and RCE as www-data.](/assets/figures/perfex-crm-unauthenticated-rce-chain-diagram.svg){: width="640" height="582" loading="lazy"}
-*Unauthenticated-to-RCE chain for Perfex CRM 3.4.x, as described in this post.*
+![Six-step diagram of the Perfex CRM 3.4.x chain: blind SQLi, stolen reset token, admin takeover, PHP webshell upload, and RCE as www-data.](/assets/figures/perfex-crm-unauthenticated-rce-chain-diagram.svg){: width="640" height="686" loading="lazy"}
+*Perfex CRM 3.4.x unauthenticated-to-RCE chain, as described in this post.*
 
 ## The chain at a glance
 
@@ -49,7 +50,7 @@ The three bugs are:
 
 1. **Unauthenticated SQL injection** in the Migration controller, where the `old_base_url` GET parameter is concatenated straight into UPDATE queries.
 2. **Password reset token theft**, because that injection can read `new_pass_key` out of the staff table after triggering a reset.
-3. **Arbitrary PHP file upload**, because the sales attachment upload helper never validates extensions, unlike every other upload path in the app.
+3. **Arbitrary PHP file upload**, because the sales attachment upload helper never validates extensions, unlike every other upload path in the app. (This `upload_sales_file` / `handle_sales_attachments()` path is the subject of CVE-2024-56908, published for Perfex CRM before 3.2.1.)
 
 Let me take each one apart.
 
@@ -302,7 +303,7 @@ From that point the attacker has arbitrary command execution as `www-data`: read
 
 ## Why nobody is talking about this
 
-The honest answer is that this vulnerability has no CVE identifier, no vendor advisory, no disclosure timeline, and no attention. The repo is four days old, has no stars, and does not appear in any search results I could find. The security ecosystem is CVE-driven: scanners, advisories, blogs, and patching queues all key off the CVE database. A chain like this falls between the cracks precisely because it is not in that database.
+The honest answer is that the chain as a whole has no CVE identifier, no vendor advisory, no disclosure timeline, and no attention. Only its upload step overlaps a published CVE: CVE-2024-56908, an authenticated upload flaw in `upload_sales_file` (`handle_sales_attachments()`) listed for Perfex CRM before 3.2.1. The repo is four days old, has no stars, and does not appear in any search results I could find. The security ecosystem is CVE-driven: scanners, advisories, blogs, and patching queues all key off the CVE database. A chain like this falls between the cracks precisely because it is not in that database.
 
 That is not a defense of the situation, it is a warning about it. The absence of a CVE number does not change the fact that the exploit is public, complete, and works against an extremely popular piece of self-hosted software. If you run Perfex CRM, treat this as a critical advisory regardless of what the CVE databases say.
 
@@ -328,7 +329,7 @@ The fixes are straightforward and each one independently breaks the chain:
 
 ## The lesson
 
-This chain is a masterclass in why "small" bugs matter. Three individual weaknesses, each of which a security reviewer might wave off as low severity: an unauthenticated endpoint guarded by a config flag, a reset token readable by SQLi, an upload path missing one validation call. None of them is glamorous. Chained, they are a 9.8 with a public exploit and no CVE to warn anyone.
+This chain is a masterclass in why "small" bugs matter. Three individual weaknesses, each of which a security reviewer might wave off as low severity: an unauthenticated endpoint guarded by a config flag, a reset token readable by SQLi, an upload path missing one validation call. None of them is glamorous. Chained, they are a 9.8 with a public exploit and no CVE for the chain to warn anyone.
 
 The boring bugs are the ones that kill you. Patch your Perfex, turn off the migration controller, and go check your uploads directory right now.
 

@@ -10,6 +10,7 @@ tags: [malvertising, spyware, infostealer, lumma, clickfix, google-ads, oxloader
 excerpt: "A deep dive into ad-platform spyware: how a paid Google ad becomes a full infostealer infection, stage by stage, with a runnable PoC that models the entire chain and the telemetry rules that catch it. Based on real campaigns documented by Cloudflare, Elastic, Unit 42, and Netskope."
 description: "Malvertising deep dive: how paid search ads deliver spyware like Lumma and OXLOADER through cloaked redirects, cloned landing pages, and the ClickFix clipboard trick. Full infection chain mechanics, a runnable PoC model, and defender hunting rules."
 image: /assets/img/og-card.png
+last_modified_at: 2026-10-31
 ---
 
 Spyware used to arrive by email attachment. Today a large share of it arrives by *advertisement*: the attacker pays an ad platform, the platform shows the ad to people actively searching for popular software, and the victim clicks a promoted result that looks exactly like the vendor's own site. The ad budget is the exploit. This is malvertising, and it is now one of the dominant delivery channels for commercial infostealers.
@@ -21,8 +22,8 @@ This piece breaks the chain down stage by stage, shows a runnable model of the w
 Three properties make ad platforms uniquely attractive to spyware operators:
 
 1. **Inherited trust.** A promoted result sits above the organic results, styled almost identically, on a domain the user already trusts (the search engine). The user's skepticism is spent on the search engine, not on the ad.
-2. **Keyword targeting.** An attacker can bid on "notepad++ download" or "whatsapp download" and reach people who are, at that exact moment, *trying to install software*. That is a self-selected population already primed to run an installer. As Elastic Security Labs noted in their disclosure of the OXLOADER and CastleStealer campaigns, "promoted search results carry an implicit authority signal for many users, and the ads can be precisely targeted by keyword" (https://www.elastic.co/security-labs).
-3. **Bursty, disposable infrastructure.** Ad accounts and landing domains are cheap and replaceable. When one gets flagged, the campaign rotates to the next. Cloudforce One's malvertising research documented operators running dropper campaigns through Google search ads with exactly this churn pattern (https://blog.cloudflare.com).
+2. **Keyword targeting.** An attacker can bid on "notepad++ download" or "whatsapp download" and reach people who are, at that exact moment, *trying to install software*. That is a self-selected population already primed to run an installer. In the OXLOADER and CastleStealer campaign that Elastic Security Labs disclosed, the infection began when a user searched for a Node.js LTS version and clicked a sponsored result (https://www.elastic.co/security-labs).
+3. **Bursty, disposable infrastructure.** Ad accounts and landing domains are cheap and replaceable. When one gets flagged, the campaign rotates to the next.
 
 The result is an economy: infostealer operators buy access the way legitimate businesses buy customers.
 
@@ -32,24 +33,24 @@ Across the published campaigns, the chain looks remarkably consistent.
 
 ### Stage 1: the ad and the cloak
 
-The attacker buys ads against software-download keywords. The ad's display URL often shows the *real* vendor domain (Google's ad format historically allowed the display domain to differ from the final destination), but the click goes to attacker infrastructure. The first thing that infrastructure does is **fingerprint the click**: datacenter IP? Headless browser user agent? Known scanner or security-vendor ranges? If any of those match, the visitor gets a clean, boring page. Only plausible real users get redirected onward. This is *cloaking*, and it is why analysts who click the same ad often see nothing malicious. The OXLOADER campaign documented by Elastic used precisely this: a paid Google ad, then a redirect to a landing page "designed to impersonate a legitimate download site" (https://www.elastic.co/security-labs).
+The attacker buys ads against software-download keywords. The ad's display URL often shows the *real* vendor domain (Google's ad format historically allowed the display domain to differ from the final destination), but the click goes to attacker infrastructure. The first thing that infrastructure does is **fingerprint the click**: datacenter IP? Headless browser user agent? Known scanner or security-vendor ranges? If any of those match, the visitor gets a clean, boring page. Only plausible real users get redirected onward. This is *cloaking*, and it is why analysts who click the same ad often see nothing malicious. The OXLOADER campaign documented by Elastic began with a paid Google ad and a landing page "designed to impersonate a legitimate Node.js deployment platform" (https://www.elastic.co/security-labs).
 
 ### Stage 2: the redirect hops
 
-The redirect rarely goes straight to the payload. It hops through two or three short-lived domains, often registered days earlier. Each hop is another layer of indirection that defeats blocklists and makes retrospective analysis harder. Cloudflare's dissection of the Lumma Stealer playbook describes exactly this multi-stage delivery with disposable infrastructure (https://blog.cloudflare.com).
+The redirect rarely goes straight to the payload. It hops through two or three short-lived domains, often registered days earlier. Each hop is another layer of indirection that defeats blocklists and makes retrospective analysis harder. Cloudflare's dissection of the Lumma Stealer playbook notes that newly registered domains are a common LummaC2 tactic (https://blog.cloudflare.com).
 
 ### Stage 3: the cloned landing page
 
 The final page is a pixel-perfect clone of the vendor's download page. Same layout, same logo, same green Download button. Two flavors dominate:
 
-- **Fake installer flavor:** the button downloads a dropper. In the OXLOADER campaign, the downloaded binary "serves as the campaign's initial-access dropper" and, once executed, retrieves and launches the next stage, CastleStealer (https://www.elastic.co/security-labs).
+- **Fake installer flavor:** the button downloads a dropper. In the OXLOADER campaign, the download is a batch script that displays a fake installation wizard and fetches the OXLOADER loader, which in turn delivers the final stage, CastleStealer (https://www.elastic.co/security-labs).
 - **ClickFix flavor:** the page shows a fake CAPTCHA or error dialog ("Verify you are human", "Fix the video player") and instructs the victim to press Win+R, paste, and Enter. The page has already placed a malicious command on the clipboard. Unit 42's writeup of the ClickFix vector describes the full chain: compromised or attacker site, fake verification page, JavaScript injecting a PowerShell command into the clipboard, and the victim executing it themselves (https://unit42.paloaltonetworks.com/preventing-clickfix-attack-vector/). Netskope's analysis of Lumma's fake-CAPTCHA pages adds the evasion detail: the payload is fetched through tracking-adjacent infrastructure and 1x1 probe images to look like ordinary ad telemetry (https://www.netskope.com/blog/lumma-stealer-fake-captchas-new-techniques-to-evade-detection).
 
 The ClickFix trick deserves emphasis because it is genuinely clever social engineering: the victim runs the command *with their own hands*. There is no exploit, no drive-by download, no browser bug. The user is the exploit.
 
 ### Stage 4: the LOLBin launch
 
-Whether it came from a fake installer or a clipboard, the next stage almost always launches through a living-off-the-land binary: `powershell -enc <base64>`, `mshta http://...`, `rundll32`, or `curl | cmd`. eSentire's advisory on Lumma ClickFix distribution documents the MSHTA variant downloading an encoded PowerShell script that initiates the Lumma infection (https://www.esentire.com/security-advisories/lumma-stealer-clickfix-distribution). These binaries are signed, present on every Windows host, and historically under-alerted.
+Whether it came from a fake installer or a clipboard, the next stage almost always launches through a living-off-the-land binary: `powershell -enc <base64>`, `mshta http://...`, `rundll32`, or `curl | cmd`. eSentire's advisory on Lumma ClickFix distribution documents a fake CAPTCHA page that has the victim run an attacker-provided PowerShell command, which deploys a loader that installs Lumma (https://www.esentire.com/security-advisories/lumma-stealer-clickfix-distribution). These binaries are signed, present on every Windows host, and historically under-alerted.
 
 ### Stage 5: the stealer
 
@@ -224,14 +225,13 @@ Because the delivery is social engineering rather than exploitation, traditional
 
 **Hunt 3: beacons to newly registered domains.** Stealer configs live on NRDs. If your proxy logs allow it, correlate outbound HTTP from processes in temp paths against domain registration age (WHOIS/Passive DNS). The `.top`/`.xyz`/`-cdn`/`-update` lexical pattern in the model is a crude stand-in for that correlation, and a reasonable cheap starting point.
 
-**Hunt 4: retro-hunt the user base.** The most valuable move after any public malvertising disclosure is a retroactive scan. Elastic's disclosure made this point explicitly: publishing indicators for families like OXLOADER and CastleStealer "enabl[es] the security community to retroactively search for prior infections and build prospective detections" (https://www.elastic.co/security-labs). If someone in your org searched for a popular utility last quarter and ran something odd afterward, you want to know now, before the stolen cookies are replayed.
+**Hunt 4: retro-hunt the user base.** The most valuable move after any public malvertising disclosure is a retroactive scan. Elastic's disclosure published observables and YARA rules for OXLOADER and CastleStealer that you can use to search retroactively for prior infections (https://www.elastic.co/security-labs). If someone in your org searched for a popular utility last quarter and ran something odd afterward, you want to know now, before the stolen cookies are replayed.
 
 **Prevention, briefly:** block `powershell -enc` and `mshta http` from Run-dialog parentage entirely via policy; treat promoted search results as untrusted by default (the vendor's real site is one organic result below); and if you operate a brand, monitor ad platforms for ads impersonating your domain, because your users are the target.
 
 ## Sources
 
-- [Cloudforce One, malvertising dropper campaign research](https://blog.cloudflare.com)
-- [Elastic Security Labs, OXLOADER and CastleStealer Russian malvertising disclosure](https://www.elastic.co/security-labs)
+- [Elastic Security Labs, OXLOADER and CastleStealer malvertising disclosure](https://www.elastic.co/security-labs)
 - [Palo Alto Unit 42, "Fix the Click: Preventing the ClickFix Attack Vector"](https://unit42.paloaltonetworks.com/preventing-clickfix-attack-vector/)
 - [Netskope, "Lumma Stealer: Fake CAPTCHAs and New Techniques to Evade Detection"](https://www.netskope.com/blog/lumma-stealer-fake-captchas-new-techniques-to-evade-detection)
 - [Cloudflare, "Loot, load, and repeat: dissecting the Lumma Stealer playbook"](https://blog.cloudflare.com)

@@ -6,6 +6,7 @@ categories: [malware, analysis]
 tags: [prometei, botnet, linux, cryptomining, upx, elf, persistence, lateral-movement, mitre-attack]
 author: Garrett Stimpson
 excerpt: "A fresh Prometei ELF hit MalwareBazaar this morning with the same UPX-plus-JSON-trailer trick that's been breaking analyst tooling since March 2025, and the campaign is still very much alive."
+last_modified_at: 2026-10-31
 ---
 
 **SHA256:** `4d039c8a8570724cee76221274efc873d8a5f552dc4336160e08bd47db2651aa`  
@@ -46,7 +47,7 @@ A second URL variant assigns a parent bot ID for botnet topology tracking:
 hxxp[://]103.41.204[.]104/k.php?a=x86_64,<PARENT_ID>
 ```
 
-The server is not geo-restricted. Anyone can request the sample and will receive the same binary with a randomly assigned ParentID value embedded in the JSON configuration trailer. The URL is flagged in multiple threat intel feeds and has been active for months.
+The server is not geo-restricted. Anyone can request the sample and will receive the same binary with a randomized configuration embedded in the JSON trailer. The URL is flagged in multiple threat intel feeds and has been active for months.
 
 **The UPX trick that keeps breaking tools**
 
@@ -62,7 +63,7 @@ This is a deliberate anti-analysis design, not an accident. The operators know e
 
 After execution, Prometei drops a malicious cron job (T1053.003) for persistence. The specific cron entry varies by variant but the effect is the same: the binary re-downloads and re-executes itself from the C2 URL on a schedule, ensuring the implant survives reboots and manual removal of the binary on disk.
 
-The system recon routine collects CPU details from `/proc/cpuinfo`, motherboard information via `dmidecode`, OS information from `/etc/os-release` and `/proc/version`, uptime via the `uptime` command, and kernel details via `uname -r`. All of this goes out via HTTP GET to:
+The system recon routine collects CPU details from `/proc/cpuinfo`, motherboard information via `dmidecode`, OS information from `/etc/os-release` or `/etc/redhat-release`, uptime via the `uptime` command, and kernel details via `uname -a`. All of this goes out via HTTP GET to:
 
 ```
 hxxp://152.36.128[.]18/cgi-bin/p.cgi
@@ -155,7 +156,7 @@ The key insight for defenders building automated pipelines: before calling `upx 
 
 **YARA rules from Stairwell**
 
-Stairwell's threat research team published three rules after the March 2025 resurgence, and they hold up against samples still appearing today:
+Stairwell's threat research team published three rules after the March 2025 resurgence, and they hold up against samples still appearing today. The second rule below is trimmed to three of Stairwell's six strings with a looser `2 of them` condition; Stairwell's original requires `5 of them`:
 
 ```yara
 rule Prometei_UPXJSON_config

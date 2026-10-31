@@ -6,11 +6,12 @@ date: 2026-09-16
 categories: [cloud-security, linux, analysis]
 tags: [spiffe, spire, kubernetes, workload-identity, machine-identity, cgroup, attestation, post-exploitation, lateral-movement, red-team, defense, mitre-attack]
 excerpt: "Unit 42 demonstrated that root on a Kubernetes node is enough to spoof SPIRE workload attestation and collect co-located workloads' SVIDs. No CVE, no patch, no in-the-wild use so far. Just an assumption every machine-identity system makes, and the bill it hands you when the node falls."
+last_modified_at: 2026-10-31
 ---
 
 The findings I take most seriously rarely arrive with a CVE number. A CVE has a patch, a deadline, a scan signature, and an end of life. An assumption has none of those. It ships by default, it sits under everything you built on top of it, and it stays quiet right up until someone demonstrates how cheap it is to break.
 
-On September 10, Unit 42 published [The Machine With Many Faces: Post-Exploitation Identity Misuse in SPIFFE/SPIRE](https://unit42.paloaltonetworks.com/spiffe-spire-vulnerabilities/), research by Eviatar Garzi. No CVE. No Patch Tuesday. No victims, and to be clear about that: Unit 42 states they have not observed this technique exploited in the wild. What they demonstrated is smaller and bigger at the same time. An attacker with root on a Kubernetes node can spoof the Linux control group metadata that the SPIRE agent reads during workload attestation, and the agent will hand over a co-located workload's identity. Not a secret stolen from a vault. A freshly issued, cryptographically valid SVID, minted by the thing that is supposed to prevent exactly that.
+On September 10, Unit 42 published [The Machine With Many Faces: Post-Exploitation Identity Misuse in SPIFFE/SPIRE](https://unit42.paloaltonetworks.com/kubernetes-spiffe-spire-identity-spoofing/), research by Eviatar Garzi. No CVE. No Patch Tuesday. No victims, and to be clear about that: Unit 42 states they have not observed this technique exploited in the wild. What they demonstrated is smaller and bigger at the same time. An attacker with root on a Kubernetes node can spoof the Linux control group metadata that the SPIRE agent reads during workload attestation, and the agent will hand over a co-located workload's identity. Not a secret stolen from a vault. A freshly issued, cryptographically valid SVID, minted by the thing that is supposed to prevent exactly that.
 
 If your zero trust story has SPIFFE or SPIRE anywhere in it, and a lot of them do, this is the part of the story worth reading twice.
 
@@ -103,7 +104,7 @@ The real scope is co-location. Every workload scheduled on the node, whose regis
 
 ## Spooffe: from one identity to all of them
 
-Unit 42 did not stop at the manual demo. They shipped [Spooffe](https://github.com/), an open-source tool for defenders that automates the loop: scan the node for running workloads, discover each one's cgroup path, replicate it as a mock cgroup for its own process, query the local agent, and collect every SVID the node can vouch for. One process, walking the node, harvesting identities.
+Unit 42 did not stop at the manual demo. They shipped [Spooffe](https://github.com/PaloAltoNetworks/spooffe), an open-source tool for defenders that automates the loop: scan the node for running workloads, discover each one's cgroup path, replicate it as a mock cgroup for its own process, query the local agent, and collect every SVID the node can vouch for. One process, walking the node, harvesting identities.
 
 It also includes a second capability the post names but does not detail: agent impersonation, testing whether an attacker can impersonate the SPIRE agent itself and talk to the server directly. That is the scarier question, and I would treat its answer as a standing research item rather than a settled one.
 
@@ -150,5 +151,5 @@ Root on the node was always game over for the node. The change is that the node 
 
 ## Sources
 
-- [The Machine With Many Faces: Post-Exploitation Identity Misuse in SPIFFE/SPIRE](https://unit42.paloaltonetworks.com/spiffe-spire-vulnerabilities/)
-- [Spooffe](https://github.com/)
+- [The Machine With Many Faces: Post-Exploitation Identity Misuse in SPIFFE/SPIRE](https://unit42.paloaltonetworks.com/kubernetes-spiffe-spire-identity-spoofing/)
+- [Spooffe](https://github.com/PaloAltoNetworks/spooffe)

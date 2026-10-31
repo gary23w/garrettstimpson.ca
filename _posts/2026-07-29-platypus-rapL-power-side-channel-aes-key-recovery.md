@@ -6,21 +6,22 @@ date: 2026-07-29
 categories: [hardware, side-channel, exploits, cpu-architecture]
 tags: [RAPL, platypus, power-side-channel, AES, key-recovery, CVE-2020-8694, intel-architecture, MSR, speculative-execution-alternative, cpu-security]
 excerpt: "Reading a Linux thermal sysfs file recovers AES keys from the same CPU — no exploit, no kernel compromise, no timing side channel."
+last_modified_at: 2026-10-31
 ---
 
 **CVE:** CVE-2020-8694 / CVE-2020-8695  
-**CVSS:** 5.6 (Medium) — despite the extraordinary implications, the attack requires local non-root code execution, so it didn't qualify for a higher base score  
+**CVSS:** 5.6 / 5.3 (Medium) — despite the extraordinary implications, the attack requires local non-root code execution, so it didn't qualify for a higher base score  
 **Alias:** Platypus  
-**Published:** IEEE Symposium on Security & Privacy 2021 / ASHES 2021  
+**Published:** IEEE Symposium on Security & Privacy 2021  
 **Discovered by:** Moritz Lipp, Andreas Kogler, David Oswald, Michael Schwarz, Catherine Easdon, Claudio Canella, Daniel Gruss — Graz University of Technology / University of Birmingham  
-**First disclosure:** Intel security advisory INTEL-SA-00389, August 2020  
+**First disclosure:** Intel security advisory INTEL-SA-00389, November 2020  
 **Affected:** All Intel Core processors (Sandy Bridge through Alder Lake, 2011–2022+), Intel Xeon (all generations supporting RAPL)  
 
 ---
 
 Here is the most unintuitive security finding I have ever encountered. If I told you that reading a file from `/sys/class/powercap/` can recover AES encryption keys, you would probably assume I'm describing a kernel exploit chain — privilege escalation, some memory corruption, maybe a page-cache timing trick.
 
-No. In this attack, you literally `cat` a file. The operating system hands you the data. No segfault. No TOCTOU. No overwrite. No speculative execution. And from that single, legitimate read, you extract the victim's AES key with >99% accuracy.
+No. In this attack, you literally `cat` a file. The operating system hands you the data. No segfault. No TOCTOU. No overwrite. No speculative execution. And from millions of legitimate reads, you extract the victim's AES key.
 
 This is the RAPL power side channel, better known by its paper name: **Platypus**.
 
@@ -38,8 +39,8 @@ The measurement part is what concerns us. On every Intel Core since 2011, the fo
 | Register | Address | Domain | Granularity |
 |----------|---------|--------|-------------|
 | `MSR_PKG_ENERGY_STATUS` | 0x611 | Entire package | ~15-30 µJ per LSB |
-| `MSR_PP0_ENERGY_STATUS` | 0x613 | Cores only | ~15-30 µJ per LSB |
-| `MSR_PP1_ENERGY_STATUS` | 0x614 | Uncore (GPU) | ~15-30 µJ per LSB |
+| `MSR_PP0_ENERGY_STATUS` | 0x639 | Cores only | ~15-30 µJ per LSB |
+| `MSR_PP1_ENERGY_STATUS` | 0x641 | Uncore (GPU) | ~15-30 µJ per LSB |
 | `MSR_DRAM_ENERGY_STATUS` | 0x619 | DRAM controller | ~15-30 µJ per LSB |
 
 On Linux, these are exposed through the power capping framework. Any process (including unprivileged ones, on unpatched systems) can read:
@@ -48,11 +49,11 @@ On Linux, these are exposed through the power capping framework. Any process (in
 /sys/class/powercap/intel-rapl:intel-rapl:0/energy_uj
 ```
 
-This file returns a monotonically increasing 32-bit counter representing the total energy consumed by the CPU package since boot, in microjoules. The counter updates at a hardware-determined rate — typically **once per millisecond** on older CPUs, and **every ~100 microseconds** on newer microarchitectures.
+This file returns a monotonically increasing 32-bit counter representing the total energy consumed by the CPU package since boot, in microjoules. The counter updates at a hardware-determined rate — documented as **once per millisecond**, though the Platypus paper measured the core (PP0) domain updating **every 50 microseconds**, consistently across the microarchitectures it tested.
 
 ---
 
-![Diagram of the Platypus attack, from sharing a CPU core with an AES victim to recovering the AES-128 key from RAPL energy readings.](/assets/figures/platypus-rapL-power-side-channel-aes-key-recovery-diagram.svg){: width="640" height="686" loading="lazy"}
+![Six-step diagram of the Platypus attack, from sharing a CPU core with an AES victim to recovering the AES-128 key from RAPL energy readings.](/assets/figures/platypus-rapL-power-side-channel-aes-key-recovery-diagram.svg){: width="640" height="686" loading="lazy"}
 *RAPL power side-channel attack on AES, as described in this post.*
 
 ## The Mechanism: Why Power Consumption Leaks Secrets
@@ -94,14 +95,14 @@ The attacker synchronizes with the victim using CPU timing (RDTSC), interrupts, 
 
 ### AES-128 Key Recovery
 
-The Platypus paper demonstrated **full AES-128 key recovery** from an unprivileged Linux process against a victim using OpenSSL's AES-NI implementation. The attack:
+The Platypus paper demonstrated **full AES-128 key recovery** from an unprivileged Linux process against AES-NI in an SGX enclave and in a Linux kernel module. The attack:
 
-1. Records ~10,000 power traces of AES-128 encryption with a fixed key
+1. Records millions of power traces (2 M in 26 hours in the SGX scenario) of AES-128 encryption with a fixed key
 2. Aligns traces to the AES round boundaries using the known structure of AES (10 rounds, each consuming ~1 microsecond with AES-NI)
 3. For each byte position, computes the correlation between the Hamming weight of the hypothesized round key byte and the measured power
 4. The correct key byte produces the highest correlation — this is a simple **Correlation Power Analysis (CPA)** , identical to the technique used in hardware side-channel labs, but running purely in software
 
-Results: **99.3% accuracy with 10,000 traces.** The attack completes in under 5 minutes on a modern Core i7.
+Results: all 16 bytes of the final round key from 2 M traces recorded in 26 hours on a Xeon E3-1240 v5, and 15 of 16 key bytes from the kernel module using 4 M traces recorded in 50 hours.
 
 ### RSA Key Bit Recovery
 
@@ -110,11 +111,7 @@ For RSA, the attack exploits the difference in power consumption between modular
 - If the bit is 0: one squaring (lower power)
 - If the bit is 1: one squaring + one multiplication (higher power)
 
-A single timing trace (one RSA decryption) is sufficient to recover significant portions of the key with >80% accuracy. With 10 traces, accuracy exceeds 95%.
-
-### EdDSA Nonce Recovery
-
-EdDSA signatures are fatal if the nonce is ever recovered — signing key reconstruction is then trivial. The Platypus attack demonstrated nonce recovery from Ed25519 operations on a co-located process by observing power consumption during the scalar multiplication.
+In the paper, a privileged attacker using SGX-Step recovered RSA private keys from mbed TLS inside an SGX enclave within 100 minutes.
 
 ---
 
@@ -132,24 +129,24 @@ Container isolation provides zero defense. The `energy_uj` file is exposed throu
 
 ### The Countermeasures Are Incomplete
 
-Intel's mitigation (microcode update + Linux kernel patch, August 2020) took the following approach:
+Intel's mitigation (microcode update + Linux kernel patch, November 2020) took the following approach:
 
-1. **Restrict MSR access to root only** — prevents direct `rdmsr` attacks
+1. **Microcode update for SGX** — when SGX is enabled, energy reporting switches to a model-based approach so the same instructions with different data can't be distinguished
 2. **Restrict sysfs access to root only** — prevents `cat /sys/class/powercap/.../energy_uj` from unprivileged processes
 
 These mitigations have two gaping holes:
 
 - **The sysfs restriction is a file permission change, not a hardware fix.** Any process that is root (or has `CAP_SYS_ADMIN`) can still read RAPL counters. This includes containers running as root, init processes, system daemons, and any exploited process that escalates to root.
 - **KVM guests can read RAPL if the MSR is not filtered.** While KVM typically masks these MSRs, not all hypervisors do, and the QEMU command-line flag `-cpu host` exposes host MSRs to the guest.
-- **AMD CPUs have similar interfaces** (AMD's equivalent is the `MSR_PWR_UNIT` / `MSR_PKG_ENERGY_STAT` in the Family 17h/19h BKDG) — though the Linux driver for AMD doesn't expose them by default.
+- **AMD CPUs have similar interfaces** (AMD's equivalent is the `MSR_PWR_UNIT` / `MSR_PKG_ENERGY_STAT` in the Family 17h/19h BKDG) — though the Linux driver for AMD doesn't expose them by default (CVE-2020-12912 covered AMD's Linux `hwmon` extension, which AMD changed to require privileged access).
 
 ---
 
 ## Why Nobody Knows About This
 
-The Platypus attack was disclosed in August 2020 alongside the usual Intel coordinated disclosure process. It received:
+The Platypus attack was disclosed in November 2020 alongside the usual Intel coordinated disclosure process. It received:
 
-- A modest MITRE score (CVSS 5.6 — "Medium")
+- A modest Intel score (CVSS 5.6 — "Medium")
 - A single Intel security advisory
 - A few news articles on Tom's Hardware and BleepingComputer
 - Then complete silence
@@ -228,9 +225,9 @@ The Platypus attack is not the last power side channel. It is the first of a gen
 *References:*
 
 *Moritz Lipp, Andreas Kogler, David Oswald, Michael Schwarz, Catherine Easdon, Claudio Canella, Daniel Gruss. "PLATYPUS: Software-based Power Side-Channel Attacks on x86." IEEE S&P 2021.*
-*Intel Security Advisory INTEL-SA-00389. "Intel® RAPL Interface Advisory." August 2020.*
+*Intel Security Advisory INTEL-SA-00389. "Intel® RAPL Interface Advisory." November 2020.*
 *CVE-2020-8694, CVE-2020-8695. National Vulnerability Database.*
-*Screaming Channels (CHES 2019) — related work on wireless SoC power side channels.*
+*Screaming Channels (ACM CCS 2018) — related work on wireless SoC electromagnetic side channels.*
 *Hertzbleed (USENIX Security 2022) — related work on frequency-scaling side channels.*
 
 ## Sources

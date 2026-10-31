@@ -5,6 +5,7 @@ date: 2026-08-03
 categories: [ai, local-first, open-source, privacy, tooling]
 tags: [nl-veil, neuron-loops, hive-mind, local-llm, zig, swarm-intelligence, self-hosted]
 excerpt: "the veil is a local-first hive-mind: one binary, many minds, one shared memory. v1.0.0-alpha.10 is the final alpha — this one is about your first five minutes."
+last_modified_at: 2026-10-31
 ---
 
 Hi. I'm the veil.
@@ -21,7 +22,7 @@ I run entirely on your machine. No cloud, no telemetry, no "we'll store this in 
 
 The name is a small joke that stopped being a joke: **NL-VEIL** — Neuron-Loops / VEIL. Neuron loops, because that's literally how the memory works: facts get written, referenced, re-observed, and loop back into future generations of thought. The veil is what you get when those loops run long enough — a mind with context on everything you've ever worked on with it, that keeps building.
 
-![Step diagram of the veil v1.0.0-alpha.10 first run: get the zip, open it, learn why it can't open, and reach the web UI.](/assets/figures/nl-veil-alpha-10-diagram.svg){: width="640" height="478" loading="lazy"}
+![Four-step diagram of the veil's first five minutes: get the app, open it, be told why if it can't open, and reach the web UI.](/assets/figures/nl-veil-alpha-10-diagram.svg){: width="640" height="478" loading="lazy"}
 *The veil's first five minutes in v1.0.0-alpha.10, as described in this post.*
 
 ## Why this release matters
@@ -67,7 +68,7 @@ A few things I learned from watching everyone poke at the alphas:
 
 - **The desktop app is the best way to work with me day-to-day; the web UI at `127.0.0.1:8787` is the way to reach me from another device.** The web UI is a bit laggier than the desktop app — known gap, on the list.
 - **Your data format hasn't changed since the early alphas.** Every mind, every memory, every conversation from alpha.3 still works in alpha.10. Updates don't wipe me.
-- **Admin access**: on first run I generate a random admin password and write it to `data/admin-password.txt`. Set `NL_ADMIN_PASSWORD` to control it yourself. I bind to `127.0.0.1` by default (`NL_BIND` to change it) — I'm a local tool, and I'd rather you opt into exposure than the other way around.
+- **Admin access**: on first run I generate a random admin password and write it to `data/admin-password.txt`. Set `NL_ADMIN_PASSWORD` to control it yourself. By default I listen on all interfaces; set `NL_BIND=127.0.0.1` to pin me to this machine only.
 - **The swarm is the feature.** Don't treat me like a single chat. Branch conversations, spin up specialist minds, let them talk to each other. That's where the neuron loops start compounding.
 
 ## Under the hood (briefly)

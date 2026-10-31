@@ -5,6 +5,7 @@ date: 2026-05-30
 categories: [exploits, linux]
 tags: [cifswitch, cifs-utils, cifs-upcall, keyrings, namespaces, nss, lpe]
 excerpt: "No memory corruption, no race. Just a root helper that trusts a key description it should never have parsed, then setns()-es into a namespace you control."
+last_modified_at: 2026-10-31
 ---
 
 Most of the Linux root bugs this month have been page-cache corruption. Dirty Frag, Fragnesia, Copy Fail. All variations on the same skb-and-COW theme, all about tricking the kernel into writing onto memory it doesn't own. CIFSwitch is a nice break from that. There is no overflow here. No race window. No timing. It is a pure trust bug that lives on the seam between the kernel CIFS client and a root-owned userspace helper, and once you see how it works you start wondering how it sat there since the upcall mechanism was built.
@@ -41,11 +42,11 @@ The public PoC at `github.com/manizada/CIFSwitch` does exactly this. It builds a
 
 This is where I want to be honest, because the headlines blur it. CIFSwitch is not a press-one-button-on-every-box bug. It needs a specific stack lined up: a vulnerable kernel, an affected `cifs-utils`, the default `cifs.spnego` request-key rule in place, unprivileged user and mount namespaces enabled, and a LSM policy that doesn't already block the chain.
 
-When those line up, it is stock-exploitable. Manizada's tested list includes Linux Mint 21.3 and 22.3, CentOS Stream 9, Rocky Linux 9, AlmaLinux 9.7 (including the Azure image), Kali headless from 2021.4 through 2026.1, and several SLES and SLES-for-SAP 15 SP7 and 16 builds running SELinux permissive. A second tier becomes exploitable the moment someone installs `cifs-utils` by hand, and that group is the one that should worry you because it is huge: Ubuntu 18.04 through 22.04, Debian 11 through 13, Pop!_OS 22.04 and 24.04, openSUSE Leap 15.6, Oracle Linux 8 and 9 cloud images, Amazon Linux 2023 on permissive SELinux. Anybody who has ever run `apt install cifs-utils` to mount a file server has opted in.
+When those line up, it is stock-exploitable. Manizada's tested list includes Linux Mint 21.3 and 22.3, CentOS Stream 9, Rocky Linux 9, AlmaLinux 9.7 (including the Azure image), Kali headless from 2021.4 through 2026.1, SLES and SLES-for-SAP 15 SP7 with AppArmor active, and SLES-for-SAP 16 running SELinux permissive. A second tier becomes exploitable the moment someone installs `cifs-utils` by hand, and that group is the one that should worry you because it is huge: Ubuntu 18.04 through 22.04, Debian 11 through 13, Pop!_OS 22.04 and 24.04, openSUSE Leap 15.6, Oracle Linux 8 and 9 cloud images, Amazon Linux 2023 on permissive SELinux. Anybody who has ever run `apt install cifs-utils` to mount a file server has opted in.
 
 The newer releases mostly hold. Fedora 40 through 44, Ubuntu 26.04, CentOS Stream 10, Rocky 10, AlmaLinux 10.1, openSUSE Tumbleweed and SLES 16 are blocked by stock SELinux or AppArmor policy even with `cifs-utils` present. That is a real argument for enforcing mode being on by default, and a quiet reminder that "SELinux permissive" in a golden image is not a neutral choice.
 
-As of disclosure there was no CVE assigned yet. The kernel-side fix is public and queued for stable. It does the obvious correct thing the original code skipped: it rejects userspace-created `cifs.spnego` descriptions and only lets CIFS create them using its private `spnego_cred` credentials, so a forged description from an unprivileged keyring call no longer reaches the root helper.
+As of disclosure there was no CVE assigned yet; it has since been assigned CVE-2026-46243. The kernel-side fix is public and queued for stable. It does the obvious correct thing the original code skipped: it rejects userspace-created `cifs.spnego` descriptions and only lets CIFS create them using its private `spnego_cred` credentials, so a forged description from an unprivileged keyring call no longer reaches the root helper.
 
 ## What to do before the erratas land
 

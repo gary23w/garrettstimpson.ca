@@ -6,12 +6,11 @@ date: 2026-07-28
 categories: [hardware, exploits, forensics, defense]
 tags: [NVMe, SSD, firmware-rootkit, persistent-implant, DMA-attack, PCIe, storage-forensics, bus-master, FTL, NAND]
 excerpt: "The most persistent computer implant isn't in the UEFI, MBR, or OS — it's in the SSD controller firmware, invisible to every scanner and forensic tool."
+last_modified_at: 2026-10-31
 ---
 
 **Alias:** Ghost Disk / SSD Firmware Rootkit
-**First demonstrated:** 2015 — "Evil Maid Just Got Worse" (SATA SSD firmware attack)
 **Updated research:** 2021 — NVMe SSD controller reverse engineering
-**Disclosed by:** Anxiao Cai / Alex Withers (2022 NVMe controller DMA analysis)
 
 ---
 
@@ -37,7 +36,7 @@ The controller's firmware — the **Flash Translation Layer (FTL)** management c
 
 That firmware update pathway is the entry point.
 
-![Diagram of an NVMe firmware implant, from OS-level firmware download and commit to read interception, host DMA and a hidden enclave.](/assets/figures/nvme-ssd-controller-firmware-rootkit-persistent-implant-diagram.svg){: width="640" height="686" loading="lazy"}
+![Six-step diagram of an NVMe controller firmware implant, from OS-level firmware download and commit to read interception, host DMA and a hidden enclave.](/assets/figures/nvme-ssd-controller-firmware-rootkit-persistent-implant-diagram.svg){: width="640" height="686" loading="lazy"}
 *SSD controller firmware implant chain, as described in this post.*
 
 ## The Firmware Update Attack Surface
@@ -47,10 +46,10 @@ The NVMe specification defines the Firmware Download and Firmware Commit command
 | Command | Opcode | Description |
 |---------|--------|-------------|
 | **Firmware Download** | 0x11 | Uploads a firmware image to the controller's staging area (up to 128MB per download) |
-| **Firmware Commit** | 0x13 | Activates the staged firmware: commit to slot, replace, or activate on next reset |
-| **Get Features (Firmware Slot)** | 0x0A | Query which firmware slot is active, revision info, and commit type support |
+| **Firmware Commit** | 0x10 | Activates the staged firmware: commit to slot, replace, or activate on next reset |
+| **Get Log Page (Firmware Slot, log ID 0x03)** | 0x02 | Query which firmware slot is active, revision info, and commit type support |
 
-The critical detail: **these commands are authenticated by only the OS — there is no cryptographic verification between the host and the drive's controller during a firmware update** on any consumer NVMe drive I'm aware of, and on most enterprise drives below the very top tier.
+The critical detail: **these commands are gated only by the OS — the drive's own defense is signature verification of the firmware image**, which every drive in the IEEE S&P 2019 SSD-encryption study had (including Samsung's 950 PRO NVMe drive), though the researchers bypassed it on some models.
 
 On Linux, any user with `CAP_SYS_ADMIN` (or root) can send these commands directly via the `/dev/nvmeX` character device:
 
@@ -68,7 +67,7 @@ ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
 
 // Firmware commit: activate slot 1 on next reset
 struct nvme_passthru_cmd cmd2 = {
-    .opcode = 0x13,           // nvme_cmd_fw_commit
+    .opcode = 0x10,           // nvme_cmd_fw_commit
     .cdw10 = 0x01,            // commit slot 1, action: activate on reset
 };
 ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd2);
@@ -77,7 +76,7 @@ ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd2);
 // The drive now loads your firmware on every power-on.
 ```
 
-That's it. Three `ioctl()` calls and a reboot. No SecureBoot enrollment needed, no TPM PCR update, no firmware signing check — unless the OEM specifically implemented vendor-unique authentication (which almost none have, because the industry assumes the host is trusted by the device, not the other way around).
+That's it. Three `ioctl()` calls and a reboot. No SecureBoot enrollment needed, no TPM PCR update — but the drive itself checks firmware signatures (the Crucial MX100 in the IEEE S&P 2019 study, for example, verifies RSA-2048/SHA-256 signatures), so this only works once that check has been bypassed.
 
 ## What a Malicious SSD Controller Can Do
 
@@ -153,12 +152,6 @@ A malicious firmware can carve itself a **persistent enclave** in the overprovis
 
 This isn't theoretical. Several research efforts have demonstrated SSD firmware implants:
 
-### "Evil Maid Just Got Worse" (Cai et al., 2015)
-The seminal work. Researchers replaced the firmware on a Crucial M500 SATA SSD with a custom build modified from the open-source OpenSSD platform. The custom firmware:
-- Intercepted LBA reads to hide a malicious bootloader
-- Maintained persistence across OS reinstalls
-- Demonstrated DMA-based host memory corruption from the SSD controller
-
 ### OpenSSD / Cosmos+ OpenSSD (2017-2022)
 The OpenSSD project (now Cosmos+) provides an open-source FPGA-based SSD controller platform. Multiple research teams have used it to:
 - Implement custom FTL for security research
@@ -167,7 +160,7 @@ The OpenSSD project (now Cosmos+) provides an open-source FPGA-based SSD control
 
 ### NVMe Controller Reverse Engineering (2021-2023)
 Multiple independent researchers have extracted firmware images from Phison E18, Samsung Phoenix, and WD SanDisk NVMe controllers via JTAG debugging and SPI flash reading. The security posture is consistently weak:
-- No firmware update signing on consumer drives (or signature verification can be toggled via debug commands)
+- Firmware update signature verification that can be toggled via debug commands
 - Debug UART ports left active on production firmware
 - JTAG/SWD fuses not blown on many retail controllers
 
@@ -231,7 +224,7 @@ DMTF's SPDM (Security Protocol and Data Model) and the NIST DICE (Device Identif
 
 3. **Monitor for unauthorized firmware update commands:**
    - Windows: Event Log entry for `NVMe Firmware Activation` (Event ID 2001 under Microsoft-Windows-Storage-Storport)
-   - Linux: audit system can monitor `ioctl` calls on `/dev/nvme*` for opcodes 0x11 and 0x13
+   - Linux: audit system can monitor `ioctl` calls on `/dev/nvme*` for opcodes 0x11 and 0x10
 
 4. **Enable IOMMU/VT-d in the UEFI firmware** and verify the NVMe controller is behind a DMA remapping hardware unit. On Linux:
    ```bash
@@ -256,13 +249,10 @@ Until then, the most persistent, forensic-resistant implant isn't hiding in your
 ---
 
 *References:*
-- *Cai, A. et al. "Evil Maid Just Got Worse: SSD Firmware Attacks." (2015)*
 - *OpenSSD Project / Cosmos+ OpenSSD, <https://openssd-project.org/*>
-- *Withers, A. "NVMe Firmware Security Analysis." (2022)*
 - *NVMe Express Base Specification, Rev 2.0c — Section 8.10: Firmware Update Commands*
 - *DMTF DSP0274 — Security Protocol and Data Model (SPDM) Specification*
 - *TCG Storage Architecture Core Specification 2.0*
-- *Zheng, Y. et al. "Your SSD Is Not Yours — DMA Attacks via NVMe Controller." (NDSS 2024 Workshop)*
 
 ## Sources
 

@@ -7,6 +7,7 @@ categories: [malware, analysis]
 tags: [donutloader, valleyrat, silver-fox, shellcode, inno-setup, reflective-loading, anti-vm, windows, mitre-attack]
 author: Garrett Stimpson
 excerpt: "A 5MB Inno Setup installer landed on MalwareBazaar carrying Donut-generated shellcode that loads ValleyRAT entirely in memory, signed with a junk certificate and wrapped in anti-VM checks."
+last_modified_at: 2026-10-31
 ---
 
 **SHA256:** `480c184e69a19d4f3bb595324d618eead8f6fcc5176f1ebc5e44ee1389472503`  
@@ -25,7 +26,7 @@ A sample named `1.chation_mscate..exe` hit MalwareBazaar yesterday afternoon, ta
 
 What makes this one worth writing about is the layering. You have a trusted installer format on the outside, position-independent shellcode in the middle, and a Gh0st descendant on the inside. None of the interesting part ever lands on disk as a recognizable PE. That is the whole point.
 
-ValleyRAT, also tracked as Winos 4.0, is a remote access trojan in the Gh0stRAT family. It is the signature tool of Silver Fox, a financially motivated actor that has spent the last year hammering Chinese-speaking targets with tax lures, fake Microsoft Teams installers, and e-invoice bait. If you have read the K7 Labs or Seqrite writeups from late 2025, you have seen the playbook. This sample is the same family arriving through a slightly different front door.
+ValleyRAT, also tracked as Winos 4.0, is a remote access trojan in the Gh0stRAT family. It is the signature tool of Silver Fox, a financially motivated actor that has spent the last year hammering Chinese-speaking targets with tax lures, fake Microsoft Teams installers, and e-invoice bait. If you have read the Seqrite writeup from October 2025 or the K7 Labs one from May 2026, you have seen the playbook. This sample is the same family arriving through a slightly different front door.
 
 ---
 

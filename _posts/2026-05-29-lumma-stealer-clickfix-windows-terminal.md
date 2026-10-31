@@ -6,6 +6,7 @@ date: 2026-05-29
 categories: [malware, analysis]
 tags: [lumma-stealer, clickfix, infostealer, windows-terminal, mitre-attack, castleloader]
 excerpt: "Twelve months after a global law enforcement operation seized 2,300 of its C2 domains, Lumma Stealer is back at scale, now weaponizing Windows Terminal and ClickFix social engineering to bypass the exact defenses that caught it last time."
+last_modified_at: 2026-10-31
 ---
 
 A year ago, the DOJ, FBI, and Microsoft jointly dismantled the LummaC2 infrastructure. They seized 2,300 command-and-control domains, filed civil actions, and called it a significant blow to the infostealer-as-a-service ecosystem. It was impressive work. And yet, here we are.
@@ -22,8 +23,8 @@ The family: Lumma Stealer (LummaC2), a malware-as-a-service infostealer platform
 
 ---
 
-![Six-step diagram of Lumma Stealer from a fake CAPTCHA and Windows Terminal paste to CastleLoader injection and credential theft.](/assets/figures/lumma-stealer-clickfix-windows-terminal-diagram.svg){: width="640" height="686" loading="lazy"}
-*Lumma Stealer ClickFix and Windows Terminal chain, as described in this post.*
+![Six steps: a fake CAPTCHA opens Windows Terminal, PowerShell runs an MSI, CastleLoader injects Lumma, Chrome data is decrypted and sent, then defences.](/assets/figures/lumma-stealer-clickfix-windows-terminal-diagram.svg){: width="640" height="686" loading="lazy"}
+*How Lumma uses Windows Terminal ClickFix to steal credentials, as described in this post.*
 
 ## What Makes It Work
 
@@ -121,7 +122,7 @@ The critical detail: `CryptUnprotectData` requires no admin rights. Any user-lev
 
 ## Detection and Defense
 
-**YARA (adapted from bgd-cirt LummaStealer ruleset):**
+**YARA:**
 
 ```yara
 rule LummaStealer_2026_CastleLoader_Chain {
@@ -152,7 +153,7 @@ Event ID 11 (File Create): Directory creation under `C:\ProgramData\app_config\`
 
 Event ID 7 (Image Load): Flag any DLL loaded into a browser process from `%TEMP%` or `%ProgramData%` paths. Browsers do not normally load modules from those locations.
 
-**Sigma references:** `proc_creation_win_wt_susp_child_process` and `proc_creation_win_msiexec_install_quiet` in the SigmaHQ community ruleset cover the major chokepoints.
+**Sigma references:** `proc_creation_win_windows_terminal_susp_children` and `proc_creation_win_msiexec_install_quiet` in the SigmaHQ community ruleset cover the major chokepoints.
 
 **Mitigations worth actually deploying:** A Windows Defender Application Control (WDAC) policy restricting MSI execution to signed, trusted publishers blocks the msiexec stage cold. For credential theft, the practical answer is deploying Chrome's App-Bound Encryption organization-wide and monitoring for processes touching `Login Data` outside the browser itself. The clipboard pre-staging for ClickFix is harder to block at the OS level, but browser extension policies can restrict JavaScript clipboard write access on non-allowlisted origins.
 

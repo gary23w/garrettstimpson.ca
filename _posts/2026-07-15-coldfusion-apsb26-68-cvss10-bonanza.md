@@ -1,11 +1,12 @@
 ---
 layout: post
-title: "ColdFusion APSB26-68: Seven CVSS 10.0 Flaws and a Two-Hour Exploitation Window"
-seo_title: "ColdFusion APSB26-68: Seven CVSS 10.0 Flaws"
+title: "ColdFusion APSB26-68: Six CVSS 10.0 Flaws and a Two-Hour Exploitation Window"
+seo_title: "ColdFusion APSB26-68: Six CVSS 10.0 Flaws"
 date: 2026-07-15
 categories: [exploits, web, vuln-research]
 tags: [CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286, adobe, coldfusion, RCE, path-traversal, unrestricted-upload, CISA-KEV, watchtowr]
 excerpt: "Adobe dropped patches for 11 critical ColdFusion flaws — six of them CVSS 10.0 — on June 30. Attackers had working exploits against CVE-2026-48282 within two hours of disclosure. This is the anatomy of the RDS FILEIO path traversal and the unrestricted upload bugs that made it possible, why ColdFusion keeps getting hammered, and what to do if you're still running a vulnerable instance."
+last_modified_at: 2026-10-31
 ---
 
 **CVE:** CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286  
@@ -18,7 +19,7 @@ excerpt: "Adobe dropped patches for 11 critical ColdFusion flaws — six of them
 
 ---
 
-On June 30, 2026, Adobe published APSB26-68, a security bulletin covering 11 critical vulnerabilities in ColdFusion 2023 and 2025. Six of them carry CVSS 10.0 — the maximum possible score. A seventh, in Adobe Campaign Classic, also scores 10.0. That is not a typo. Seven distinct vulnerabilities that each earn a perfect severity rating, all fixed in the same patch release.
+On June 30, 2026, Adobe published APSB26-68, a security bulletin covering 11 critical vulnerabilities in ColdFusion 2023 and 2025. Six of them carry CVSS 10.0 — the maximum possible score. A seventh, in Adobe Campaign Classic (CVE-2026-48286, fixed under the separate bulletin APSB26-69), also scores 10.0. That is not a typo. Seven distinct vulnerabilities that each earn a perfect severity rating, fixed across two Adobe bulletins.
 
 What happened next is a case study in how fast modern exploitation moves. Two days after the bulletin, watchTowr researchers published a technical analysis breaking down the RDS FILEIO path traversal (CVE-2026-48282) and the unrestricted file upload bugs. Within two hours of that publication, KEVIntel's global honeypot network recorded active exploit traffic. An actor operating from Indian infrastructure was already probing every internet-facing ColdFusion server they could find.
 
@@ -32,7 +33,7 @@ This post walks through the two most interesting bugs — the RDS FILEIO path tr
 
 ColdFusion's Remote Development Services (RDS) is a legacy feature dating back to the Dreamweaver era. It lets an IDE — historically ColdFusion Builder, Dreamweaver, or the Eclipse plugin — communicate with a running ColdFusion server over HTTP-based RPC. Through RDS a developer can browse the filesystem, execute database queries, deploy files, and debug applications.
 
-One of the RDS services is **FILEIO**, a servlet that handles remote file operations: read, write, copy, delete, list directory contents. It was designed for developer convenience, not for exposure to the open internet. But ColdFusion servers often sit behind a web server that passes requests through, and RDS is enabled by default in many configurations.
+One of the RDS services is **FILEIO**, a servlet that handles remote file operations: read, write, copy, delete, list directory contents. It was designed for developer convenience, not for exposure to the open internet. But ColdFusion servers often sit behind a web server that passes requests through, and RDS, though not enabled by default, is switched on in some deployments.
 
 The vulnerability is a path traversal in the FILEIO handler. The servlet constructs file paths from user-supplied parameters without adequate validation, and the ColdFusion server runs with high integrity (often `NT AUTHORITY\SYSTEM` on Windows or root-equivalent on Linux). An unauthenticated attacker sends a crafted POST request to:
 
@@ -74,13 +75,11 @@ Attacker                  ColdFusion Server
    │◄───────────────────────────│
 ```
 
-watchTowr's analysis confirmed that the FILEIO handler uses a `processCmd()` dispatch that maps the `ACTION` parameter directly to command implementations. The `writeFile` command takes a `path` parameter and writes the request body to that location. Path traversal sequences like `../` are not stripped or validated.
+watchTowr's analysis showed that `RdsFrontEndServlet` maps the `ACTION` parameter to a servlet (`FILEIO` goes to `FileServlet`), whose `processCmd()` hands file operations to operators such as `FileWriteOperator`. The write operation takes a `path` parameter and writes the request body to that location. Path traversal sequences like `../` are not stripped or validated.
 
-The researchers described it in characteristically blunt terms during their July 2 write-up:
+The researchers' July 2 write-up called the resulting write primitive a trivial path to remote code execution.
 
-> *"We can write a file anywhere on the filesystem. Since ColdFusion serves CFM templates from its web root, we can simply write a .cfm shell and execute it."*
-
-![Diagram of the CVE-2026-48282 attack chain, from an unauthenticated RDS FILEIO request to a .cfm shell and remote code execution.](/assets/figures/coldfusion-apsb26-68-cvss10-bonanza-diagram.svg){: width="640" height="582" loading="lazy"}
+![Five-step diagram of CVE-2026-48282, from an unauthenticated RDS FILEIO request to a .cfm file in the web root and remote code execution.](/assets/figures/coldfusion-apsb26-68-cvss10-bonanza-diagram.svg){: width="640" height="582" loading="lazy"}
 *Attack chain for CVE-2026-48282, as described in this post.*
 
 ## The Unrestricted Upload: CVE-2026-48276
@@ -89,11 +88,11 @@ While CVE-2026-48282 is the headline grabber due to confirmed active exploitatio
 
 The key difference: CVE-2026-48276 does not require RDS to be enabled. It targets a separate file upload handler that accepts multipart form data and writes uploaded files to disk without validating the file extension or content type. A `.cfm`, `.jsp`, or `.exe` file can be uploaded and subsequently executed.
 
-Where CVE-2026-48282 requires the RDS feature to be accessible (a condition that varies by deployment), CVE-2026-48276 is reachable on any ColdFusion server that exposes a file upload endpoint — and ColdFusion's default configuration includes several of those.
+Where CVE-2026-48282 requires the RDS feature to be accessible (a condition that varies by deployment), CVE-2026-48276 is reachable on any ColdFusion server that exposes a file upload endpoint — though watchTowr found that upload path is off by default (`AllowUploads` defaults to false).
 
 Both bugs achieve the same end state: unauthenticated remote code execution with a single HTTP request.
 
-## Why Seven CVSS 10.0s in One Bulletin?
+## Why Six CVSS 10.0s in One Bulletin?
 
 This is not an isolated incident. ColdFusion has a long track record of critical vulnerabilities. Sixteen ColdFusion CVEs already sit in the CISA KEV catalog. A 2023 patch batch included multiple CVSS 9.8 RCE flaws. In 2024, attackers exploited ColdFusion vulnerabilities to deploy webshells on government servers.
 
@@ -114,7 +113,7 @@ The timeline of CVE-2026-48282 exploitation is worth restating because it sets a
 - **June 30** — Adobe releases APSB26-68 with patches. The bulletin includes minimal technical detail.
 - **July 2** — watchTowr publishes technical analysis of the RDS FILEIO path traversal, including request structures and exploitation mechanics.
 - **July 2 (2 hours later)** — KEVIntel's honeypot network detects active exploitation attempts. The attacker infrastructure routes through Indian IP space.
-- **July 7** — CISA adds CVE-2026-48282 to the KEV catalog. BOD 26-04 requires federal agencies to patch within 21 days.
+- **July 7** — CISA adds CVE-2026-48282 to the KEV catalog. CISA set a federal remediation due date of July 10, three days after listing.
 
 The takeaway: the window between "technical details published" and "active scanning at internet scale" is now measured in hours, not days. If you do not have a mechanism to patch critical-severity vulnerabilities within 24 hours of public disclosure, you are racing the attackers and losing.
 

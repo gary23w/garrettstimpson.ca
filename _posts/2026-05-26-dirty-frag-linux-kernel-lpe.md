@@ -5,6 +5,7 @@ date: 2026-05-26
 categories: [exploits, linux, lpe]
 tags: [cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache]
 excerpt: "Two in-place decryption optimizations introduced in 2017 and 2023 let an unprivileged local user corrupt arbitrary page cache entries and escalate to root. No race window. Standard syscalls only."
+last_modified_at: 2026-10-31
 ---
 
 What makes a kernel vulnerability genuinely scary? Not just the CVSS score. It's the combination: deterministic exploitation with no timing window, no special privileges required, and a bug introduced by a performance optimization that shipped in every kernel for nearly a decade before anyone noticed.
@@ -25,8 +26,8 @@ CVE-2026-43284 covers the ESP variant (`esp4` and `esp6`). The bug traces to com
 
 Nine years for the ESP half. Nobody caught it.
 
-![Five-step diagram of the Dirty Frag ESP path from a crafted IPsec socket to a page cache write and SUID binary overwrite.](/assets/figures/dirty-frag-linux-kernel-lpe-diagram.svg){: width="640" height="582" loading="lazy"}
-*Dirty Frag ESP exploit chain, as described in this post.*
+![Six steps from an unprivileged user through in-place decryption and a deterministic page cache write to root, then module blocking and detection.](/assets/figures/dirty-frag-linux-kernel-lpe-diagram.svg){: width="640" height="686" loading="lazy"}
+*How Dirty Frag turns in-place decryption into root, as described in this post.*
 
 ## Why "deterministic" changes everything
 
@@ -38,7 +39,7 @@ That's what separates it from the average LPE.
 
 ## The exploit chain
 
-No elevated capabilities or unusual kernel modules needed. `esp4`, `esp6`, and `rxrpc` load by default in every major enterprise distribution. The syscalls involved are completely standard: `socket`, `setsockopt`, `bind`, `vmsplice`, `splice`, `sendmsg`.
+No elevated capabilities or unusual kernel modules needed. `esp4` and `esp6` ship in major enterprise distribution kernels, but `rxrpc.ko` is not included in most distributions (Ubuntu loads it by default). The syscalls involved are completely standard: `socket`, `setsockopt`, `bind`, `vmsplice`, `splice`, `sendmsg`.
 
 Rough flow:
 
@@ -53,7 +54,7 @@ Rough flow:
 
 For the RxRPC path the mechanics differ slightly but the outcome is identical.
 
-The container escape angle is worth noting specifically. The page cache is shared across the entire host. A container with standard Linux capabilities (not `CAP_SYS_ADMIN`) can corrupt host page cache entries. On unpatched Kubernetes nodes this becomes a container-to-host escape. Microsoft's security blog confirmed active use of exactly this pattern in post-compromise scenarios observed in the wild within the first 24 hours after the PoC dropped.
+The container escape angle is worth noting specifically. The page cache is shared across the entire host. A container with standard Linux capabilities (not `CAP_SYS_ADMIN`) can corrupt host page cache entries. On unpatched Kubernetes nodes this becomes a container-to-host escape. Microsoft's security blog lists container escape into the host as one route to the local access Dirty Frag needs, and reports only limited in-the-wild privilege escalation activity that may relate to Dirty Frag or Copy Fail.
 
 ## Blocking the modules as a stopgap
 
@@ -75,7 +76,7 @@ If they show up, unload with `rmmod` or reboot after adding the modprobe config.
 
 ## Detection signatures
 
-Sysdig's write-up flags the combination that doesn't appear in legitimate workloads: a process calling `socket(AF_INET, SOCK_RAW, IPPROTO_ESP)`, followed by `vmsplice()` into a file-backed mapping, followed by `sendmsg()` with a payload of specific sizes. If you're running a SIEM or behavioral detection layer, their rule set is worth importing directly.
+Sysdig's write-up adds rules that link events to catch the setup phase before the in-place write, plus a Falco rule that flags an `AF_RXRPC` socket created by an unexpected process. If you're running a SIEM or behavioral detection layer, their rule set is worth importing directly.
 
 For container environments, watch for `sendmsg` calls to `IPPROTO_ESP` sockets originating from container PIDs. That combination has essentially no legitimate use case in most Kubernetes deployments.
 

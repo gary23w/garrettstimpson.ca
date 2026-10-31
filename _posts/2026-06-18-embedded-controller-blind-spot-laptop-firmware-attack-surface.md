@@ -6,25 +6,18 @@ date: 2026-06-18
 categories: [hardware-security, firmware]
 tags: [Embedded-Controller, EC, ACPI, SPI-flash, firmware-persistence, JTAG, SMM]
 excerpt: "Your laptop has a second computer inside it — running its own CPU, firmware, and debug ports — that can read your keystrokes, rewrite your BIOS, and survives every OS reinstall. Nobody is looking at it."
+last_modified_at: 2026-10-31
 ---
 
 Here's the thing nobody tells you about modern laptops: there is a third computer running inside your machine, hidden between the main CPU and everything else. It's called the Embedded Controller (EC), and it has its own Cortex-M class processor, its own flash storage, its own RAM, its own GPIO pins attached to the SPI flash chip where your UEFI BIOS lives, and a direct line to every keystroke you type. It runs before the main CPU even powers on. It stays running when your OS is suspended. It keeps running when you flash a new BIOS. It retains its state across full power cycles. And in 2026, most production ECs still ship without signed firmware updates, without flash protection registers enabled, and without debug port fuses blown.
 
-This is the blind spot of hardware security. Let me walk through what the EC actually is, the attack primitives it gives an adversary, and the handful of CVEs that have only scratched the surface.
-
----
-
-> **CVE-2022-25839** | CVSS 6.5 (Medium)  
-> **Disclosed:** February 2022 | **Affected:** Dell Latitude 5400/7400 (Unified Write Filter)  
-> **Fixed:** January 2024 (firmware patch via Dell Command Update)  
-> **CISA KEV:** No  
-> **Public analysis:** Minimal  
+This is the blind spot of hardware security. Let me walk through what the EC actually is and the attack primitives it gives an adversary.
 
 ---
 
 ## What Is the Embedded Controller?
 
-Look at any laptop motherboard and find the component near the EC/battery connector — usually a QFN package from Nuvoton (NPCX/MEC series), Microchip (MEC17xx), or ITE (IT85/IT89). That's the EC. It's a microcontroller with:
+Look at any laptop motherboard and find the component near the EC/battery connector — usually a QFN package from Nuvoton (NPCX series), Microchip (MEC17xx), or ITE (IT85/IT89). That's the EC. It's a microcontroller with:
 
 - **A CPU core:** Typically an ARM Cortex-M0+/M4/M7, or an 8051-class core, clocked at 8–48 MHz  
 - **Internal flash:** 128 KB to 2 MB for its own firmware  
@@ -35,8 +28,8 @@ The EC connects to the main platform through the **LPC bus** (Low Pin Count) or 
 
 What isn't documented in the public ACPI tables is that the EC also has **direct access to the main SPI flash** — the same flash chip that holds the UEFI BIOS/UEFI firmware. The EC's firmware update path in most OEM firmware updates works by having the EC download a blob, validate it (or not), and copy it from its own internal flash to the main SPI flash via its own dedicated SPI controller. The main CPU doesn't do the write. The EC does.
 
-![Diagram of four embedded controller attack primitives: keystroke capture, SPI flash read/write, persistence and open debug ports.](/assets/figures/embedded-controller-blind-spot-laptop-firmware-attack-surface-diagram.svg){: width="640" height="478" loading="lazy"}
-*Embedded controller attack primitives, as described in this post.*
+![Five-step diagram of the embedded controller's attack primitives (keystrokes, SPI flash, persistence, open debug ports) and the post's mitigations.](/assets/figures/embedded-controller-blind-spot-laptop-firmware-attack-surface-diagram.svg){: width="640" height="582" loading="lazy"}
+*Embedded controller attack primitives and mitigations, as described in this post.*
 
 ## The Attack Primitives
 
@@ -93,19 +86,11 @@ To remove an EC-based implant, you need to either flash the EC firmware external
 
 ### 4. Debug Ports Left Open
 
-Here's the detail that keeps me up: virtually every shipping laptop has JTAG or Serial Wire Debug (SWD) pins on the EC that are **not fused** on production units. The datasheets for the Nuvoton NPCX series document an OTP bit called `JTAG_EN` — once blown, the JTAG interface is permanently disabled. In a 2023 survey by Independent Security Evaluators (ISE), only one out of twelve shipping enterprise laptops had this bit set. The rest accept full debugger connections over the physical pins, giving an attacker with screwdriver access full EC register read/write, firmware dump, and firmware upload.
-
-## Real-World Cases (That Got CVEs)
-
-**CVE-2017-15303** — A vulnerability in the CPU fan control logic on consumer laptops allowed an attacker with SMM (System Management Mode) code execution to reprogram the EC's fan PWM controller via ACPI commands. The EC itself was trusted implicitly.
-
-**CVE-2022-25839** (Dell Unified Write Filter) — Dell's Latitude series used an EC command (vendor-specific, poorly documented) to toggle a hardware write filter on the SPI flash. The Dell Command Update firmware update tool exposed this command to any code running at SMI execution level. Researchers found that the command required no authentication — any SMM module could call it and disable the SPI write protection.
-
-**CVE-2024-7726** — A missing signature verification in a major OEM's EC firmware update mechanism. The vendor shipped updates signed only for the UEFI capsule, but the internal validation the EC performed when receiving the blob was a CRC16 checksum. Any CRC-matching blob was accepted and written to the EC's flash. The vendor silently fixed it without a CVE assignment in a 2024 point release.
+Here's the detail that keeps me up: virtually every shipping laptop has JTAG or Serial Wire Debug (SWD) pins on the EC that are **not fused** on production units. The datasheets for the Nuvoton NPCX series document an OTP bit called `JTAG_EN` — once blown, the JTAG interface is permanently disabled. Units without it blown accept full debugger connections over the physical pins, giving an attacker with screwdriver access full EC register read/write, firmware dump, and firmware upload.
 
 ## Autonomous EC Exploitation (2025 Proof-of-Concept)
 
-In early 2025, I developed a PoC that targets the Nuvoton NPCT750 (a TPM 2.0 chip with an embedded security controller) at DEF CON 32. The key innovation: rather than attacking the main CPU's SPI controller, the attack uses a **malicious USB-C charger** (a USB-PD sink device programmed with Raspberry Pi Pico firmware) that connects to the JTAG pins of the EC exposed through a debug header on the motherboard edge. The Pico:
+In early 2025, I developed a PoC that targets the Nuvoton NPCT750 (a TPM 2.0 chip with an embedded security controller). The key innovation: rather than attacking the main CPU's SPI controller, the attack uses a **malicious USB-C charger** (a USB-PD sink device programmed with Raspberry Pi Pico firmware) that connects to the JTAG pins of the EC exposed through a debug header on the motherboard edge. The Pico:
 
 1. Enumerates the EC via SWD
 2. Dumps the EC flash (512 KB — takes ~30 seconds at 1 MHz SWO speed)
@@ -128,27 +113,10 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 
 ---
 
-> *"The EC is the most powerful ring below SMM, and the least audited. It runs your keyboard. It runs your fan. It writes your BIOS update. And almost nobody has ever dumped its firmware and reviewed it for security."*  
-> — Matthew Garrett, DEF CON 31 (2024)
-
----
-
 *References:*  
 
 - [Nuvoton NPCX5xx Documentation](https://www.nuvoton.com/products/microcontrollers/arm-cortex-m4-mcu/npcx-series/)  
-- [CVE-2022-25839 — Dell UWF EC Bypass](https://nvd.nist.gov/vuln/detail/CVE-2022-25839)  
-- [CVE-2017-15303 — CPU Fan EC Exploit](https://nvd.nist.gov/vuln/detail/CVE-2017-15303)  
-- [Matthew Garrett — The EC and SMM](https://mjg59.dreamwidth.org/65433.html)  
-- [Independent Security Evaluators — Embedded Controller Security Survey, 2023](https://www.securityevaluators.com/casestudies/embedded-controller-security/)  
-- [TPM.dev — NPCT750 Teardown and EC Flash Access via SWD](https://tpm.dev/npct750-ec-swd-debug)  
-- [DEF CON 32 — EC Exploitation via USB-C Charger PoC (Stimpson, 2025)](https://media.defcon.org/DEF%20CON%2032/DEF%20CON%2032%20presentations/Garrett%20Stimpson%20-%20Ghost%20in%20the%20Charger.pdf)
 
 ## Sources
 
 - [Nuvoton NPCX5xx Documentation](https://www.nuvoton.com/products/microcontrollers/arm-cortex-m4-mcu/npcx-series/)
-- [CVE-2022-25839 — Dell UWF EC Bypass](https://nvd.nist.gov/vuln/detail/CVE-2022-25839)
-- [CVE-2017-15303 — CPU Fan EC Exploit](https://nvd.nist.gov/vuln/detail/CVE-2017-15303)
-- [Matthew Garrett — The EC and SMM](https://mjg59.dreamwidth.org/65433.html)
-- [Independent Security Evaluators — Embedded Controller Security Survey, 2023](https://www.securityevaluators.com/casestudies/embedded-controller-security/)
-- [TPM.dev — NPCT750 Teardown and EC Flash Access via SWD](https://tpm.dev/npct750-ec-swd-debug)
-- [DEF CON 32 — EC Exploitation via USB-C Charger PoC (Stimpson, 2025)](https://media.defcon.org/DEF%20CON%2032/DEF%20CON%2032%20presentations/Garrett%20Stimpson%20-%20Ghost%20in%20the%20Charger.pdf)
