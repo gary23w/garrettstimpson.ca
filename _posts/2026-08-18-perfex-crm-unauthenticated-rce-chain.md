@@ -18,6 +18,9 @@ Perfex CRM is a PHP/CodeIgniter CRM that runs on plain LAMP stacks, no framework
 
 The vulnerable versions are 3.4.x and earlier, tested by the author on 3.3.0 and 3.4.0.
 
+![Attack chain for Perfex CRM 3.4.x: blind SQLi, stolen reset token, admin takeover, PHP webshell upload, and RCE as www-data.](/assets/figures/perfex-crm-unauthenticated-rce-chain-diagram.svg){: width="640" height="582" loading="lazy"}
+*Unauthenticated-to-RCE chain for Perfex CRM 3.4.x, as described in this post.*
+
 ## The chain at a glance
 
 The repo chains three separate weaknesses, each of which exists independently and each of which would be medium-severity on its own. Together they are a CVSS 9.8 critical:
@@ -328,3 +331,11 @@ The fixes are straightforward and each one independently breaks the chain:
 This chain is a masterclass in why "small" bugs matter. Three individual weaknesses, each of which a security reviewer might wave off as low severity: an unauthenticated endpoint guarded by a config flag, a reset token readable by SQLi, an upload path missing one validation call. None of them is glamorous. Chained, they are a 9.8 with a public exploit and no CVE to warn anyone.
 
 The boring bugs are the ones that kill you. Patch your Perfex, turn off the migration controller, and go check your uploads directory right now.
+
+## Sources
+
+- [Migrate to another domain/hosting (Perfex CRM)](https://help.perfexcrm.com/migrate-to-another-domainhosting/)
+- [CVE-2024-56908 (JuyLang on GitHub)](https://gist.github.com/JuyLang/7406077e3e5e6b2ff35c80f1853e298f)
+- [Version 3.4.1 - Security & Maintenance Release (Perfex CRM)](https://help.perfexcrm.com/version-3-4-1-security-maintenance-release/)
+- [mm0r1/exploits (GitHub)](https://github.com/mm0r1/exploits)
+- [TimeAfterFree: PHP 8 Sandbox Escape (GitHub)](https://github.com/m0x41nos/TimeAfterFree)

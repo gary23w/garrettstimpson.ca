@@ -17,6 +17,9 @@ Sit with that for a second. The most consequential planning exercise in the indu
 
 The question worth asking is not whether the labs are right to prepare. They are. Amodei himself called a major AI incident "inevitable" weeks earlier (Axios, September 15, 2026). The question is what a rehearsed aftermath does to everyone else's ability to find out what actually happened. The interesting variable is not whether something breaks. It is who gets blamed, who decides, and what gets locked in during the first 168 hours, because that window, not the technical post-mortem, is where the governance settlement of the next decade gets written.
 
+![Timeline diagram of the first 168 hours after a catastrophic AI event, from detection and silence to the settlement window.](/assets/figures/ai-companies-day-after-scenarios-diagram.svg){: width="640" height="478" loading="lazy"}
+*The first 168 hours after a catastrophic AI event, as described in this post.*
+
 ## How we got here: the timeline
 
 The "day after" story did not arrive from nowhere. Seven dated items set it up.
@@ -106,3 +109,7 @@ A note on sourcing: the anchor story, the Amodei remarks, the Forbes report, the
 ## The takeaway
 
 The labs are rehearsing the morning after. That is prudent, and it is also a tell: an industry that schedules its own blame management believes the blame is coming. The rest of us should run the cheaper version of the same exercise. Read the script before the curtain goes up, and pay attention to the first 168 hours, because that is when the settlement gets written whether we are watching or not.
+
+## Sources
+
+- [Axios reported](https://www.axios.com/2026/10/09/ai-companies-day-after-major-attack)

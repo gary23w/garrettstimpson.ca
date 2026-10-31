@@ -23,6 +23,9 @@ From the LNK onward the chain lives off the land: the LNK copies itself and invo
 
 What JPCERT confirmed in this campaign, in their own words: Proton Drive for file distribution, an LNK file contained in a RAR archive, JavaScript execution via mshta.exe, and abuse of legitimate services such as GitHub, GitLab, jsDelivr, and Codeberg. The IoCs, including C2 servers and file hashes, are in the post's appendix.
 
+![Attack chain for APT-C-60's 2026 campaign: Proton Drive link, RAR with an LNK, mshta JavaScript, and abuse of developer platforms.](/assets/figures/apt-c-60-spyglace-proton-drive-diagram.svg){: width="640" height="582" loading="lazy"}
+*The APT-C-60 delivery chain JPCERT documented, as described in this post.*
+
 ## Why Proton Drive is a smart staging choice
 
 This part is my analysis, not JPCERT's claim. Proton Drive is end-to-end encrypted cloud storage run by a company whose entire brand is privacy. As malware staging it offers three things at once:
@@ -105,3 +108,13 @@ In the spirit of the honesty this blog tries to keep:
 - [The Hacker News: APT-C-60 StatCounter and Bitbucket campaign, November 2024](https://thehackernews.com/2024/11/apt-c-60-exploits-wps-office.html) - for the 2024 precedent only
 
 No CVE. No patch coming. The fix is deciding, in advance, how much you trust the services your whole network already trusts.
+
+## Sources
+
+- [JPCERT's post](https://blogs.jpcert.or.jp/en/2026/07/apt-c-60_2026.html)
+- [used StatCounter and Bitbucket](https://thehackernews.com/2024/11/apt-c-60-exploits-wps-office.html)
+- [JPCERT/CC Eyes: APT-C-60, December 2024](https://blogs.jpcert.or.jp/en/2024/12/APT-C-60.html)
+- [JPCERT/CC Eyes: APT-C-60 update, November 2025](https://blogs.jpcert.or.jp/en/2025/11/APT-C-60_update.html)
+- [Cyble: APT-C-60 deploys updated SpyGlace malware in Japan](https://cyble.com/blog/apt-c-60-deploys-updated-spyglace-malware-in-japan/)
+- [Cyber Press: APT-C-60 hackers abuse Proton Drive and developer platforms](https://cyberpress.org/apt-c-60-deploys-spyglace-malware/)
+- [Positive Technologies PT ESC: APT-C-60 / SpyGlace profile](https://www.ptsecurity.com/ww-en/analytics/pt-esc-threat-intelligence/apt-c-60-spyglace/)

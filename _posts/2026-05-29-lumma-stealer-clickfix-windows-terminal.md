@@ -22,6 +22,9 @@ The family: Lumma Stealer (LummaC2), a malware-as-a-service infostealer platform
 
 ---
 
+![Six-step diagram of Lumma Stealer from a fake CAPTCHA and Windows Terminal paste to CastleLoader injection and credential theft.](/assets/figures/lumma-stealer-clickfix-windows-terminal-diagram.svg){: width="640" height="686" loading="lazy"}
+*Lumma Stealer ClickFix and Windows Terminal chain, as described in this post.*
+
 ## What Makes It Work
 
 The cleverness of the new delivery chain is that it abuses trust in a specific, targeted way. Older ClickFix attacks told users to press Win+R and paste a command into the Run dialog. Security tools caught up. EDRs started flagging PowerShell processes spawned from explorer.exe's Run child processes. SOCs wrote detections. The run-dialog vector got noisy.
@@ -154,3 +157,7 @@ Event ID 7 (Image Load): Flag any DLL loaded into a browser process from `%TEMP%
 **Mitigations worth actually deploying:** A Windows Defender Application Control (WDAC) policy restricting MSI execution to signed, trusted publishers blocks the msiexec stage cold. For credential theft, the practical answer is deploying Chrome's App-Bound Encryption organization-wide and monitoring for processes touching `Login Data` outside the browser itself. The clipboard pre-staging for ClickFix is harder to block at the OS level, but browser extension policies can restrict JavaScript clipboard write access on non-allowlisted origins.
 
 The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickFix now accounts for 47% of initial access events tracked by Microsoft Defender Experts. It beat out traditional phishing at 35%. The lure text will keep changing. The execution vehicle will keep rotating. The behavioral indicators on the process creation and injection side are more durable than any signature against the social engineering layer, so that is where detection engineering effort is best spent right now.
+
+## Sources
+
+- [bazaar.abuse.ch/browse/yara/LummaStealerDetection](https://bazaar.abuse.ch/browse/yara/Lumma_Stealer_Detection/)

@@ -10,7 +10,7 @@ excerpt: "RemusStealer, a signed Go-based infostealer descended from Lumma, land
 
 Fresh off the MalwareBazaar browse queue this morning: a cluster of RemusStealer samples distributed from the `hippamsas-com` C2 domain, all first-seen within a two-hour window. The sample I'm working from is `84705a48cd1e868dc45ca6f42d565cf1c2a3c44def8fe25f7f15e5b3962bc5e8`, a 7.1MB Win64 PE timestamped 10:53 UTC today. It carries a code-signing certificate issued to www.sjabr.org (serial `06036922e36f40a6911679792abaafe28cd2`, valid May 8 through August 6, 2026), meaning it walks past naive signature-based defenses with a plausible-looking trust chain. A companion from the same campaign, `cdd16fc0a2bf1499ba815bc95288456e46c7245b64c9d06033f2c61eb06900f5`, carries an explicit `go` tag on Bazaar and hits ReversingLabs' Win64.Trojan.GoInject classification, confirming the delivery binary is Go-compiled. Six other samples in MalwareBazaar share the same rogue signing certificate.
 
-MalwareBazaar entry: https://bazaar.abuse.ch/sample/84705a48cd1e868dc45ca6f42d565cf1c2a3c44def8fe25f7f15e5b3962bc5e8/
+MalwareBazaar entry: <https://bazaar.abuse.ch/sample/84705a48cd1e868dc45ca6f42d565cf1c2a3c44def8fe25f7f15e5b3962bc5e8/>
 
 Remus has been active since early 2026, appearing shortly after Lumma Stealer's core operators were publicly identified between August and October 2025. Gen Threat Labs traced the lineage through intermediate builds labeled "Tenzor," compiled September 2025, which bridge earlier Lumma samples directly to current Remus binaries. The code continuity is not subtle: matching string obfuscation schemes, identical anti-VM logic, the same ChaCha20 config decryption layout, and a very specific Application-Bound Encryption bypass technique that, until Remus appeared, had only ever been seen in Lumma. This is a 64-bit native branch of the same codebase, not a copycat.
 
@@ -29,6 +29,9 @@ The ABE bypass is the most technically dense part. Chrome's Application-Bound En
 If injection fails or no browser is running, Remus falls back to calling `CreateDesktop` to spin up a hidden desktop, launching Chrome there to avoid any visible window, and using SYSTEM token impersonation as an alternate ABE unlock path (T1134.001).
 
 The sandbox evasion is thorough. Remus checks CPUID leaf `0x40000000` for hypervisor brand strings, scanning for VMware's `VMwareVMware`, VirtualBox's `VBoxVBoxVBox`, KVM's `KVMKVMKVM`, and Xen signatures in the same order and with similarly obfuscated comparison constants as Lumma (T1497.001). On top of that, it runs a CRC32 scan of loaded DLLs hunting for modules associated with Avast Sandbox, Sandboxie, and Comodo. It also checks for a honeypot PST file, specifically a fake Outlook archive that some automated sandboxes place on disk. If either check triggers, the binary terminates silently with no network activity. It just looks like a crash.
+
+![Six-step diagram of RemusStealer from a signed Go download and EtherHiding C2 lookup to Chrome ABE bypass and key theft.](/assets/figures/remusstealer-go-injector-abe-bypass-etherhiding-diagram.svg){: width="640" height="686" loading="lazy"}
+*RemusStealer delivery and ABE bypass chain, as described in this post.*
 
 ## Educational sample: EtherHiding C2 resolution in Go
 
@@ -175,3 +178,10 @@ Mitigating the ABE bypass at the OS level is possible but requires some work. En
 Six samples in MalwareBazaar now share the same certificate thumbprint `eae49c47a0dde758f20b3bf6616579b11461873a072d371578eb42282f269277`. Blocking on that thumbprint is a quick defensive win until the next cert rotation.
 
 MITRE ATT&CK coverage for this sample: T1027.010 (MBA string obfuscation), T1055 (process injection into Chrome), T1553.002 (rogue code signing certificate), T1497.001 (CPUID anti-VM), T1555.003 (credentials from web browsers), T1134.001 (SYSTEM token impersonation for hidden desktop fallback), T1071 (EtherHiding via Ethereum JSON-RPC as application layer protocol).
+
+## Sources
+
+- [Remus: Unmasking The 64-bit Variant of the Infamous Lumma Stealer (Gen Threat Labs)](https://www.gendigital.com/blog/insights/research/remus-64bit-variant-of-lumma-stealer)
+- [Remus Stealer: A New, Not-So-New Infostealer (Flashpoint)](https://flashpoint.io/blog/remus-stealer-a-new-not-so-new-infostealer/)
+- [Remus Stealer: C2 Protocol Analysis, Cryptography, and Detection (Malware Cake Factory)](https://malwarecakefactory.github.io/malware-analysis/remus-c2-protocol-analysis/)
+- [Improving the security of Chrome cookies on Windows (Google Security Blog)](https://security.googleblog.com/2024/07/improving-security-of-chrome-cookies-on.html)

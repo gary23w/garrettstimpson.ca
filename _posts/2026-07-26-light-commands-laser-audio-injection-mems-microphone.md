@@ -37,6 +37,9 @@ This is fundamentally different from conventional optical eavesdropping (like th
 
 The researchers demonstrated this with wavelengths from 532 nm (green) through 1064 nm (infrared). Infrared is particularly dangerous because it's completely invisible to the human eye — the attacker can be actively injecting commands and nobody in the room would see anything.
 
+![Diagram of the Light Commands attack, from a modulated laser on a MEMS microphone to a voice assistant running the injected command.](/assets/figures/light-commands-laser-audio-injection-mems-microphone-diagram.svg){: width="640" height="582" loading="lazy"}
+*Laser audio injection chain for Light Commands, as described in this post.*
+
 ## What the Attackers Achieved
 
 The Light Commands team tested 27 different devices across Amazon Alexa, Google Assistant, Apple Siri, and Facebook Portal ecosystems. Their results:
@@ -123,3 +126,8 @@ The Light Commands team published their full paper, video demonstrations, and de
 - Sugawara et al., "Light Commands: Laser-Based Audio Injection Attacks on Voice-Controllable Systems," USENIX Security 2020
 - [USENIX Security 2020 paper page](https://www.usenix.org/conference/usenixsecurity20/presentation/sugawara)
 - Sugawara et al., *sec20-sugawara.pdf* — full paper with methodology and measurement data
+
+## Sources
+
+- [lightcommands.com](https://lightcommands.com/)
+- [USENIX Security 2020 paper page](https://www.usenix.org/conference/usenixsecurity20/presentation/sugawara)

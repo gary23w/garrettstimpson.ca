@@ -15,6 +15,9 @@ On October 1, 2026 the Apache HTTP Server project shipped 2.4.69, a security, fe
 
 The difference matters if your job is finding the next one. A fix tells you a bug existed. A cluster tells you a habitat exists. And one non-security entry in this release, a full rewrite of mod_auth_digest's shared memory and nonce handling, is the most interesting thing the project has shipped in years. I will come back to it, because I am spending my week inside it.
 
+![Workflow from reading Apache httpd 2.4.69 as a map of bug clusters to auditing the mod_auth_digest rewrite and disclosing findings.](/assets/figures/apache-2-4-69-bug-clusters-and-the-digest-rewrite-diagram.svg){: width="640" height="686" loading="lazy"}
+*Bug-cluster hunt plan for Apache httpd 2.4.69, as described in this post.*
+
 ## The twenty, grouped the way the code sees them
 
 **Cluster one: mod_auth_digest, three CVEs.** All three are unauthenticated, remote, and depend on the same two directives: `AuthDigestNcCheck` and `AuthDigestNonceLifetime`.
@@ -85,3 +88,9 @@ The audit is live, so no findings to publish yet, and anything found goes to sec
 - **The response chain.** mod_xml2enc's partial-conversion-then-failure path, since the 2.4.69 fix for CVE-2026-63686 is exactly the kind of patch that fixes the reported crash and misses the adjacent one.
 
 If you are running httpd in front of the internet, the action item is simple: 2.4.69 is a good release to be on, and the Digest and proxy-transform directives deserve a second look regardless. If you are hunting, the map is above. The clusters are where the next one lives.
+
+## Sources
+
+- [NVD: CVE-2026-48005](https://nvd.nist.gov/vuln/detail/CVE-2026-48005)
+- [Apache HTTP Server 2.4 vulnerabilities - The Apache HTTP Server Project](https://httpd.apache.org/security/vulnerabilities_24.html)
+- [NVD: CVE-2026-42528](https://nvd.nist.gov/vuln/detail/CVE-2026-42528)

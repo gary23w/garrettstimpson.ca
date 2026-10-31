@@ -38,6 +38,9 @@ The full MITRE ATT&CK coverage here: T1027 (Obfuscated Files), T1620 (Reflective
 
 ---
 
+![Six-step diagram of the DarkTortilla crypter loading DarkCloud from a fake quotation email through credential theft.](/assets/figures/darktortilla-darkcloud-net-crypter-credential-stealer-diagram.svg){: width="640" height="686" loading="lazy"}
+*DarkTortilla and DarkCloud infection chain, as described in this post.*
+
 ## Educational Sample: Reflective .NET Loading Skeleton
 
 The following demonstrates the core DarkTortilla technique, `Assembly.Load()` reflective loading, without any payload. This is what the two-stage loader looks like structurally.
@@ -144,3 +147,11 @@ On the network side, watch for outbound HTTP GET requests to `showip.net`, `chec
 Mitigations: restrict execution of unsigned .NET assemblies via AppLocker or WDAC policies, enable Credential Guard to protect LSASS-based secrets, and consider pushing Chrome's App-Bound Encryption (introduced in Chrome 127) which stores encryption keys in a way that blocks cross-process DPAPI abuse at the browser credential level. That last control specifically targets the `CryptUnprotectData()` bypass DarkCloud relies on.
 
 Practically speaking, this family is not going anywhere. DarkTortilla has been distributing payloads for over a decade because the combination of .NET reflective loading and layered encryption works. DarkCloud has been under active development since 2022 and is sold as a builder with configurable modules. When two mature, maintained tools combine in a single delivery, you get exactly what landed on Bazaar this morning: a 1.3MB `.exe` masquerading as a business document that empties a victim's credential store before their endpoint protection notices the loader ever ran.
+
+## Sources
+
+- [DarkTortilla Malware Analysis (Sophos (Secureworks CTU))](https://www.sophos.com/en-us/research/darktortilla-malware-analysis)
+- [DarkTortilla, Software S1066 (MITRE ATT&CK)](https://attack.mitre.org/software/S1066/)
+- [DarkCloud Stealer: Comprehensive Analysis of a New Attack Chain That Employs AutoIt (Palo Alto Networks Unit 42)](https://unit42.paloaltonetworks.com/darkcloud-stealer-and-obfuscated-autoit-scripting/)
+- [Unveiling a New Variant of the DarkCloud Campaign (Fortinet FortiGuard Labs)](https://www.fortinet.com/blog/threat-research/unveiling-a-new-variant-of-the-darkcloud-campaign)
+- [A YARA Rule for Threat Hunting DarkCloud Stealer (Stairwell)](https://stairwell.com/resources/a-yara-rule-for-threat-hunting-darkcloud-stealer/)

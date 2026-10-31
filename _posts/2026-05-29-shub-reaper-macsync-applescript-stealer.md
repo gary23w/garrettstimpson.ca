@@ -19,6 +19,9 @@ Two companion samples (`6cfdf4ec...` and `1d67c1c1...`) dropped in the same two-
 
 On May 18, SentinelOne published a detailed breakdown of the latest SHub variant, internally tagged "Reaper." That was eleven days ago. New samples are still coming in. This family is not slowing down.
 
+![Six-step diagram of SHub Reaper from an applescript:// lure and zsh payload to Keychain theft, wallet hijacking and a LaunchAgent.](/assets/figures/shub-reaper-macsync-applescript-stealer-diagram.svg){: width="640" height="686" loading="lazy"}
+*SHub Reaper MacSync infection chain, as described in this post.*
+
 ## What makes it work
 
 The core problem SHub Reaper is solving is a platform-level change Apple shipped in macOS Tahoe 26.4 in late March 2026. That update blocked the most common ClickFix technique on macOS: pasting a terminal command from a fake CAPTCHA or error page. Attackers had been abusing user muscle memory for two years with that trick and Apple finally killed the obvious vector. SHub operators adapted in roughly four weeks.
@@ -168,3 +171,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 ---
 
 *Research sources: SentinelOne SentinelLabs (Phil Stokes, May 18 2026), Jamf Threat Labs, MalwareBazaar sample database.*
+
+## Sources
+
+- [bazaar.abuse.ch/sample/63f6dcab9e0dabb78449efda7aa7ecd2c10a8ef4e35b7f7346df](https://bazaar.abuse.ch/sample/63f6dcab9e0dabb78449efda7aa7ecd2c10a8ef4e35b7f7346df76c60d17e12f/)

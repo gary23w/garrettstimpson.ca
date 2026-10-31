@@ -49,6 +49,9 @@ The top row is fine. The bottom row is where attackers will live.
 
 ---
 
+![Diagram of the CXL isolation gap PoC, where a malicious process on the same host maps shared CXL memory and reads another process's secret.](/assets/figures/cxl-memory-no-security-model-diagram.svg){: width="640" height="582" loading="lazy"}
+*Within-host CXL memory isolation gap, as described in this post.*
+
 ## The Gap: Process-Level Isolation in a Post-OS World
 
 The Space-Control paper frames it precisely. On a traditional system, virtual memory provides process-level isolation through page tables managed by the OS. On a CXL system, the memory expands — but the isolation doesn't scale. When two processes on different hosts share a CXL memory pool, the **only** thing enforcing separation is the OS on each host.
@@ -296,3 +299,11 @@ CXL is the future of data center memory. It's also a future where your data live
 - CXL 4.0 Specification — computeexpresslink.org
 
 — Garrett
+
+## Sources
+
+- [Space-Control: Process-Level Isolation for Sharing CXL-based Disaggregated Memory (arXiv)](https://arxiv.org/abs/2603.06951)
+- [Space-Control: Process-Level Isolation for Sharing CXL-based Disaggregated Memory (UC Davis)](https://arch.cs.ucdavis.edu/security/memory/cxl/2026/03/06/space-control.html)
+- [CXL-Interference: Analysis and Characterization in Modern Computer Systems (arXiv)](https://arxiv.org/abs/2411.18308)
+- [Introducing the CXL 4.0 Specification: Webinar Q&A Recap (CXL Consortium)](https://computeexpresslink.org/blog/introducing-the-cxl-4-0-specification-webinar-qa-recap-4386/)
+- [Introducing the CXL 3.1 Specification (CXL Consortium)](https://computeexpresslink.org/event/introducing-the-cxl-3-1-specification-2/)

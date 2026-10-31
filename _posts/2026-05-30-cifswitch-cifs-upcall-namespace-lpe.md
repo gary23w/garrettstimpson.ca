@@ -26,6 +26,9 @@ request_key("cifs.spnego",
 
 `cifs.upcall` reads `pid`, `uid`, `creduid`, and `upcall_target` out of that string as if a kernel that did its homework produced them. That last field is the lever.
 
+![Five-step diagram of CIFSwitch from a forged cifs.spnego key to cifs.upcall loading an attacker NSS module as root.](/assets/figures/cifswitch-cifs-upcall-namespace-lpe-diagram.svg){: width="640" height="582" loading="lazy"}
+*CIFSwitch cifs.upcall privilege escalation chain, as described in this post.*
+
 ## upcall_target=app, and the helper follows you home
 
 Set `upcall_target=app` and `cifs.upcall` does something genuinely alarming. It calls `setns(2)` to enter the namespaces of the process named by the attacker-supplied `pid`. The idea behind the feature is reasonable enough: resolve the credential in the context of the application that wanted the mount. The execution is where it falls apart.
@@ -60,3 +63,11 @@ If you do need CIFS but not Kerberos auth, override the default request-key rule
 And if you have been putting off the unprivileged-namespace conversation, this is the bug to bring to that meeting. `sysctl kernel.unprivileged_userns_clone=0` on Debian-family systems, or `user.max_user_namespaces=0` where the clone toggle isn't available, breaks the chain by removing the namespace primitive the helper gets lured into. It is the same mitigation that shut down half the other LPEs this month, which tells you something about where the soft underbelly is.
 
 Patch when your distro ships the kernel update. Until then, decide whether any given box actually needs to speak SMB, because most of them don't, and the ones that don't are a free win.
+
+## Sources
+
+- [CIFSwitch: a non-universal Linux local root vulnerability (Asim Viladi Oglu Manizada)](https://heyitsas.im/posts/cifswitch/)
+- [CIFSwitch: Linux kernel/cifs-utils local root via forged cifs.spnego upcall (oss-security)](https://openwall.com/lists/oss-security/2026/05/28/2)
+- [smb: client: reject userspace cifs.spnego descriptions (Linux kernel)](https://github.com/torvalds/linux/commit/3da1fdf4efbc490041eb4f836bf596201203f8f2)
+- [CIFSwitch (CVE-2026-46243) Patches Released (AlmaLinux)](https://almalinux.org/blog/2026-05-28-cifswitch/)
+- [CIFSwitch (CVE-2026-46243) (TrueNAS)](https://security.truenas.com/scale/impact-statements/cifswitch/)

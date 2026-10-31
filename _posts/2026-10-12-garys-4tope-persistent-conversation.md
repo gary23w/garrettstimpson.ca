@@ -255,3 +255,17 @@ On Windows, supply the path to `zig.exe`. The script runs the module tests, comp
 6. [Tool-tree source in belt.zig](https://github.com/gary23w/nl-veil/blob/v1.1.16/src/worker/chat/belt.zig).
 7. [Charles Packer and colleagues, MemGPT: Towards LLMs as Operating Systems, 2023](https://arxiv.org/abs/2310.08560).
 8. [Wujiang Xu and colleagues, A-MEM: Agentic Memory for LLM Agents, 2025](https://arxiv.org/abs/2502.12110).
+
+## Sources
+
+- [Paper, reference code, and raw benchmark data on Hugging Face](https://huggingface.co/datasets/gary23w/garys-4tope)
+- [Download the PDF](https://huggingface.co/datasets/gary23w/garys-4tope/resolve/main/garys-4tope-paper.pdf?download=true)
+- [NL-Veil v1.1.16 release record and scripted verification](https://github.com/gary23w/nl-veil/blob/v1.1.16/docs/release/RELEASE-v1.1.16.md)
+- [Gary's 4tope reference source in net.zig](https://github.com/gary23w/nl-veil/blob/v1.1.16/src/worker/chat/net.zig)
+- [Eric W. Weisstein, Polytope, Wolfram MathWorld](https://mathworld.wolfram.com/Polytope.html)
+- [NL-Veil engine handoff integration](https://github.com/gary23w/nl-veil/blob/v1.1.16/src/worker/chat/engine.zig#L3988)
+- [working-context protection and folding](https://github.com/gary23w/nl-veil/blob/v1.1.16/src/worker/chat/engine.zig#L13064)
+- [E. W. Dijkstra, A note on two problems in connexion with graphs, Numerische Mathematik 1, 269–271, 1959](https://doi.org/10.1007/BF01386390)
+- [Tool-tree source in belt.zig](https://github.com/gary23w/nl-veil/blob/v1.1.16/src/worker/chat/belt.zig)
+- [Charles Packer and colleagues, MemGPT: Towards LLMs as Operating Systems, 2023](https://arxiv.org/abs/2310.08560)
+- [Wujiang Xu and colleagues, A-MEM: Agentic Memory for LLM Agents, 2025](https://arxiv.org/abs/2502.12110)
