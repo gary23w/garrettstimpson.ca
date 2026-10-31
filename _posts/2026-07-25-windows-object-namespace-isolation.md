@@ -6,6 +6,7 @@ date: 2026-07-25
 categories: [windows, kernel, security-research, dacl, lateral-movement]
 tags: [Windows, kernel-objects, NULL-DACL, BaseNamedObjects, session-isolation, DACL, named-objects, cross-component-attack, PoC]
 excerpt: "I ran a NULL-DACL audit against every named kernel object in my Windows session. 67 objects had no access control at all. Five of them were AMD GPU state events. I signaled them all from an unprivileged process. Nobody is talking about this."
+last_modified_at: 2026-10-31
 ---
 
 I ran a DACL audit against every named kernel object in my Windows 11 session. Not the filesystem — the kernel object namespace. Events, mutexes, semaphores, sections, timers — the synchronization primitives that every driver and service uses to coordinate state.
@@ -18,7 +19,7 @@ Then I tested whether I could actually *do* anything with them. I picked seven N
 
 **Five of seven opened and signaled.** Including four AMD GPU driver state events, a file sync client event, and a COM runtime event.
 
-Nobody talks about this attack surface. There is no built-in audit tool for kernel object DACLs. No Group Policy template. No Microsoft security baseline. The only visibility tool is WinObj, and it doesn't show DACLs unless you dig into the security tab one object at a time.
+Nobody talks about this attack surface. There is no built-in audit tool for kernel object DACLs. No Group Policy template. No Microsoft security baseline. The usual visibility tool is WinObj, a separate Sysinternals download, and it doesn't show DACLs unless you dig into the security tab one object at a time; Sysinternals AccessChk can report object permissions with its `-o` switch.
 
 This post has working proof-of-concept code that enumerates, classifies, and manipulates the entire session object namespace — compiled and run on a stock Windows 11 machine, producing real data.
 
@@ -38,7 +39,7 @@ And there is almost no tooling to find these.
 
 ---
 
-![Diagram of the kernel object namespace audit, from enumerating named objects to signaling NULL-DACL events from an unprivileged process.](/assets/figures/windows-object-namespace-isolation-diagram.svg){: width="640" height="582" loading="lazy"}
+![Five-step diagram of the kernel object DACL audit, from enumerating 2,181 named objects to signaling five NULL-DACL events from an unprivileged process.](/assets/figures/windows-object-namespace-isolation-diagram.svg){: width="640" height="582" loading="lazy"}
 *Kernel object DACL audit workflow, as described in this post.*
 
 ## The Audit — What I Built and What I Found
@@ -127,7 +128,7 @@ I didn't test what happens — that would be destructive — but the attack surf
 
 ### 2. No Audit Surface
 
-There is exactly one built-in tool for viewing kernel object namespaces: WinObj from Sysinternals. It shows the object tree. It does not audit DACLs. It does not flag NULL DACLs. You have to right-click each object individually and check the Security tab.
+There is no built-in tool for viewing kernel object namespaces; the usual one is WinObj, a separate Sysinternals download. It shows the object tree. It does not audit DACLs. It does not flag NULL DACLs. You have to right-click each object individually and check the Security tab.
 
 That means a NULL-DACL event created by a kernel driver in 2023 is still sitting there in 2026, and nobody has ever checked its permissions. There is no `icacls` for kernel objects. No `Get-Acl` cmdlet. No Group Policy setting to enforce a minimum DACL on named objects.
 
@@ -137,13 +138,13 @@ My audit found 92 weak-or-null objects in ONE session on ONE machine. Scale that
 
 ### 4. Container and Sandbox Implications
 
-Windows containers and sandboxes (Windows Sandbox, Defender Application Guard) use sessions for isolation. But kernel object namespaces within those sessions inherit the same DACL weaknesses as the host. A sandboxed process that can enumerate its session's object directory has the same attack surface I just demonstrated — NULL-DACL objects created by drivers mapped into the sandbox.
+Windows Sandbox does not use host sessions for isolation; it runs a separate kernel under the Microsoft hypervisor. But wherever sessions are the isolation boundary, kernel object namespaces within those sessions inherit the same DACL weaknesses as the host. A sandboxed process that can enumerate its session's object directory has the same attack surface I just demonstrated — NULL-DACL objects created by drivers mapped into the sandbox.
 
 ---
 
 ## Why Nobody Is Talking About This
 
-Kernel object security is invisible by design. The mechanisms — `Object Manager`, `SECURITY_DESCRIPTOR`, `DACL`, `OBJ_CASE_INSENSITIVE` — are documented but obscure. No developer creating a named event thinks about the DACL. The API signature `CreateEvent(NULL, ...)` takes a `LPSECURITY_ATTRIBUTES` parameter, and when you pass NULL, you get "default security." What that actually means is determined by the creating thread's token default DACL, which for driver threads is often empty.
+Kernel object security is invisible by design. The mechanisms — `Object Manager`, `SECURITY_DESCRIPTOR`, `DACL`, `OBJ_CASE_INSENSITIVE` — are documented but obscure. No developer creating a named event thinks about the DACL. The API signature `CreateEvent(NULL, ...)` takes a `LPSECURITY_ATTRIBUTES` parameter, and when you pass NULL, you get "default security." What that actually means is determined by the creating thread's token default DACL.
 
 The security community focuses on memory corruption, EoP, and RCE because those are flashy and get CVEs. A NULL-DACL event that lets you spoof GPU state transitions? Nobody's writing Metasploit modules for that. But it's a real, persistent, universally-present attack surface.
 
@@ -151,7 +152,7 @@ The security community focuses on memory corruption, EoP, and RCE because those 
 
 ## What a Fix Looks Like
 
-1. **A kernel object DACL auditing tool** — Microsoft should ship a `Get-KernelObjectAcl` PowerShell cmdlet or extend `accesschk` to cover `\BaseNamedObjects` and `\Sessions\*\BaseNamedObjects`.
+1. **A kernel object DACL auditing tool** — Microsoft should ship a built-in `Get-KernelObjectAcl` PowerShell cmdlet. Sysinternals `accesschk` already covers `\BaseNamedObjects` with its `-o` switch (e.g. `accesschk -wuo everyone \basednamedobjects`), but it is a separate download.
 
 2. **A security baseline for named objects** — Group Policy objects that enforce minimum DACLs on all named objects in a session namespace, similar to how `SeCreateSymbolicLinkPrivilege` controls symlink creation.
 

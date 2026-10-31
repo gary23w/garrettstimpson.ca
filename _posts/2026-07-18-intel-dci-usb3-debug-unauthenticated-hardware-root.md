@@ -4,15 +4,16 @@ title: "Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop"
 seo_title: "Intel DCI / USB3-Debug: The $30 Hardware Root on Laptops"
 date: 2026-07-18
 categories: [hardware, exploits, vuln-research]
-tags: [DCI, USB3-Debug, Intel, PCH, hardware-hacking, JTAG, DMA, physical-attack, firmware, CVE-2017-5691]
+tags: [DCI, USB3-Debug, Intel, PCH, hardware-hacking, JTAG, DMA, physical-attack, firmware]
 excerpt: "Intel's Direct Connect Interface gives full JTAG-level debug access over a standard USB-C port — it ships enabled on virtually every laptop, no authentication required, and no software patch can fix it."
+last_modified_at: 2026-10-31
 ---
 
-**CVE:** CVE-2017-5691 (Intel DCI debug interface)
-**Disclosed:** June 2017 (Black Hat USA)
+**CVE:** None cited (CVE-2017-5691 is an unrelated SGX early-state issue)
+**Disclosed:** December 2016 (33C3)
 **Affected:** All Intel Core platforms with PCH (Skylake 6th gen through present, ~2015–2026+)
 **Fixed in:** Not fixable by patch — requires OTP fuse blown at factory
-**Public analysis:** [Intel SA-00079](https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00079.html), [Black Hat 2017 — DCI talk by Eric Sesterhenn & Fabian Berg](https://www.blackhat.com/us-17/briefings.html#direct-connect-interface-the-intels-hidden-debug-port), [TcDci — open-source DCI implementation on GitHub](https://github.com/REhints/TcDci)
+**Public analysis:** [33C3 — Tapping into the core, Maxim Goryachy & Mark Ermolov](https://media.ccc.de/v/33c3-8069-tapping_into_the_core)
 
 ---
 
@@ -32,7 +33,7 @@ Intel took that interface and routed it through the laptop's own USB-C or USB3-A
 
 The protocol is called **USB3-Debug** (or DCI-OB, "on-board"). It's a USB Physical Layer variant that tunnels JTAG traffic over the USB3 SuperSpeed differential pairs. The same cable you use to charge your phone can, with the right PD handshake, give an attacker direct hardware access to your machine's CPU.
 
-![Six-step diagram of the Intel DCI attack path, from plugging a USB-C cable into a sleeping laptop to leaving with no trace.](/assets/figures/intel-dci-usb3-debug-unauthenticated-hardware-root-diagram.svg){: width="640" height="686" loading="lazy"}
+![Six-step diagram of the Intel DCI attack path, from plugging a USB-C cable into a sleeping laptop to JTAG memory access and leaving no trace.](/assets/figures/intel-dci-usb3-debug-unauthenticated-hardware-root-diagram.svg){: width="640" height="686" loading="lazy"}
 *Physical attack path through Intel DCI, as described in this post.*
 
 ## Why Nobody Talks About It
@@ -113,7 +114,7 @@ There is no software defense. No OS-level mitigation. No IOMMU configuration tha
 Here's what connecting to a DCI-capable PCH looks like in practice. You need:
 
 - A target machine with Intel 6th-gen Core or newer (Skylake through present)
-- A USB-C debug dongle — either [TcDci](https://github.com/REhints/TcDci) (open-source, ~$30 in parts) or Intel's official DCI cable (if you can find one)
+- A USB-C debug dongle — Intel's official DCI cable (if you can find one)
 - A host machine running OpenOCD with DCI support
 
 The OpenOCD configuration looks something like this:
@@ -173,7 +174,7 @@ This is not theoretical. This works, today, on the laptop you're reading this on
 
 ## Mitigations
 
-Let me be blunt: there is no software fix. No BIOS update, no kernel patch, no driver update can disable DCI. The interface is controlled by the PCH hardware, and the only disable mechanism is a one-time-programmable fuse checked at power-on reset.
+Let me be blunt: DCI has to be shut off and locked in firmware. CHIPSEC's `common.debugenabled` module checks the HDCIEN bit in the DCI Control Register and the debug enable and lock bits in the IA32_DEBUG_INTERFACE MSR, and fails the platform if any of them is enabled or unlocked.
 
 ### The Only Fix: OTP Fuse (eFuse Programming)
 
@@ -213,10 +214,8 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 
 *— Garrett Stimpson*
 
-*Thanks to Eric Sesterhenn, Fabian Berg, and the REhints team for the original research and open-source tools that made this accessible to the community.*
+*Thanks to Maxim Goryachy and Mark Ermolov for the original research that made this accessible to the community.*
 
 ## Sources
 
-- [Intel SA-00079](https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00079.html)
-- [Black Hat 2017 — DCI talk by Eric Sesterhenn & Fabian Berg](https://www.blackhat.com/us-17/briefings.html#direct-connect-interface-the-intels-hidden-debug-port)
-- [TcDci — open-source DCI implementation on GitHub](https://github.com/REhints/TcDci)
+- [33C3 — Tapping into the core, Maxim Goryachy & Mark Ermolov](https://media.ccc.de/v/33c3-8069-tapping_into_the_core)

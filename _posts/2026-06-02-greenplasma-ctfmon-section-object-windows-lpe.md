@@ -6,11 +6,12 @@ date: 2026-06-02
 categories: [exploits, windows]
 tags: [greenplasma, ctfmon, lpe, windows, section-objects, nightmare-eclipse]
 excerpt: "An unprivileged user plants a section object where CTFMON trusts it, and the SYSTEM text-input service walks itself into your payload. The PoC stops one step short on purpose."
+last_modified_at: 2026-10-31
 ---
 
 Here's the part that gets me about GreenPlasma. There is no kernel bug. No heap groom, no use-after-free, no race against a one-shot window you have to win on the first try. The whole thing is a standard user politely asking the object manager for a section, putting it somewhere a SYSTEM process already looks, and waiting. Windows does the rest to itself.
 
-GreenPlasma is one of two zero-days that Nightmare-Eclipse (the same person posting as Chaotic Eclipse) dropped on GitHub on May 13, 2026, alongside YellowKey, the BitLocker/WinRE bypass I wrote up the other day as CVE-2026-45585. GreenPlasma is the local privilege escalation half. As of June 2 there is still no CVE assigned and no patch from Microsoft. It affects Windows 10, Windows 11, and Windows Server wherever an interactive session is running ctfmon.exe, which in practice is almost everywhere a human logs in.
+GreenPlasma is one of two zero-days that Nightmare-Eclipse (the same person posting as Chaotic Eclipse) dropped on GitHub on May 13, 2026, alongside YellowKey, the BitLocker/WinRE bypass I wrote up the other day as CVE-2026-45585. GreenPlasma is the local privilege escalation half. As of June 2 there is still no CVE assigned and no patch from Microsoft (Microsoft has since assigned CVE-2026-45586 and fixed it in the June 2026 Patch Tuesday updates). It affects Windows 10, Windows 11, and Windows Server wherever an interactive session is running ctfmon.exe, which in practice is almost everywhere a human logs in.
 
 ## What CTFMON actually is, and why it's a problem
 
@@ -35,7 +36,7 @@ This is the genuinely annoying bit, and also the clever bit. Nightmare-Eclipse s
 
 Do not let the word "partial" lull anyone. Releasing the hard, novel part (the boundary abuse that gets your section trusted) while withholding the mechanical last step is not a mitigation. It's a speed bump for skids and a free starting block for anyone competent. The conceptual gap between a controlled SYSTEM-mapped section and code execution is small. You're picking how CTFMON interprets data it already trusts. A skilled person closes that in an afternoon, and ransomware crews and APT operators have repeatedly folded public LPE code into live intrusions inside the same week a drop lands.
 
-For context on how fast this turns operational: SpiderLabs and SecurityWeek both tie earlier Nightmare-Eclipse tools (BlueHammer, patched as CVE-2026-33825, plus the still-unpatched RedSun and UnDefend) to hands-on-keyboard intrusions within days of release, staged behind compromised FortiGate SSL VPN credentials from Russia-geolocated source IPs. GreenPlasma slots into that same kill chain as a third independent path to SYSTEM, used when Defender-targeting routes like BlueHammer and RedSun don't apply.
+For context on how fast this turns operational: SpiderLabs and SecurityWeek both tie earlier Nightmare-Eclipse tools (BlueHammer, patched as CVE-2026-33825, plus RedSun and UnDefend, which Microsoft patched in May 2026) to hands-on-keyboard intrusions within days of release, staged behind compromised FortiGate SSL VPN credentials from Russia-geolocated source IPs. GreenPlasma slots into that same kill chain as a third independent path to SYSTEM, used when Defender-targeting routes like BlueHammer and RedSun don't apply.
 
 ## A rough sketch of the chain
 

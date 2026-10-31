@@ -6,6 +6,7 @@ date: 2026-09-17
 categories: [malware, analysis, windows]
 tags: [apt-c-60, spyglace, japan, spear-phishing, proton-drive, lnk, mshta, living-off-the-land, jsdelivr, codeberg, github, gitlab, threat-intel, mitre-attack, defense]
 excerpt: "JPCERT's July 2026 update on APT-C-60 shows the espionage group still working Japanese targets, now staging SpyGlace through Proton Drive and hiding its traffic among GitHub, GitLab, jsDelivr, and Codeberg. No CVE, no exploit kit. Just phishing and trust in services everyone already uses."
+last_modified_at: 2026-10-31
 ---
 
 JPCERT/CC published its third write-up on APT-C-60 in July 2026, and the picture is almost boring in the way that matters: no zero-day, no custom exploit framework, just spearphishing, a cloud storage link, and a backdoor that moves through infrastructure nobody wants to block. [JPCERT's post](https://blogs.jpcert.or.jp/en/2026/07/apt-c-60_2026.html) documents a chain that runs Proton Drive, a RAR archive, an LNK file, mshta.exe, and then GitHub, GitLab, jsDelivr, and Codeberg.
@@ -23,7 +24,7 @@ From the LNK onward the chain lives off the land: the LNK copies itself and invo
 
 What JPCERT confirmed in this campaign, in their own words: Proton Drive for file distribution, an LNK file contained in a RAR archive, JavaScript execution via mshta.exe, and abuse of legitimate services such as GitHub, GitLab, jsDelivr, and Codeberg. The IoCs, including C2 servers and file hashes, are in the post's appendix.
 
-![Attack chain for APT-C-60's 2026 campaign: Proton Drive link, RAR with an LNK, mshta JavaScript, and abuse of developer platforms.](/assets/figures/apt-c-60-spyglace-proton-drive-diagram.svg){: width="640" height="582" loading="lazy"}
+![Five-step diagram of APT-C-60's 2026 chain: a Proton Drive link, a RAR holding an LNK, mshta running JavaScript, and abuse of developer platforms.](/assets/figures/apt-c-60-spyglace-proton-drive-diagram.svg){: width="640" height="582" loading="lazy"}
 *The APT-C-60 delivery chain JPCERT documented, as described in this post.*
 
 ## Why Proton Drive is a smart staging choice
@@ -78,7 +79,7 @@ detection:
 Two more signals that survive the trust problem:
 
 - Network egress from mshta.exe to codeberg, jsdelivr, github, or gitlab endpoints. Legitimate mshta traffic is rare enough that this is worth a look, not a block.
-- Any archive attachment containing an LNK file, flagged at the mail gateway. The LNK-in-RAR pattern is the constant across all three years of this campaign.
+- Any archive attachment containing an LNK file, flagged at the mail gateway. An LNK inside a container (a VHDX in 2024 and 2025, a RAR in 2026) is the constant across all three years of this campaign.
 
 ## What to do Monday
 
@@ -102,9 +103,8 @@ In the spirit of the honesty this blog tries to keep:
 - [JPCERT/CC Eyes: Update on Attacks by Threat Group APT-C-60 in 2026](https://blogs.jpcert.or.jp/en/2026/07/apt-c-60_2026.html) - the primary source for every factual claim above
 - [JPCERT/CC Eyes: APT-C-60, December 2024](https://blogs.jpcert.or.jp/en/2024/12/APT-C-60.html) - the first write-up in the series
 - [JPCERT/CC Eyes: APT-C-60 update, November 2025](https://blogs.jpcert.or.jp/en/2025/11/APT-C-60_update.html) - the second write-up
-- [Cyble: APT-C-60 deploys updated SpyGlace malware in Japan](https://cyble.com/blog/apt-c-60-deploys-updated-spyglace-malware-in-japan/) - independent analysis, September 7, 2026
+- [Cyble: APT-C-60 deploys updated SpyGlace malware in Japan](https://cyble.com/blog/apt-c-60-deploys-updated-spyglace-malware-in-japan/) - independent analysis, October 27, 2025
 - [Cyber Press: APT-C-60 hackers abuse Proton Drive and developer platforms](https://cyberpress.org/apt-c-60-deploys-spyglace-malware/) - trade coverage, July 13, 2026
-- [Positive Technologies PT ESC: APT-C-60 / SpyGlace profile](https://www.ptsecurity.com/ww-en/analytics/pt-esc-threat-intelligence/apt-c-60-spyglace/)
 - [The Hacker News: APT-C-60 StatCounter and Bitbucket campaign, November 2024](https://thehackernews.com/2024/11/apt-c-60-exploits-wps-office.html) - for the 2024 precedent only
 
 No CVE. No patch coming. The fix is deciding, in advance, how much you trust the services your whole network already trusts.
@@ -117,4 +117,3 @@ No CVE. No patch coming. The fix is deciding, in advance, how much you trust the
 - [JPCERT/CC Eyes: APT-C-60 update, November 2025](https://blogs.jpcert.or.jp/en/2025/11/APT-C-60_update.html)
 - [Cyble: APT-C-60 deploys updated SpyGlace malware in Japan](https://cyble.com/blog/apt-c-60-deploys-updated-spyglace-malware-in-japan/)
 - [Cyber Press: APT-C-60 hackers abuse Proton Drive and developer platforms](https://cyberpress.org/apt-c-60-deploys-spyglace-malware/)
-- [Positive Technologies PT ESC: APT-C-60 / SpyGlace profile](https://www.ptsecurity.com/ww-en/analytics/pt-esc-threat-intelligence/apt-c-60-spyglace/)

@@ -6,9 +6,10 @@ date: 2026-07-26
 categories: [windows, kernel, vulnerability-research, exploit-development]
 tags: [DirectWrite, font-parsing, BSOD, fontdrvhost, KERNELBASE, TrueType, OpenType, fuzzing, integer-overflow, EoP, RCE, Windows-11]
 excerpt: "I fuzzed the Windows 11 font stack with 2,000 structurally-corrupted TrueType files. The system bluescreened through fontdrvhost.exe — an integer overflow in KERNELBASE.dll crossing into kernel space. Here is the pipeline, the crash chain, and what this attack surface means at scale."
+last_modified_at: 2026-10-31
 ---
 
-I ran a structured font-fuzzing pipeline against the Windows 11 font parsing stack — 2,000 aggressively-mutated TrueType files fed through DirectWrite, GDI, and DWriteCore API harnesses. The system bluescreened with `SYSTEM_SERVICE_EXCEPTION (0x3B)` originating from `fontdrvhost.exe` — the kernel font driver host. The exception was an integer overflow (`0xc0000095`) in `KERNELBASE.dll`, crossing from userspace into kernel space.
+I ran a structured font-fuzzing pipeline against the Windows 11 font parsing stack — 2,000 aggressively-mutated TrueType files fed through DirectWrite, GDI, and DWriteCore API harnesses. The system bluescreened with `SYSTEM_SERVICE_EXCEPTION (0x3B)` originating from `fontdrvhost.exe` — the user-mode font driver host. The exception was an integer overflow (`0xc0000095`) in `KERNELBASE.dll`, crossing from userspace into kernel space.
 
 This is the attack surface that web browsers, Office, the Windows shell, and every application that renders text hits automatically. No user interaction. No approval prompt. A malicious font file dropped in `C:\Windows\Fonts` — or served via `@font-face` on a webpage — is parsed before anything appears on screen.
 
@@ -27,7 +28,7 @@ Here is the full pipeline, the crash chain, what we tried to isolate the killer 
 
 ## The Attack Surface
 
-The Windows font stack has been targeted for decades — MS13-060, MS15-078, CVE-2023-36710, CVE-2021-24093 — and for good reason. It is a complex C/C++ parser of a binary format with 20+ table types, each containing nested offsets, variable-length data, and interdependent structures. It runs with kernel-adjacent privileges. And it parses fonts automatically, without user consent, in nearly every application.
+The Windows font stack has been targeted for decades — MS13-060, MS15-078, CVE-2021-24093 — and for good reason. It is a complex C/C++ parser of a binary format with 20+ table types, each containing nested offsets, variable-length data, and interdependent structures. It runs with kernel-adjacent privileges. And it parses fonts automatically, without user consent, in nearly every application.
 
 Every modern Windows application that renders text hits this stack:
 
@@ -38,7 +39,7 @@ Application (Browser, Office, Shell, Game)
 DirectWrite / GDI / GDI+
     │
     ▼
-fontdrvhost.exe  ← Kernel font driver host
+fontdrvhost.exe  ← User-mode font driver host (AppContainer)
     │
     ▼
 win32k.sys / ATMFD.DLL  ← Kernel-mode font processing
@@ -93,7 +94,7 @@ Each harness calls the real Windows font APIs (not a mock) and catches crashes v
 | `gdi_font_fuzz` | `AddFontResourceExW`, `CreateFontIndirectW`, `GetGlyphIndices`, `GetGlyphOutline`, `GetCharABCWidths`, `GetFontData` | **System-wide** — triggers `fontdrvhost.exe` |
 | `dwritecore_fuzz` | DWriteCore-specific: variation axes, font face references, font set queries | Per-process |
 
-The critical distinction: `AddFontResourceExW` (GDI path) registers fonts **system-wide**, which causes `fontdrvhost.exe` — the kernel font driver host — to parse them. This is the code path that crashed.
+The critical distinction: `AddFontResourceExW` (GDI path) registers fonts **system-wide**, which causes `fontdrvhost.exe` — the user-mode font driver host — to parse them. This is the code path that crashed.
 
 ## The Crash
 
@@ -125,7 +126,7 @@ The integer overflow in `KERNELBASE.dll` — called from `fontdrvhost.exe` while
 |---|---|
 | Bug class: integer overflow | Which exact mutant triggered it |
 | Module: KERNELBASE.dll at offset 0xc1ada | Which font table (glyf? cmap? CFF?) |
-| Process: fontdrvhost.exe (kernel font driver) | Whether the overflow is controllable |
+| Process: fontdrvhost.exe (user-mode font driver host) | Whether the overflow is controllable |
 | Trigger: system-wide GDI font registration | Whether it leads to a controlled write or only a crash |
 | Attack path: `AddFontResourceExW` → kernel | Reproducibility without exact trigger font |
 
@@ -194,7 +195,7 @@ Here is the uncomfortable reality. If a capable adversary — a nation-state act
 
 An AI system with access to a Windows VM, a mutator, a fuzz harness, a debugger, and an exploit generator — none of which require special privileges or exotic hardware — could autonomously discover and weaponise a font parsing vulnerability in under half an hour. Every component of this pipeline already exists as open-source tooling. The only missing piece is the orchestration layer that connects them.
 
-This is not speculative. Google's ClusterFuzz has been finding font parsing bugs in FreeType and HarfBuzz automatically for years. OSS-Fuzz covers the open-source font stacks. The closed-source Windows font stack — `fontdrvhost.exe`, `win32k.sys`, `ATMFD.DLL` — has no public continuous fuzzing coverage. It relies on Microsoft's internal testing and occasional external researcher attention.
+This is not speculative. Google's ClusterFuzz has been finding font parsing bugs in FreeType and HarfBuzz automatically for years. OSS-Fuzz covers the open-source font stacks. The closed-source Windows font stack — `fontdrvhost.exe`, `win32k.sys` — has no public continuous fuzzing coverage. It relies on Microsoft's internal testing and occasional external researcher attention.
 
 The surface area is enormous. The tooling to automate exploitation exists. The gap is not technical — it is one of motivation and resources.
 
@@ -227,7 +228,7 @@ Every harness was compiled with MinGW-w64 and run from an unprivileged user acco
 For organisations concerned about this attack surface:
 
 1. **Block untrusted font downloads** at the network perimeter — `.ttf`, `.otf`, `.woff`, `.woff2` from non-approved domains
-2. **Enable Microsoft's Attack Surface Reduction (ASR) rules** — rule `56a863a9-875e-4185-98a7-b882c64b5ce5` blocks untrusted fonts
+2. **Enable Microsoft's Attack Surface Reduction (ASR) rules** — rule `56a863a9-875e-4185-98a7-b882c64b5ce5` is "Block abuse of exploited vulnerable signed drivers" — no ASR rule targets fonts
 3. **Deploy Enhanced Mitigation Experience Toolkit (EMET) or Exploit Protection** — enable Force ASLR, Bottom-up ASLR, and Control Flow Guard for `fontdrvhost.exe`
 4. **Monitor for fontdrvhost.exe crashes** in Windows Event Log (Event ID 1000, source fontdrvhost.exe) — these are potential exploitation attempts, not benign errors
 5. **Restrict write access to `C:\Windows\Fonts\`** — only Administrators and TrustedInstaller should have write permission
@@ -235,7 +236,7 @@ For organisations concerned about this attack surface:
 For Microsoft:
 
 - **Continuous public fuzzing of the Windows font stack** — the same model OSS-Fuzz uses for FreeType and HarfBuzz should apply to `fontdrvhost.exe` and `win32k.sys`
-- **Isolate fontdrvhost.exe in a lower-integrity AppContainer** — it currently runs with elevated privileges despite parsing untrusted input
+- **Harden fontdrvhost.exe's AppContainer sandbox** — it already runs in an AppContainer with limited privileges, but it still parses untrusted input
 - **Audit the integer arithmetic in every font table parser** — TrueType, OpenType, CFF, CFF2, WOFF, WOFF2 — for overflow-vulnerable calculations
 
 ## Closing Notes
@@ -254,5 +255,4 @@ The difference between a BSOD and a working remote code execution exploit is con
 
 ## Sources
 
-- [NVD: CVE-2023-36710](https://nvd.nist.gov/vuln/detail/CVE-2023-36710)
 - [NVD: CVE-2021-24093](https://nvd.nist.gov/vuln/detail/CVE-2021-24093)

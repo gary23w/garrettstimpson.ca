@@ -7,6 +7,7 @@ categories: [exploits, web, vuln-research]
 tags: [apache, httpd, cve, vulnerability-research, mod-auth-digest, mod-dav, fuzzing, asan]
 excerpt: "Apache httpd 2.4.69 shipped October 1 with twenty CVE fixes. The fixes are not randomly distributed. Three clusters account for half of them, and one module got a full rewrite of its authentication state handling. Where bugs cluster, more bugs live. Here is the map and the hunt plan."
 description: "Apache httpd 2.4.69 fixed twenty CVEs on October 1, 2026. The fixes cluster in mod_auth_digest, the mod_dav family, and the response processing chain, and mod_auth_digest got a full rewrite. Cluster analysis says where the next bug lives."
+last_modified_at: 2026-10-31
 ---
 
 ## A security release is a map. Most people read it as a changelog.
@@ -75,7 +76,7 @@ I build targets like this from source with AddressSanitizer before I read a line
 
 What I do not do is point a generic fuzzer at the whole server and wait. OSS-Fuzz has blanketed apache-httpd continuously for years. Anything a blind corpus finds in the well-fuzzed protocol paths has almost certainly been found already. The play is targeted: small harnesses against the specific functions the rewrite touched, nonce generation, opaque parsing, the shared memory garbage collection path, plus line-by-line reading of the 1431-line delta. The reading comes first. The fuzzer confirms what the reading suspects.
 
-Two smaller tells from the same release worth noting. mod_substitute got fixes for a crash on a directive with a missing closing delimiter, the kind of config-time parsing bug that hints at where the next one is. And the project's SECURITY.md now lists mod_sed as out of scope for security response, which is the project telling you, in writing, that this module is risky ground. When the vendor flags a module as not their problem, that module becomes everyone's problem.
+Two smaller tells from around the same release worth noting. mod_substitute got fixes for a crash on a directive with a missing closing delimiter, the kind of config-time parsing bug that hints at where the next one is. And on October 7, a trunk change to the project's SECURITY.md listed mod_sed as out of scope for security response, which is the project telling you, in writing, that this module is risky ground. When the vendor flags a module as not their problem, that module becomes everyone's problem.
 
 ## What I am watching
 

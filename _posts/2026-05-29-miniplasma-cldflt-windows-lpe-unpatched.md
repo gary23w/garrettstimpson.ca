@@ -5,6 +5,7 @@ date: 2026-05-29
 categories: [exploits, windows]
 tags: [windows, lpe, zero-day, cldflt, privilege-escalation, nightmare-eclipse, unpatched]
 excerpt: "A Windows LPE 'fixed' in December 2020 still hands out SYSTEM on fully patched Windows 11 in May 2026 — and the person who proved it is threatening to drop RCEs on July 14."
+last_modified_at: 2026-10-31
 ---
 
 Here's something that should bother you. In September 2020, Google Project Zero researcher James Forshaw reported a local privilege escalation bug in the Windows Cloud Files Mini Filter Driver, `cldflt.sys`. Microsoft patched it that December as CVE-2020-17103. The advisory went up, the KB shipped, the CVE closed. Done.
@@ -19,7 +20,7 @@ The Windows Cloud Files Mini Filter Driver ships on every modern Windows install
 
 The specific function at fault is `HsmOsBlockPlaceholderAccess`. The bug is a race condition in how that routine handles an undocumented API call. By hitting it with an unexpected command at the right moment, a standard (unprivileged) user process can force a structured error path that bypasses the access checks that should be protecting the operation. That bypassed check then allows the process to create arbitrary registry keys inside the `.DEFAULT` user hive — the profile used by `SYSTEM` services — without any elevated privileges.
 
-From there, you pivot to SYSTEM. The path isn't short, but it's reliable enough. Researchers at ThreatLocker confirmed it works consistently on current Windows 11, and the PoC was validated across Windows 10, Windows Server 2022, and Windows Server 2025 as well.
+From there, you pivot to SYSTEM. The path isn't short, but it's reliable enough. Researchers at ThreatLocker confirmed it works on current Windows 11 and list Windows Server 2022 and Windows Server 2025 as affected as well, though Windows 10 does not appear to be affected.
 
 No admin rights. No special hardware. Standard user account, fully patched OS, working SYSTEM shell.
 
@@ -48,15 +49,15 @@ Microsoft has not assigned a new CVE to MiniPlasma as of today, May 29. No patch
 
 ## Who Is Nightmare-Eclipse and Why Do You Need to Know
 
-MiniPlasma is the sixth zero-day released by a researcher operating under the name Nightmare-Eclipse (also Chaotic Eclipse, Dead Eclipse) since early April 2026. The other five, in order: BlueHammer (CVE-2026-33825, a Defender TOCTOU+oplock LPE, patched April 14), RedSun (CVE-2026-41091, a second Defender link-following EoP, patched May 21), UnDefend (CVE-2026-45498, a Defender disruption primitive, patched May 21), YellowKey (CVE-2026-45585, a BitLocker bypass, unpatched), and GreenPlasma (a partial Windows LPE through a different subsystem, unpatched).
+MiniPlasma is the sixth zero-day released by a researcher operating under the name Nightmare-Eclipse (also Chaotic Eclipse, Dead Eclipse) since early April 2026. The other five, in order: BlueHammer (CVE-2026-33825, a Defender TOCTOU+oplock LPE, patched April 14), RedSun (CVE-2026-41091, a second Defender link-following EoP, patched May 19), UnDefend (CVE-2026-45498, a Defender disruption primitive, patched May 19), YellowKey (CVE-2026-45585, a BitLocker bypass, unpatched), and GreenPlasma (a partial Windows LPE through a different subsystem, unpatched).
 
-Three of those six — BlueHammer, RedSun, and UnDefend — are confirmed actively exploited in the wild. Huntress Labs documented intrusions using the BlueHammer SYSTEM escalation as early as April 10, ten days after the PoC dropped. Activity was tracked to Russian-geolocated infrastructure. By the time Microsoft patched RedSun and UnDefend on May 21, attackers had already been chaining them with ransomware deployment for weeks.
+Three of those six — BlueHammer, RedSun, and UnDefend — are confirmed actively exploited in the wild. Huntress Labs documented intrusions using the BlueHammer SYSTEM escalation as early as April 10, eight days after the PoC dropped. Activity was tracked to Russian-geolocated infrastructure. By the time Microsoft patched RedSun and UnDefend on May 19, attackers had already been chaining them with ransomware deployment for weeks.
 
 The researcher's stated motivation is personal. Their blog describes an agreement they say Microsoft violated. The posts are specific: their MSRC account was deleted, reports were credited to other researchers, they received no payment. "Someone violated our agreement and left me homeless with nothing." Whether that's accurate, embellished, or entirely fabricated, the exploit code works regardless of the backstory.
 
-GitHub banned the account around May 23. GitLab followed on May 26. On May 28, Microsoft published a blog invoking their Digital Crimes Unit and threatening legal action against anyone who releases uncoordinated PoC code for unpatched vulnerabilities — a position that security community veterans like Katie Moussouris and Kevin Beaumont both called tone-deaf, given that Microsoft's own statement simultaneously claims researchers "are compensated and publicly acknowledged" while responding to one who says they got neither.
+GitHub banned the account around May 23. GitLab followed on May 26. On May 28, Microsoft published a blog invoking their Digital Crimes Unit and threatening legal action against anyone who releases uncoordinated PoC code for unpatched vulnerabilities — a position that security community veterans like Katie Moussouris and Kevin Beaumont both criticized, given that Microsoft's own statement simultaneously claims researchers "are compensated and publicly acknowledged" while responding to one who says they got neither.
 
-Nightmare-Eclipse responded with a promise: something described as a "bone shattering drop" on July 14, which is the next Patch Tuesday. Their exact words: "Mark this date July 14th, I will make sure your bones are shattered that day."
+Nightmare-Eclipse responded with a promise: something described as a "bone shattering drop" on July 14, which is July's Patch Tuesday. Their exact words: "Mark this date July 14th, I will make sure your bones are shattered that day."
 
 They have also stated they possess RCE vulnerabilities they haven't released yet.
 
@@ -64,9 +65,9 @@ They have also stated they possess RCE vulnerabilities they haven't released yet
 
 MiniPlasma is a local privilege escalation. It needs an existing foothold — someone has to be logged in, or an attacker has to already have code execution as a low-privileged user. It doesn't help with initial access.
 
-What it does help with is everything that comes after initial access. A phishing payload running as a standard user gets SYSTEM. A contractor account with minimal rights gets SYSTEM. An EDR evasion payload that needs kernel interaction gets SYSTEM first. In a post-exploitation context, this is precisely what attackers need and exactly why Huntress saw BlueHammer integrated into ransomware chains within days of release.
+What it does help with is everything that comes after initial access. A phishing payload running as a standard user gets SYSTEM. A contractor account with minimal rights gets SYSTEM. An EDR evasion payload that needs kernel interaction gets SYSTEM first. In a post-exploitation context, this is precisely what attackers need and exactly why Huntress saw BlueHammer used in a real intrusion within days of release.
 
-The scale matters too. Every Windows 10 and 11 machine, every Server 2022 and 2025 box, with no exceptions for patch level. OneDrive integration is on by default. `cldflt.sys` is loaded. The attack surface is essentially the entire Windows installed base.
+The scale matters too. Every Windows 11 machine, every Server 2022 and 2025 box, with no exceptions for patch level. OneDrive integration is on by default. `cldflt.sys` is loaded. The attack surface is essentially the entire Windows installed base.
 
 ## What You Can Do Right Now
 

@@ -6,6 +6,7 @@ date: 2026-05-31
 categories: [malware, analysis]
 tags: [evelyn-stealer, vscode, supply-chain, process-hollowing, infostealer, windows, mitre-attack]
 excerpt: "A stealer campaign weaponizes the VS Code marketplace: a trojan extension drops a downloader DLL, fires hidden PowerShell, and hollows grpconv.exe to run entirely in memory while it strips browser creds and crypto wallets. The injection target alone is the tell."
+last_modified_at: 2026-10-31
 ---
 
 This one bothers me more than your average stealer, because it goes straight at developers. Not the marketing intern who clicks a fake invoice. The person with a signed commit history, a cloud token in their environment, and push access to production. Evelyn Stealer rides in through the Visual Studio Code extension marketplace, runs its final payload inside a Windows process that basically never executes on a modern machine, and walks out with browser credentials, cookies, and crypto wallets. Trend Micro published a full breakdown in January after Koi Security first flagged the extensions in December, and the chain is clean enough to be worth picking apart.
@@ -20,18 +21,18 @@ The campaign starts with three malicious VS Code extensions: `BigBlack.bitcoin-b
 
 Reference hash for that downloader, per Trend Micro's IOC table, SHA256: `369479bd9a248c9448705c222d81ff1a0143343a138fc38fc0ea00f54fcc1598`. Do not go fetch it. You do not need the binary to understand the chain, and the analysis below is built entirely from published metadata and reporting.
 
-`Lightshot.dll` launches a hidden PowerShell command (T1059.001) that pulls down a second stage called `runtime.exe`. That executable is the injector. It decrypts the real stealer with AES-256-CBC and injects it directly into the memory of a legitimate Windows process, `grpconv.exe`. From there the stealer collects clipboard contents, installed apps, running processes, desktop screenshots, stored Wi-Fi credentials, system info, and the good stuff, saved cookies and credentials out of Chrome and Edge, plus crypto wallets. It zips the haul and ships it over FTP to `server09.mentality[.]cloud`. Trend Micro tracks the final payload as Evelyn Stealer; some later samples added WhatsApp and Telegram session theft and Epic Games tokens.
+`Lightshot.dll` launches a hidden PowerShell command (T1059.001) that pulls down a second stage called `runtime.exe`. That executable is the injector. It decrypts the real stealer with AES-256-CBC and injects it directly into the memory of a legitimate Windows process, `grpconv.exe`. From there the stealer collects clipboard contents, installed apps, running processes, desktop screenshots, stored Wi-Fi credentials, system info, and the good stuff, saved cookies and credentials out of Chrome and Edge, plus crypto wallets. It zips the haul and ships it over FTP to `server09.mentality[.]cloud`. Trend Micro tracks the final payload as Evelyn Stealer; some later samples added WhatsApp and Telegram session theft and Epic Games data.
 
 There is also a second delivery path. A ClickFix-style variant uses malvertising to trick the victim into pasting PowerShell, which stages GuLoader out of a JPG and loads Evelyn into memory with MSBuild. Same destination, different front door.
 
 ---
 
-![Step diagram of the Evelyn Stealer chain from a trojan VS Code extension through grpconv.exe hollowing to FTP exfiltration.](/assets/figures/evelyn-stealer-vscode-extension-grpconv-hollowing-diagram.svg){: width="640" height="582" loading="lazy"}
-*Evelyn Stealer infection chain, as described in this post.*
+![Six steps: trojan VS Code extensions, a hidden PowerShell download, hollowing grpconv.exe, headless browser theft, FTP exfiltration, and detection.](/assets/figures/evelyn-stealer-vscode-extension-grpconv-hollowing-diagram.svg){: width="640" height="686" loading="lazy"}
+*How Evelyn Stealer goes from extension to stolen data, as described in this post.*
 
 ## What Makes It Work
 
-The piece worth your attention is the injection target. `grpconv.exe` is the Program Group Converter, a signed Microsoft binary left over from the Windows 9x to NT migration. On a normal box it runs approximately never. So when Evelyn picks it as the host for process hollowing (T1055.012), the attacker gets a payload running under a trusted, signed image name. The cost is that anything spawning or writing into `grpconv.exe` is, by itself, an anomaly. The malware traded stealth on the image name for a giant tell on the behavior. I will take that trade as a defender every single time.
+The piece worth your attention is the injection target. `grpconv.exe` is the Program Group Converter, a signed Microsoft binary left over from the Windows 3.x to Windows 95 upgrade. On a normal box it runs approximately never. So when Evelyn picks it as the host for process hollowing (T1055.012), the attacker gets a payload running under a trusted, signed image name. The cost is that anything spawning or writing into `grpconv.exe` is, by itself, an anomaly. The malware traded stealth on the image name for a giant tell on the behavior. I will take that trade as a defender every single time.
 
 Process hollowing works like this. The injector calls `CreateProcessW` with the `CREATE_SUSPENDED` flag so the target launches but never runs a single instruction. It reads the target's PEB to find the image base, unmaps the original executable image with `NtUnmapViewOfSection` (sometimes called `ZwUnmapViewOfSection`), allocates fresh memory with `VirtualAllocEx`, writes the decrypted payload in with `WriteProcessMemory`, repoints the thread's entry via `SetThreadContext`, and finally calls `ResumeThread`. The process that the OS, the EDR, and the analyst all see is `grpconv.exe`. The code actually running is Evelyn. Nothing ever touches disk as the real payload, which is the entire point of doing it in memory.
 
@@ -103,9 +104,9 @@ The detection lesson is in the call graph, not the bytes. `CreateProcess` with `
 
 ## Detection and Defense
 
-Start with the injection target because it is the cheapest, highest-signal catch you have. Alert on `grpconv.exe` running at all. Sysmon Event ID 1 with `Image` ending in `grpconv.exe` should be near zero in any normal environment, and a parent process of `runtime.exe` or PowerShell makes it an instant pivot. Pair that with Sysmon Event ID 10, ProcessAccess, where the source process opens `grpconv.exe` with `GrantedAccess` containing `0x0820` or similar masks that include `PROCESS_VM_WRITE` and `PROCESS_VM_OPERATION` and `PROCESS_SET_INFORMATION`. That access pattern into a dormant signed binary is the hollowing handprint.
+Start with the injection target because it is the cheapest, highest-signal catch you have. Alert on `grpconv.exe` running at all. Sysmon Event ID 1 with `Image` ending in `grpconv.exe` should be near zero in any normal environment, and a parent process of `runtime.exe` or PowerShell makes it an instant pivot. Pair that with Sysmon Event ID 10, ProcessAccess, where the source process opens `grpconv.exe` with `GrantedAccess` containing `0x0820` (`PROCESS_SUSPEND_RESUME` plus `PROCESS_VM_WRITE`) or similar masks that include `PROCESS_VM_WRITE`, `PROCESS_VM_OPERATION` or `PROCESS_SET_INFORMATION`. That access pattern into a dormant signed binary is the hollowing handprint.
 
-Watch the extension origin. The dropped `Lightshot.dll` will load into the Code/node process tree, so Sysmon Event ID 7, ImageLoad, for an unsigned or odd DLL loading under `Code.exe` or the extension host is worth flagging. Inventory installed extensions and hunt for the `BigBlack.*` publisher and anything pulled from outside your approved list under `%USERPROFILE%\.vscode\extensions`.
+Watch the extension origin. The dropped `Lightshot.dll` is executed by the genuine `Lightshot.exe`, so Sysmon Event ID 7, ImageLoad, for an unsigned or odd DLL loading under `Lightshot.exe` is worth flagging. Inventory installed extensions and hunt for the `BigBlack.*` publisher and anything pulled from outside your approved list under `%USERPROFILE%\.vscode\extensions`.
 
 Hunt the browser relaunch. A Chrome or Edge process started with `--headless=new` combined with `--disable-logging` and an off-screen `--window-position=-10000,-10000` or a `--window-size=1,1` is not something a human does. That command line in Sysmon Event ID 1 is one of the strongest behavioral indicators in this whole chain.
 

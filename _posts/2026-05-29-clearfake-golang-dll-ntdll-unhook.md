@@ -6,6 +6,7 @@ date: 2026-05-29
 categories: [malware, analysis]
 tags: [clearfake, golang, dll, ntdll-unhooking, evasion, rundll32, mitre-attack]
 excerpt: "A ClearFake sample dropped today on MalwareBazaar is a 32-bit Go-compiled DLL that bypasses EDR hooks by remapping ntdll from KnownDlls, uses NtClose(0xdeadc0de) as an anti-debug tripwire, and goes completely dark in sandbox — zero network hits, clean bail-out."
+last_modified_at: 2026-10-31
 ---
 
 Fresh off MalwareBazaar today: a ClearFake dropper that is doing things I do not normally see from this campaign family. The name is `goog.ct_2026-05-29`. It is disguised as a Google Certificate Transparency log file, it is compiled in Go, and it performs a textbook ntdll unhook via KnownDlls to strip EDR hooks before doing anything visible. In the CAPE sandbox it made zero network calls and returned `DLL_INIT_FAILED` — it detected the analysis environment and shut down cleanly. Seven vendor detections at time of submission.
@@ -30,8 +31,8 @@ CAPE sandbox analysis: [https://www.capesandbox.com/analysis/68500/](https://www
 
 ---
 
-![Six-step diagram of the ClearFake Go DLL from a fake update and rundll32 launch through ntdll unhooking and sandbox exit.](/assets/figures/clearfake-golang-dll-ntdll-unhook-diagram.svg){: width="640" height="686" loading="lazy"}
-*ClearFake Go DLL execution and evasion chain, as described in this post.*
+![Six steps: a fake update lure, rundll32 execution, anti-debug checks, ntdll unhooking via KnownDlls, a clean sandbox exit, and detection.](/assets/figures/clearfake-golang-dll-ntdll-unhook-diagram.svg){: width="640" height="686" loading="lazy"}
+*How a ClearFake DLL strips EDR hooks and evades sandboxes, as described in this post.*
 
 ## What Makes It Work
 
@@ -61,7 +62,7 @@ The behavioral trace shows:
 NtClose Handle: 0xdeadc0de  →  failed INVALID_HANDLE
 ```
 
-Called twice, at different points in execution. This is a classic Windows debugger detection primitive. Under normal execution, `NtClose` on an invalid handle fails silently and returns `STATUS_INVALID_HANDLE`. When a kernel debugger like WinDbg is attached and has `sxe ch` (close handle exceptions) configured, the same call raises a `EXCEPTION_INVALID_HANDLE` exception instead. The malware catches that exception — or rather, checks whether the call throws at all — to determine if a debugger is present. The value `0xdeadc0de` is a well-known marker in this specific technique.
+Called twice, at different points in execution. This is a classic Windows debugger detection primitive. Under normal execution, `NtClose` on an invalid handle fails silently and returns `STATUS_INVALID_HANDLE`. When a debugger is attached, the same call raises a `EXCEPTION_INVALID_HANDLE` exception instead. The malware catches that exception — or rather, checks whether the call throws at all — to determine if a debugger is present. The value `0xdeadc0de` is a well-known marker in this specific technique.
 
 **ntdll unhooking via KnownDlls (T1562.001)**
 
