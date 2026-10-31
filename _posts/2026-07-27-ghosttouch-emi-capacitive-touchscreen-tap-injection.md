@@ -41,6 +41,9 @@ This is the critical insight: **the controller does not distinguish between a fi
 
 ---
 
+![Diagram of the GhostTouch attack, from a hidden antenna coupling into a touchscreen's sense grid to an injected tap on a permission dialog.](/assets/figures/ghosttouch-emi-capacitive-touchscreen-tap-injection-diagram.svg){: width="640" height="582" loading="lazy"}
+*EM tap injection chain for GhostTouch, as described in this post.*
+
 ## GhostTouch Injection Mechanism
 
 GhostTouch exploits this ambiguity with three components:
@@ -171,3 +174,7 @@ A GhostTouch-class attack could be deployed today and no existing enterprise mob
 - *Security Analysis of Capacitive Touch Input Systems* — prior work on touch relay attacks (Xu et al., USENIX Security, 2020)
 - *Light Commands: Laser-Based Audio Injection on Voice-Controllable Systems* — Sugawara et al., USENIX Security 2020 (parallel electromagnetic attack class)
 - NIST SP 800-124 Rev. 2 — Guidelines for Managing the Security of Mobile Devices in the Enterprise
+
+## Sources
+
+- [DOI: 10.1145/3548606.3560600](https://doi.org/10.1145/3548606.3560600)

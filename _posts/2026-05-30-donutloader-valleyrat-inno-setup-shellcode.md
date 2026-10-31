@@ -15,7 +15,7 @@ excerpt: "A 5MB Inno Setup installer landed on MalwareBazaar carrying Donut-gene
 **First seen:** 2026-05-29 14:01 UTC  
 **File size:** 5,295,183 bytes  
 **Reporter:** Ling  
-**MalwareBazaar:** https://bazaar.abuse.ch/sample/480c184e69a19d4f3bb595324d618eead8f6fcc5176f1ebc5e44ee1389472503/
+**MalwareBazaar:** <https://bazaar.abuse.ch/sample/480c184e69a19d4f3bb595324d618eead8f6fcc5176f1ebc5e44ee1389472503/>
 
 ---
 
@@ -28,6 +28,9 @@ What makes this one worth writing about is the layering. You have a trusted inst
 ValleyRAT, also tracked as Winos 4.0, is a remote access trojan in the Gh0stRAT family. It is the signature tool of Silver Fox, a financially motivated actor that has spent the last year hammering Chinese-speaking targets with tax lures, fake Microsoft Teams installers, and e-invoice bait. If you have read the K7 Labs or Seqrite writeups from late 2025, you have seen the playbook. This sample is the same family arriving through a slightly different front door.
 
 ---
+
+![Six-step diagram of the DonutLoader chain from an Inno Setup installer and Donut stub to in-memory ValleyRAT and persistence.](/assets/figures/donutloader-valleyrat-inno-setup-shellcode-diagram.svg){: width="640" height="686" loading="lazy"}
+*DonutLoader and ValleyRAT infection chain, as described in this post.*
 
 ## What Makes It Work
 
@@ -104,3 +107,12 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 ---
 
 *Sample reference (do not download or execute): SHA256 `480c184e69a19d4f3bb595324d618eead8f6fcc5176f1ebc5e44ee1389472503`. Analysis based on MalwareBazaar metadata and public threat intelligence. No malware was downloaded or run in producing this post.*
+
+## Sources
+
+- [Rat Race: ValleyRAT Malware Targets Organizations with New Delivery Techniques (Morphisec)](https://www.morphisec.com/blog/rat-race-valleyrat-malware-china/)
+- [Donut, Software S0695 (MITRE ATT&CK)](https://attack.mitre.org/software/S0695/)
+- [Cracking ValleyRAT: From Builder Secrets to Kernel Rootkits (Check Point Research)](https://research.checkpoint.com/2025/cracking-valleyrat-from-builder-secrets-to-kernel-rootkits/)
+- [Operation Silk Lure: Scheduled Tasks Weaponized for DLL Side-Loading (Seqrite)](https://www.seqrite.com/blog/operation-silk-lure-scheduled-tasks-weaponized-for-dll-side-loading-drops-valleyrat/)
+- [Fake Microsoft Teams Campaign Delivers ValleyRAT via NSIS Installer and DLL Sideloading (K7 Labs)](https://labs.k7computing.com/index.php/fake-microsoft-teams-campaign-delivers-valleyrat-via-nsis-installer-and-dll-sideloading/)
+- [Threat Campaign Spreads Winos4.0 Through Game Application (Fortinet)](https://www.fortinet.com/blog/threat-research/threat-campaign-spreads-winos4-through-game-application)

@@ -17,6 +17,9 @@ Most vulnerability scanners will not find any of this. Three of the five are pro
 
 This is the security work waiting outside the CVE feed.
 
+![Key-points diagram of five attacks: WILD, Opossum, Download More RAM, Cuckoo, and x402, each crossing an unbound trust boundary.](/assets/figures/five-obscure-security-threats-trusted-systems-diagram.svg){: width="640" height="582" loading="lazy"}
+*Five attacks on a boundary the system forgot to bind, as described in this post.*
+
 ## 1. WILD Attack: poison the map instead of spoofing the phone
 
 Phones do not use GPS alone to determine where they are. Indoors, between tall buildings, and on devices without a GPS receiver, they lean on Wi-Fi Positioning Systems. The device scans nearby access points, sends their BSSIDs to a provider, and gets coordinates back from a giant Location Lookup Table:
@@ -203,3 +206,18 @@ This is why more patching is not a complete answer. You cannot CVE-scan your way
 The practical review question is simple: when one layer authenticates a fact, what does the next layer assume that fact means? Write both statements down. If they are not identical, the space between them is where the next obscure attack is already growing.
 
 *Primary research: [WILD Attack](https://www.usenix.org/system/files/usenixsecurity26-zhu-changjia.pdf); [Opossum Attack](https://www.usenix.org/system/files/conference/usenixsecurity26/sec26_prepub_merget.pdf); [Download More RAM](https://www.usenix.org/system/files/usenixsecurity26-collins.pdf); [A Cuckoo in the Nest](https://www.usenix.org/system/files/usenixsecurity26-zhang-qiguang.pdf); [When HTTP 402 Meets the Blockchain](https://www.usenix.org/system/files/usenixsecurity26-wang-qinying.pdf). All five were presented at the 35th USENIX Security Symposium, August 12–14, 2026.*
+
+## Sources
+
+- [WILD paper](https://www.usenix.org/conference/usenixsecurity26/presentation/zhu-changjia)
+- [Opossum paper](https://www.usenix.org/conference/usenixsecurity26/presentation/merget)
+- [RFC 2817](https://www.rfc-editor.org/rfc/rfc2817.html)
+- [Download More RAM](https://www.usenix.org/conference/usenixsecurity26/presentation/collins)
+- [A Cuckoo in the Nest](https://www.usenix.org/conference/usenixsecurity26/presentation/zhang-qiguang)
+- [USENIX x402 study](https://www.usenix.org/conference/usenixsecurity26/presentation/wang-qinying)
+- [x402 v2 specification](https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md)
+- [WILD Attack](https://www.usenix.org/system/files/usenixsecurity26-zhu-changjia.pdf)
+- [Opossum Attack](https://www.usenix.org/system/files/conference/usenixsecurity26/sec26_prepub_merget.pdf)
+- [Download More RAM](https://www.usenix.org/system/files/usenixsecurity26-collins.pdf)
+- [A Cuckoo in the Nest](https://www.usenix.org/system/files/usenixsecurity26-zhang-qiguang.pdf)
+- [When HTTP 402 Meets the Blockchain](https://www.usenix.org/system/files/usenixsecurity26-wang-qinying.pdf)

@@ -21,6 +21,9 @@ The thing I care about most is fidelity. When you run `ps aux` in a shellDojo mi
 
 That's a genuinely hard problem, and it's the whole reason the project exists. A training range that shows you sanitized output teaches you sanitized thinking. A range that shows you the real thing — including the ambiguity, the noise, and the rabbit holes — teaches you to actually *read a box*. Every command, every flag, every argument is interpreted the way it would be in the real world, and the output is generated to match: the same tools, the same flags, the same output shape you'd see on a live machine. And when you do get it wrong, the command brief decodes what you just ran — the binary, the flags, the hook — so a fumbled `find` invocation doesn't just earn you a "wrong," it tells you what you were actually doing.
 
+![Step diagram of a shellDojo operation: pick an operation, enter a compromised box, hunt the intruder, get an after-action report, earn rank.](/assets/figures/shell-dojo-diagram.svg){: width="640" height="582" loading="lazy"}
+*How a shellDojo operation runs, as described in this post.*
+
 ## How the range works
 
 You pick an operation and get dropped straight into the terminal. The machine is already owned — your job is to figure out how, by whom, and how to kick them out. Most operations are Linux boxes; a solid chunk are Windows. Difficulty runs 1 to 5, and the catalog runs from ten-minute warm-ups to eighty-minute marathons.
@@ -60,3 +63,7 @@ shellDojo is a Flask + Python app running on Vercel with a terminal client in th
 If any of that sounds like your kind of Friday, the range is live at [shell-dojo.vercel.app](https://shell-dojo.vercel.app/). It's free, it runs in your browser, and the first warm-up takes about ten minutes. Start with Operation Ghost Signal — a web server mining crypto for someone who isn't you — and try not to touch `hint`. Your score will thank you.
 
 — Garrett
+
+## Sources
+
+- [shell-dojo.vercel.app](https://shell-dojo.vercel.app/)

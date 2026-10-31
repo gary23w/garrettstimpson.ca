@@ -26,6 +26,9 @@ Researchers at G DATA documented this campaign beginning in March 2025. The payl
 
 Once the installer runs, the attacker has a persistent ScreenConnect session. That is already bad enough. But that is not where the campaign stops.
 
+![Six-step diagram of the ScreenConnect campaign from a PDF lure and signed installer to in-memory AsyncRAT and task persistence.](/assets/figures/screenconnect-authenticode-stuffing-asyncrat-diagram.svg){: width="640" height="686" loading="lazy"}
+*Signed ScreenConnect installer to AsyncRAT chain, as described in this post.*
+
 ## The Full Attack Chain
 
 The phishing chain usually starts with a malicious PDF. The PDF links to a Canva page or a Cloudflare R2 bucket hosting the trojanized installer. The file arrives signed, and security tooling frequently lets it through because the signer is a known vendor.
@@ -119,3 +122,7 @@ level: high
 Beyond detection, restrict which RMM tools are allowed in your environment with an allowlist. Validate that any ScreenConnect installer your help desk distributes connects only to your organization's ScreenConnect instance by checking the embedded server URL before installation. ConnectWise revoked the specific certificate used in documented samples, but new campaigns simply build fresh installers with different server configurations.
 
 Two samples this morning. Same reporter. Same technique. This campaign is not slowing down.
+
+## Sources
+
+- [bazaar.abuse.ch/sample/aa116a6279aebc383ed7a9321d580f998436e34f06d07f2cb8ac](https://bazaar.abuse.ch/sample/aa116a6279aebc383ed7a9321d580f998436e34f06d07f2cb8ac2d7fd876ba60/)

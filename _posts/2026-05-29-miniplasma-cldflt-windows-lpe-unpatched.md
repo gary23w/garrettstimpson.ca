@@ -33,6 +33,9 @@ C:\> whoami
 nt authority\system
 ```
 
+![Four-step diagram of MiniPlasma from an unprivileged cldflt.sys race to .DEFAULT hive registry keys and a SYSTEM shell.](/assets/figures/miniplasma-cldflt-windows-lpe-unpatched-diagram.svg){: width="640" height="478" loading="lazy"}
+*MiniPlasma cldflt.sys privilege escalation path, as described in this post.*
+
 ## The CVE-2020-17103 Problem
 
 What makes this interesting beyond the typical "new LPE" post is the history. This isn't a new discovery that Microsoft missed. James Forshaw found it and Microsoft "fixed" it. The fix just didn't fix the right thing.
@@ -84,3 +87,11 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 ---
 
 **References:** [Bleeping Computer - MiniPlasma](https://www.bleepingcomputer.com/news/microsoft/new-windows-miniplasma-zero-day-exploit-gives-system-access-poc-released/) | [ThreatLocker Analysis](https://www.threatlocker.com/blog/miniplasma-windows-privilege-escalation-zero-day-affects-fully-patched-systems) | [The Register - July 14 threat](https://www.theregister.com/security/2026/05/28/microsoft-0-day-feud-escalates-as-researcher-threatens-another-windows-exploit-dump/5248085) | [Barracuda - Nightmare-Eclipse profile](https://blog.barracuda.com/2026/05/19/nightmare-eclipse-zero-days-grudge) | [CSO Online - 2020 resurface](https://www.csoonline.com/article/4172320/patched-windows-bug-resurfaces-6-years-later-as-working-system-level-exploit.html)
+
+## Sources
+
+- [Bleeping Computer - MiniPlasma](https://www.bleepingcomputer.com/news/microsoft/new-windows-miniplasma-zero-day-exploit-gives-system-access-poc-released/)
+- [ThreatLocker Analysis](https://www.threatlocker.com/blog/miniplasma-windows-privilege-escalation-zero-day-affects-fully-patched-systems)
+- [The Register - July 14 threat](https://www.theregister.com/security/2026/05/28/microsoft-0-day-feud-escalates-as-researcher-threatens-another-windows-exploit-dump/5248085)
+- [Barracuda - Nightmare-Eclipse profile](https://blog.barracuda.com/2026/05/19/nightmare-eclipse-zero-days-grudge)
+- [CSO Online - 2020 resurface](https://www.csoonline.com/article/4172320/patched-windows-bug-resurfaces-6-years-later-as-working-system-level-exploit.html)

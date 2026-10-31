@@ -25,6 +25,9 @@ CVE-2026-43284 covers the ESP variant (`esp4` and `esp6`). The bug traces to com
 
 Nine years for the ESP half. Nobody caught it.
 
+![Five-step diagram of the Dirty Frag ESP path from a crafted IPsec socket to a page cache write and SUID binary overwrite.](/assets/figures/dirty-frag-linux-kernel-lpe-diagram.svg){: width="640" height="582" loading="lazy"}
+*Dirty Frag ESP exploit chain, as described in this post.*
+
 ## Why "deterministic" changes everything
 
 Most page cache corruption exploits involve timing. You race against the kernel, success rates vary. Dirty Pipe had good rates because the race window was wide. Other bugs require hundreds of attempts, specific CPU topology, or a fast machine.
@@ -87,3 +90,9 @@ Patch. Then ask why your review process didn't catch it either.
 ---
 
 *Based on the [Wiz blog](https://www.wiz.io/blog/dirty-frag-linux-kernel-local-privilege-escalation-via-esp-and-rxrpc), [Sysdig detection guide](https://www.sysdig.com/blog/dirty-frag-cve-2026-43284-and-cve-2026-43500-detecting-unpatched-local-privilege-escalation-via-linux-kernel-esp-and-rxrpc), and [Microsoft Security Blog](https://www.microsoft.com/en-us/security/blog/2026/05/08/active-attack-dirty-frag-linux-vulnerability-expands-post-compromise-risk/).*
+
+## Sources
+
+- [Wiz blog](https://www.wiz.io/blog/dirty-frag-linux-kernel-local-privilege-escalation-via-esp-and-rxrpc)
+- [Sysdig detection guide](https://www.sysdig.com/blog/dirty-frag-cve-2026-43284-and-cve-2026-43500-detecting-unpatched-local-privilege-escalation-via-linux-kernel-esp-and-rxrpc)
+- [Microsoft Security Blog](https://www.microsoft.com/en-us/security/blog/2026/05/08/active-attack-dirty-frag-linux-vulnerability-expands-post-compromise-risk/)

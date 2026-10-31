@@ -19,6 +19,9 @@ Most hardware bugs let an attacker read data they shouldn't have access to. Ghos
 
 **The punchline.** With a small JavaScript or Python payload, an unprivileged attacker can write arbitrary values to arbitrary physical addresses. That means one-shot kernel root, direct firmware overwrite of SPI flash, or even permanent device bricking. There is no software mitigation — only hardware respin.
 
+![Diagram of the three hardware attacks covered in the post: GhostWrite, TPM SPI bus sniffing and Prime+Abort.](/assets/figures/three-obscure-hardware-attack-vectors-diagram.svg){: width="640" height="478" loading="lazy"}
+*Three obscure hardware attack vectors, as described in this post.*
+
 ## TPM SPI Bus Sniffing — The 30-Cent Logic Analyzer Attack
 
 Trusted Platform Modules are meant to provide hardware-grounded attestation and key storage. Their security hinges on the assumption that the communication bus between the CPU and the TPM is trusted. In most laptops, that bus is SPI.
@@ -48,3 +51,10 @@ Intel TSX (Transactional Synchronization Extensions) was designed to improve the
 Hardware security is full of these weird, specialized attack surfaces that feel like magic tricks in a world that only knows one card game. GhostWrite writes to physical memory because of an errata in a Chinese RISC-V core. TPM sniffing recovers keys from a bus that everyone *assumes* is trusted because the protocol is too fast and too cheap to encrypt. Prime+Abort weaponizes Intel's buggy transaction memory into a covert channel that needs no fine measurement at all.
 
 Each of these is obscure in its own way — but all three are real, weaponizable, and still exploitable on millions of devices today. If you work in hardware security, add them to your threat model. If you don't, enjoy the rabbit hole. This is the stuff that keeps me up at night. — Garrett
+
+## Sources
+
+- [NVD: CVE-2024-27907](https://nvd.nist.gov/vuln/detail/CVE-2024-27907)
+- [cert-portal.siemens.com vendor advisory for CVE-2024-27907](https://cert-portal.siemens.com/productcert/html/ssa-000072.html)
+- [NVD: CVE-2019-11135](https://nvd.nist.gov/vuln/detail/CVE-2019-11135)
+- [oss-security - CVE-2019-19338 Kernel: KVM: export MSR_IA32_TSX_CTRL to guest - incomplete fix for TAA (CVE-2019-11135)](http://www.openwall.com/lists/oss-security/2019/12/10/3)

@@ -3,6 +3,12 @@
 
 @import "minima";
 
+/* JetBrains Mono, self-hosted latin subset (SIL OFL 1.1, assets/fonts/OFL.txt; files from @fontsource/jetbrains-mono 5.3.0) */
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 300; font-display: swap; src: url('/assets/fonts/jetbrains-mono-latin-300-normal.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('/assets/fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 700; font-display: swap; src: url('/assets/fonts/jetbrains-mono-latin-700-normal.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: 'JetBrains Mono'; font-style: italic; font-weight: 400; font-display: swap; src: url('/assets/fonts/jetbrains-mono-latin-400-italic.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+
 /* ============================================================
    GARRETT STIMPSON — CYBERSECURITY THEME
    Neon green terminal aesthetic over pure black
@@ -1156,9 +1162,8 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 .topic-name a:hover { text-shadow: 0 0 6px rgba(0, 255, 65, 0.4) !important; }
 
 /* ============================================================
-   RENDERING: skip layout/paint of off-screen list items and code
-   blocks until they are scrolled near (long lists, /tags/, /commands/)
+   RENDERING: skip layout/paint of off-screen list items until they
+   are scrolled near (homepage list, /tags/)
    ============================================================ */
 .post-list > .post-card:nth-child(n+4) { content-visibility: auto; contain-intrinsic-size: auto 210px; }
 ul.tag-posts { content-visibility: auto; contain-intrinsic-size: auto 90px; }
-.post-content div.highlighter-rouge { content-visibility: auto; contain-intrinsic-size: auto 160px; }

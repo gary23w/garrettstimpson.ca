@@ -18,6 +18,9 @@ ctfmon.exe is the Collaborative Translation Framework monitor. It's the plumbing
 
 Shared state plus a privilege boundary is the oldest trap in Windows local exploitation. CTFMON reaches into the object manager namespace to find and map section objects (shared memory, created through NtCreateSection and friends) that the input stack uses to pass data around. The trust assumption baked in is that whatever lives at the expected name was placed there by something at least as privileged as CTFMON. That assumption is wrong, and GreenPlasma is the proof.
 
+![Step diagram of the GreenPlasma chain where a standard user plants a section object that the SYSTEM ctfmon.exe process maps and trusts.](/assets/figures/greenplasma-ctfmon-section-object-windows-lpe-diagram.svg){: width="640" height="582" loading="lazy"}
+*GreenPlasma privilege escalation chain, as described in this post.*
+
 ## The primitive
 
 What James Ballantyne's team at SpiderLabs documented, and what the public PoC demonstrates, is arbitrary section creation in a namespace location a standard user has no business writing to. The exploit, running as a plain unprivileged user, creates a named section object and gets it to land where CTFMON expects a trusted one. Then a chain of registry edits and ACL boundary abuse nudges CTFMON into opening and mapping the attacker's section instead of the legitimate one.
@@ -73,3 +76,10 @@ There's no patch, so this is detection and hardening, not remediation. Baseline 
 Block execution from user-writable staging directories with ASR rules, since every confirmed Nightmare-Eclipse intrusion staged payloads out of Pictures and Downloads subfolders. Alert on a process literally named GreenPlasma.exe and its obvious renames. Audit your FortiGate and other SSL VPN logs for off-hours or geographically improbable logins, because that has been the front door for this crew every time. And set a calendar reminder to watch Microsoft's out-of-band channel ahead of June's Update Tuesday, plus the Nightmare-Eclipse GitHub account, since he has been explicit that more drops are coming on a Patch Tuesday cadence.
 
 Treat GreenPlasma as live. The dangerous half is already public, and the other half is a weekend project for the wrong person.
+
+## Sources
+
+- [NVD: CVE-2026-45585](https://nvd.nist.gov/vuln/detail/CVE-2026-45585)
+- [NVD: CVE-2026-33825](https://nvd.nist.gov/vuln/detail/CVE-2026-33825)
+- [Nightmare-Eclipse Tooling Seen in Real-World Intrusion | Huntress](https://www.huntress.com/blog/nightmare-eclipse-intrusion)
+- [CISA Known Exploited Vulnerabilities catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)

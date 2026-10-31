@@ -26,6 +26,9 @@ Three components matter:
 
 The SPIRE server holds the registration entries: rules that say which selector sets earn which identity. A SPIRE agent runs on every node, syncs and caches those entries, and pre-generates key pairs and SVIDs for them locally. That last detail matters later: by the time a workload asks for its identity, the credential is usually already sitting in the agent's cache on the same node.
 
+![Attack chain where root on a Kubernetes node fakes a victim's cgroup path so the SPIRE agent returns the victim's SVID.](/assets/figures/spire-cgroup-spoofing-node-trust-diagram.svg){: width="640" height="686" loading="lazy"}
+*Cgroup-spoofing chain from Unit 42's SPIRE research, as described in this post.*
+
 ## How attestation actually decides who you are
 
 A workload asks the agent over the Workload API, typically a Unix domain socket such as `/run/spire/sockets/agent.sock`, calling `FetchX509SVID` or `FetchJWTSVID`. The agent extracts the PID of the calling process and hands it to attestation plugins. In the Unit 42 lab, two plugins were configured: `k8s` and `unix`.
@@ -144,3 +147,8 @@ Then shrink the blast radius so the assumption breaks smaller:
 PaperCut, two posts ago on this site, had a patch and still produced 440 compromised instances in days. This one has no patch, no CVE, and no known victims, and that combination is exactly why it deserves attention now. The window where an assumption can be fixed cheaply is the window before the first campaign turns it into an incident timeline.
 
 Root on the node was always game over for the node. The change is that the node now holds a branch office of your identity fabric, with valid credentials for every workload parked on it. Treat root as identity compromise, because that is what it is now.
+
+## Sources
+
+- [The Machine With Many Faces: Post-Exploitation Identity Misuse in SPIFFE/SPIRE](https://unit42.paloaltonetworks.com/spiffe-spire-vulnerabilities/)
+- [Spooffe](https://github.com/)

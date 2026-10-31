@@ -38,6 +38,9 @@ And there is almost no tooling to find these.
 
 ---
 
+![Diagram of the kernel object namespace audit, from enumerating named objects to signaling NULL-DACL events from an unprivileged process.](/assets/figures/windows-object-namespace-isolation-diagram.svg){: width="640" height="582" loading="lazy"}
+*Kernel object DACL audit workflow, as described in this post.*
+
 ## The Audit — What I Built and What I Found
 
 I wrote a tool against the NT API that enumerates, classifies, and opens every named object in the session. The code is in [the companion repo](https://github.com/gary23w/garrettstimpson.ca/tree/main/post-poc). Compiled with MinGW-w64 and run on a stock Windows 11 24H2 machine from an unprivileged user account (Session 9).
@@ -165,3 +168,11 @@ Windows kernel object namespace DACLs are a forgotten attack surface. In a stock
 There is no built-in audit tool, no security baseline, no Group Policy, and no WHQL driver certification rule for this vector. Every Windows machine in the world has this problem. The only question is how many NULL-DACL objects are in YOUR session directory.
 
 — Garrett
+
+## Sources
+
+- [Kernel object namespaces (Microsoft Learn)](https://learn.microsoft.com/en-us/windows/win32/termserv/kernel-object-namespaces)
+- [Null DACLs and Empty DACLs (Microsoft Learn)](https://learn.microsoft.com/en-us/windows/win32/secauthz/null-dacls-and-empty-dacls)
+- [CreateEventW function (synchapi.h) (Microsoft Learn)](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createeventw)
+- [AccessChk (Microsoft Sysinternals)](https://learn.microsoft.com/en-us/sysinternals/downloads/accesschk)
+- [WinObj (Microsoft Sysinternals)](https://learn.microsoft.com/en-us/sysinternals/downloads/winobj)

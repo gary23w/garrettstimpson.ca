@@ -58,6 +58,9 @@ That distinction is important. HP called the VBA macros minimal. It did not say 
 
 Every important boundary in that chain appears before the final malware family matters. The attachment crosses Office's macro trust decision. The document becomes code. Office becomes the parent of PowerShell. PowerShell becomes a loader. The loader makes a normal framework process carry the payload.
 
+![Attack chain from an unpaid-invoice Office attachment through a macro and PowerShell loader to Agent Tesla using Telegram C2.](/assets/figures/agent-tesla-vba-email-macros-diagram.svg){: width="640" height="686" loading="lazy"}
+*The Agent Tesla chain HP documented, as described in this post.*
+
 ## What this sample did, and what it did not
 
 Agent Tesla is not new. A [joint CISA and ACSC advisory](https://www.cisa.gov/sites/default/files/publications/aa22-216a-2021-top-malware-strains.pdf) listed it among the top malware strains of 2021, said malicious actors had used it for at least five years, and documented mass-phishing campaigns carrying it. The family can steal information from mail clients, browsers, and FTP applications and can capture screenshots.
@@ -218,3 +221,16 @@ This Agent Tesla delivery pattern does not need a new vulnerability. It needs on
 Microsoft made that crossing much harder, and attackers measurably moved away from macros. Obfuscation keeps the residue useful because exact-string detection is brittle, not because VBA has become invisible. The Q4 2025 campaign is the residue: environments where VBA still has a business-shaped exception, provenance is weaker than policy assumes, runtime scanning is narrower than assumed, or Office can hand execution to a child process without being stopped.
 
 The invoice is the story the attacker tells. The Office-to-process handoff is the part defenders can end.
+
+## Sources
+
+- [March 2026 Threat Insights Report](https://threatresearch.ext.hp.com/wp-content/uploads/2026/03/HP_Wolf_Security_Threat_Insights_Report_March_2026.pdf)
+- [joint CISA and ACSC advisory](https://www.cisa.gov/sites/default/files/publications/aa22-216a-2021-top-malware-strains.pdf)
+- [June 2026 Threat Insights Report](https://threatresearch.ext.hp.com/wp-content/uploads/2026/06/HP_Wolf_Security_Threat_Insights_Report_June_2026.pdf)
+- [Proofpoint observed macro-enabled attachments in its campaign data fall by roughly 66%](https://www.proofpoint.com/uk/blog/threat-insight/how-threat-actors-are-adapting-post-macro-world)
+- [Microsoft's current macro guidance](https://learn.microsoft.com/en-us/microsoft-365-apps/security/internet-macros-blocked)
+- [MITRE ATT&CK documents VBA stomping](https://attack.mitre.org/techniques/T1564/007/)
+- [Unit 42's Boggy Serpens assessment](https://unit42.paloaltonetworks.com/boggy-serpens-threat-assessment/)
+- [Microsoft's Office VBA and AMSI analysis](https://www.microsoft.com/en-us/security/blog/2018/09/12/office-vba-amsi-parting-the-veil-on-malicious-macros/)
+- [Microsoft's current Defender architecture](https://learn.microsoft.com/en-us/defender-endpoint/adv-tech-of-mdav)
+- [Attack Surface Reduction rule reference](https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction-rules-reference)

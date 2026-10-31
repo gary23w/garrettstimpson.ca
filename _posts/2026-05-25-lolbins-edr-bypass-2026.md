@@ -39,6 +39,9 @@ APT groups including Earth Preta and Lazarus have been caught using this in real
 
 **What detection actually requires:** Sysmon or Event ID 4688 with full command-line logging, specifically watching for `mavinject.exe` with `/INJECTRUNNING` in the arguments. Behavioral correlation that flags `mavinject.exe` spawning `OpenProcess` + `WriteProcessMemory` API call sequences works too, but most deployments aren't configured this tight.
 
+![Five-step figure summarising the post's MAVInject, forfiles kill chain, io_uring, eBPF and behavioral detection points.](/assets/figures/lolbins-edr-bypass-2026-diagram.svg){: width="640" height="582" loading="lazy"}
+*Living-off-the-land techniques EDR still misses, as described in this post.*
+
 ## The Kill Chain That Still Slips Through
 
 This sequence has been observed in real attacks against enterprise environments and still makes it past most corporate EDR stacks:
@@ -136,3 +139,11 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 ---
 
 *References: [RingReaper analysis](https://cybersecuritynews.com/ringreaper-edr-evasion/), [ARMO io_uring research](https://www.infoq.com/news/2025/09/linux-security-rootkit/), [MITRE ATT&CK T1218.013](https://attack.mitre.org/techniques/T1218/013/), [LOLBAS Project](https://lolbas-project.github.io/), [Hive Security 2026](https://hivesecurity.gitlab.io/blog/lolbins-living-off-the-land-windows-2026/)*
+
+## Sources
+
+- [LOLBAS Project](https://lolbas-project.github.io/)
+- [RingReaper analysis](https://cybersecuritynews.com/ringreaper-edr-evasion/)
+- [ARMO iouring research](https://www.infoq.com/news/2025/09/linux-security-rootkit/)
+- [MITRE ATT&CK T1218.013](https://attack.mitre.org/techniques/T1218/013/)
+- [Hive Security 2026](https://hivesecurity.gitlab.io/blog/lolbins-living-off-the-land-windows-2026/)

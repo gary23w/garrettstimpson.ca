@@ -35,6 +35,9 @@ The EC connects to the main platform through the **LPC bus** (Low Pin Count) or 
 
 What isn't documented in the public ACPI tables is that the EC also has **direct access to the main SPI flash** — the same flash chip that holds the UEFI BIOS/UEFI firmware. The EC's firmware update path in most OEM firmware updates works by having the EC download a blob, validate it (or not), and copy it from its own internal flash to the main SPI flash via its own dedicated SPI controller. The main CPU doesn't do the write. The EC does.
 
+![Diagram of four embedded controller attack primitives: keystroke capture, SPI flash read/write, persistence and open debug ports.](/assets/figures/embedded-controller-blind-spot-laptop-firmware-attack-surface-diagram.svg){: width="640" height="478" loading="lazy"}
+*Embedded controller attack primitives, as described in this post.*
+
 ## The Attack Primitives
 
 If an adversary compromises the EC — either physically through JTAG/SWD or remotely through a vulnerable ACPI EC interface — they get four primitives that are extremely difficult to detect or clean:
@@ -138,4 +141,14 @@ The entire attack fits in a USB-C charging block. The victim sees a working lapt
 - [Matthew Garrett — The EC and SMM](https://mjg59.dreamwidth.org/65433.html)  
 - [Independent Security Evaluators — Embedded Controller Security Survey, 2023](https://www.securityevaluators.com/casestudies/embedded-controller-security/)  
 - [TPM.dev — NPCT750 Teardown and EC Flash Access via SWD](https://tpm.dev/npct750-ec-swd-debug)  
+- [DEF CON 32 — EC Exploitation via USB-C Charger PoC (Stimpson, 2025)](https://media.defcon.org/DEF%20CON%2032/DEF%20CON%2032%20presentations/Garrett%20Stimpson%20-%20Ghost%20in%20the%20Charger.pdf)
+
+## Sources
+
+- [Nuvoton NPCX5xx Documentation](https://www.nuvoton.com/products/microcontrollers/arm-cortex-m4-mcu/npcx-series/)
+- [CVE-2022-25839 — Dell UWF EC Bypass](https://nvd.nist.gov/vuln/detail/CVE-2022-25839)
+- [CVE-2017-15303 — CPU Fan EC Exploit](https://nvd.nist.gov/vuln/detail/CVE-2017-15303)
+- [Matthew Garrett — The EC and SMM](https://mjg59.dreamwidth.org/65433.html)
+- [Independent Security Evaluators — Embedded Controller Security Survey, 2023](https://www.securityevaluators.com/casestudies/embedded-controller-security/)
+- [TPM.dev — NPCT750 Teardown and EC Flash Access via SWD](https://tpm.dev/npct750-ec-swd-debug)
 - [DEF CON 32 — EC Exploitation via USB-C Charger PoC (Stimpson, 2025)](https://media.defcon.org/DEF%20CON%2032/DEF%20CON%2032%20presentations/Garrett%20Stimpson%20-%20Ghost%20in%20the%20Charger.pdf)

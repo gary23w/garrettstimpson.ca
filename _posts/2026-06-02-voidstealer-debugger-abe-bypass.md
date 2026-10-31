@@ -16,6 +16,9 @@ VoidStealer is a Malware-as-a-Service infostealer that started selling on HackFo
 
 For the data side, VoidStealer is the usual grab-and-go. Chromium credentials and session cookies, crypto wallets from Exodus, Atomic, Electrum, MetaMask, and Phantom, Telegram session files, Discord tokens, FTP creds, and a system fingerprint. Cookies are the prize. A live session cookie walks past MFA, which is exactly why Google built ABE to protect them, and exactly why the v2.0 bypass matters.
 
+![Step diagram of VoidStealer debugging a hidden browser and using a hardware breakpoint to read Chrome's App-Bound Encryption master key.](/assets/figures/voidstealer-debugger-abe-bypass-diagram.svg){: width="640" height="686" loading="lazy"}
+*VoidStealer App-Bound Encryption bypass chain, as described in this post.*
+
 ## What makes it work
 
 Quick recap on what ABE actually defends, because the bypass only makes sense against it. Chrome encrypts cookies and passwords with a per-application key, the `v20_master_key`. That key is stored encrypted on disk in `Local State` under `os_crypt.app_bound_encrypted_key`, and it is wrapped by `CryptProtectData` running as `NT AUTHORITY\SYSTEM`. Chrome itself runs as you, not as SYSTEM, so it cannot unwrap the key directly. A separate Google Chrome Elevation Service runs as SYSTEM, validates that the caller is really Chrome over a COM interface, and hands back the decrypted key. That validation is the soft spot a lot of bypasses lean on, but VoidStealer's new trick does not even bother with the service.
@@ -88,3 +91,10 @@ For mitigations, EDR that monitors `SetThreadContext` and cross-process memory r
 VoidStealer is commodity malware that borrowed an elegant idea. The idea is the threat, not the family, because ElevationKatz is public and the next ten stealers will ship the same chain. Hunt the behavior, not the build.
 
 *Sources: Gen Threat Labs, "VoidStealer: Debugging Chrome to Steal Its Secrets" (Mar 19, 2026); SOCRadar, "Void Stealer: The Infostealer Malware Quietly Targeting Organizations in 2026" (Apr 16, 2026).*
+
+## Sources
+
+- [VoidStealer: Debugging Chrome to Steal Its Secrets (Gen)](https://www.gendigital.com/blog/insights/research/voidstealer-abe-bypass)
+- [VoidStealer malware steals Chrome master key via debugger trick (BleepingComputer)](https://www.bleepingcomputer.com/news/security/voidstealer-malware-steals-chrome-master-key-via-debugger-trick/)
+- [ChromeKatz (ElevationKatz) (Meckazin on GitHub)](https://github.com/Meckazin/ChromeKatz)
+- [Web Service: Dead Drop Resolver (T1102.001) (MITRE ATT&CK)](https://attack.mitre.org/techniques/T1102/001/)
