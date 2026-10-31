@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Apache httpd 2.4.69: Twenty CVEs, Three Bug Clusters, and a Rewrite Worth Auditing"
+seo_title: "Apache httpd 2.4.69: Twenty CVEs in Three Bug Clusters"
 date: 2026-10-13
 categories: [exploits, web, vuln-research]
 tags: [apache, httpd, cve, vulnerability-research, mod-auth-digest, mod-dav, fuzzing, asan]

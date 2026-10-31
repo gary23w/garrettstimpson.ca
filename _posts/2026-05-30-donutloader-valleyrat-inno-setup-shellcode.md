@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk"
+seo_title: "DonutLoader Wraps ValleyRAT in an Inno Setup Shell"
 date: 2026-05-30
 categories: [malware, analysis]
 tags: [donutloader, valleyrat, silver-fox, shellcode, inno-setup, reflective-loading, anti-vm, windows, mitre-attack]

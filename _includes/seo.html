@@ -1,0 +1,162 @@
+{%- comment -%}
+  Site-owned replacement for {% seo %}. GitHub Pages only runs whitelisted plugins,
+  and jekyll-seo-tag cannot mark the About page as a ProfilePage, give posts a Person
+  author/publisher entity, fall back to a default share image, or describe videos,
+  so the head tags and the JSON-LD graph are built here.
+
+  Page front matter it reads: title, seo_title, description, image, image_alt,
+  last_modified_at, seo_type (ProfilePage), topic (topic hubs), video (url, poster,
+  duration as ISO 8601, optional name/description/upload_date).
+{%- endcomment -%}
+{%- assign seo_is_post = false -%}
+{%- if page.collection == "posts" -%}{%- assign seo_is_post = true -%}{%- endif -%}
+{%- assign seo_is_home = false -%}
+{%- if page.url == "/" -%}{%- assign seo_is_home = true -%}{%- endif -%}
+{%- assign seo_url = page.canonical_url | default: page.url | replace: "/index.html", "/" | absolute_url -%}
+{%- assign seo_home_url = "/" | absolute_url -%}
+{%- assign seo_person_id = "/about/#person" | absolute_url -%}
+{%- assign seo_site_id = "/#website" | absolute_url -%}
+
+{%- comment -%} <title>: keep the brand suffix only while the whole title fits in 60 characters. {%- endcomment -%}
+{%- assign seo_base = page.seo_title | default: page.title | default: site.title -%}
+{%- if seo_is_home -%}
+  {%- assign seo_title = seo_base | append: " | " | append: site.title -%}
+{%- elsif seo_base contains site.title -%}
+  {%- assign seo_title = seo_base -%}
+{%- else -%}
+  {%- assign seo_title = seo_base | append: " | " | append: site.title -%}
+  {%- if seo_title.size > 60 -%}{%- assign seo_title = seo_base -%}{%- endif -%}
+{%- endif -%}
+{%- if seo_is_post -%}
+  {%- assign seo_og_title = page.title -%}
+{%- else -%}
+  {%- assign seo_og_title = seo_title -%}
+{%- endif -%}
+
+{%- comment -%} Description: whole sentences up to 160 characters when that keeps at least 100, else a word-boundary cut. {%- endcomment -%}
+{%- assign seo_desc_raw = page.description | default: page.excerpt | default: site.description | strip_html | normalize_whitespace | strip -%}
+{%- if seo_desc_raw.size > 160 -%}
+  {%- assign seo_desc = "" -%}
+  {%- assign seo_sentences = seo_desc_raw | split: ". " -%}
+  {%- for seo_sentence in seo_sentences -%}
+    {%- if forloop.last -%}{%- assign seo_piece = seo_sentence -%}{%- else -%}{%- assign seo_piece = seo_sentence | append: "." -%}{%- endif -%}
+    {%- if seo_desc == "" -%}{%- assign seo_candidate = seo_piece -%}{%- else -%}{%- assign seo_candidate = seo_desc | append: " " | append: seo_piece -%}{%- endif -%}
+    {%- if seo_candidate.size > 160 -%}{%- break -%}{%- endif -%}
+    {%- assign seo_desc = seo_candidate -%}
+  {%- endfor -%}
+  {%- if seo_desc.size < 100 -%}{%- assign seo_desc = "" -%}{%- endif -%}
+  {%- if seo_desc == "" -%}
+    {%- assign seo_words = seo_desc_raw | split: " " -%}
+    {%- for seo_word in seo_words -%}
+      {%- if seo_desc == "" -%}{%- assign seo_candidate = seo_word -%}{%- else -%}{%- assign seo_candidate = seo_desc | append: " " | append: seo_word -%}{%- endif -%}
+      {%- if seo_candidate.size > 156 -%}{%- break -%}{%- endif -%}
+      {%- assign seo_desc = seo_candidate -%}
+    {%- endfor -%}
+    {%- assign seo_last = seo_desc | slice: -1 -%}
+    {%- if seo_last == "," or seo_last == ";" or seo_last == ":" -%}
+      {%- assign seo_keep = seo_desc.size | minus: 1 -%}
+      {%- assign seo_desc = seo_desc | slice: 0, seo_keep -%}
+    {%- endif -%}
+    {%- assign seo_desc = seo_desc | append: "…" -%}
+  {%- endif -%}
+{%- else -%}
+  {%- assign seo_desc = seo_desc_raw -%}
+{%- endif -%}
+
+{%- comment -%} Share image: page image, else the site card. {%- endcomment -%}
+{%- assign seo_image = page.image | default: site.image -%}
+{%- if seo_image.path -%}{%- assign seo_image = seo_image.path -%}{%- endif -%}
+{%- assign seo_image_meta = site.data.og_images[seo_image] -%}
+{%- assign seo_image_url = seo_image | absolute_url -%}
+{%- assign seo_image_alt = page.image_alt | default: seo_image_meta.alt | default: seo_og_title -%}
+
+{%- if seo_is_post -%}
+  {%- include page-topics.html -%}
+  {%- assign seo_published = page.date | date_to_xmlschema -%}
+  {%- assign seo_modified = page.last_modified_at | default: page.date | date_to_xmlschema -%}
+{%- endif -%}
+<title>{{ seo_title | escape }}</title>
+<meta name="description" content="{{ seo_desc | escape }}">
+<meta name="author" content="{{ site.author.name | escape }}">
+<link rel="canonical" href="{{ seo_url }}">
+<meta property="og:site_name" content="{{ site.title | escape }}">
+<meta property="og:locale" content="en_US">
+<meta property="og:type" content="{% if seo_is_post %}article{% else %}website{% endif %}">
+<meta property="og:title" content="{{ seo_og_title | escape }}">
+<meta property="og:description" content="{{ seo_desc | escape }}">
+<meta property="og:url" content="{{ seo_url }}">
+<meta property="og:image" content="{{ seo_image_url }}">
+{%- if seo_image_meta %}
+<meta property="og:image:width" content="{{ seo_image_meta.width }}">
+<meta property="og:image:height" content="{{ seo_image_meta.height }}">
+{%- endif %}
+<meta property="og:image:alt" content="{{ seo_image_alt | escape }}">
+{%- if seo_is_post %}
+<meta property="article:published_time" content="{{ seo_published }}">
+<meta property="article:modified_time" content="{{ seo_modified }}">
+<meta property="article:author" content="{{ site.author.url }}">
+{%- for seo_topic in page_topics limit: 1 %}
+<meta property="article:section" content="{{ seo_topic.name | escape }}">
+{%- endfor %}
+{%- endif %}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ seo_og_title | escape }}">
+<meta name="twitter:description" content="{{ seo_desc | escape }}">
+<meta name="twitter:image" content="{{ seo_image_url }}">
+<meta name="twitter:image:alt" content="{{ seo_image_alt | escape }}">
+{%- comment -%} ---------- JSON-LD graph ---------- {%- endcomment -%}
+{%- capture seo_person_ref -%}{"@type":"Person","@id":{{ seo_person_id | jsonify }},"name":{{ site.author.name | jsonify }},"url":{{ site.author.url | jsonify }}}{%- endcapture -%}
+{%- capture seo_person -%}{"@type":"Person","@id":{{ seo_person_id | jsonify }},"name":{{ site.author.name | jsonify }},"url":{{ site.author.url | jsonify }},"description":{{ site.author.description | jsonify }},"homeLocation":{"@type":"Place","name":{{ site.author.location | jsonify }}},"knowsAbout":{{ site.author.knows_about | jsonify }},"sameAs":{{ site.social.links | jsonify }}}{%- endcapture -%}
+{%- capture seo_image_obj -%}{"@type":"ImageObject","url":{{ seo_image_url | jsonify }}{% if seo_image_meta %},"width":{{ seo_image_meta.width }},"height":{{ seo_image_meta.height }}{% endif %}}{%- endcapture -%}
+{%- capture seo_website -%}{"@type":"WebSite","@id":{{ seo_site_id | jsonify }},"url":{{ seo_home_url | jsonify }},"name":{{ site.title | jsonify }},"description":{{ site.description | normalize_whitespace | strip | jsonify }},"inLanguage":"en","publisher":{"@id":{{ seo_person_id | jsonify }}}}{%- endcapture -%}
+{%- assign seo_nodes = "" | split: "" | push: seo_website -%}
+{%- assign seo_crumbs = "" | split: "" -%}
+{%- capture seo_crumb -%}{"@type":"ListItem","position":1,"name":"Home","item":{{ seo_home_url | jsonify }}}{%- endcapture -%}
+{%- assign seo_crumbs = seo_crumbs | push: seo_crumb -%}
+
+{%- if seo_is_post -%}
+  {%- capture seo_node -%}{"@type":"BlogPosting","@id":{{ seo_url | append: "#article" | jsonify }},"url":{{ seo_url | jsonify }},"mainEntityOfPage":{"@type":"WebPage","@id":{{ seo_url | jsonify }}},"headline":{{ page.title | jsonify }},"description":{{ seo_desc_raw | jsonify }},"image":{{ seo_image_obj }},"datePublished":{{ seo_published | jsonify }},"dateModified":{{ seo_modified | jsonify }},"author":{{ seo_person_ref }},"publisher":{{ seo_person_ref }},"isPartOf":{"@id":{{ seo_site_id | jsonify }}},"inLanguage":"en","wordCount":{{ page.content | strip_html | number_of_words }}{% if page_topics.size > 0 %},"articleSection":{{ page_topics | map: "name" | jsonify }}{% endif %}{% if page.tags.size > 0 %},"keywords":{{ page.tags | join: ", " | jsonify }}{% endif %}{% if page.video %},"video":{"@id":{{ seo_url | append: "#video" | jsonify }}}{% endif %}}{%- endcapture -%}
+  {%- assign seo_nodes = seo_nodes | push: seo_node | push: seo_person -%}
+  {%- assign seo_position = 2 -%}
+  {%- for seo_topic in page_topics limit: 1 -%}
+    {%- assign seo_topic_url = "/topics/" | append: seo_topic.slug | append: "/" | absolute_url -%}
+    {%- capture seo_crumb -%}{"@type":"ListItem","position":2,"name":{{ seo_topic.name | jsonify }},"item":{{ seo_topic_url | jsonify }}}{%- endcapture -%}
+    {%- assign seo_crumbs = seo_crumbs | push: seo_crumb -%}
+    {%- assign seo_position = 3 -%}
+  {%- endfor -%}
+{%- elsif page.seo_type == "ProfilePage" -%}
+  {%- capture seo_node -%}{"@type":"ProfilePage","@id":{{ seo_url | jsonify }},"url":{{ seo_url | jsonify }},"name":{{ seo_title | jsonify }},"description":{{ seo_desc_raw | jsonify }},"isPartOf":{"@id":{{ seo_site_id | jsonify }}},"inLanguage":"en"{% if page.last_modified_at %},"dateModified":{{ page.last_modified_at | date_to_xmlschema | jsonify }}{% endif %},"mainEntity":{{ seo_person }}}{%- endcapture -%}
+  {%- assign seo_nodes = seo_nodes | push: seo_node -%}
+  {%- assign seo_position = 2 -%}
+{%- elsif page.layout == "topic" -%}
+  {%- include topic-posts.html slug=page.topic -%}
+  {%- assign seo_items = "" | split: "" -%}
+  {%- for seo_post in topic_posts -%}
+    {%- capture seo_item -%}{"@type":"ListItem","position":{{ forloop.index }},"url":{{ seo_post.url | absolute_url | jsonify }},"name":{{ seo_post.title | jsonify }}}{%- endcapture -%}
+    {%- assign seo_items = seo_items | push: seo_item -%}
+  {%- endfor -%}
+  {%- capture seo_node -%}{"@type":"CollectionPage","@id":{{ seo_url | jsonify }},"url":{{ seo_url | jsonify }},"name":{{ seo_title | jsonify }},"description":{{ seo_desc_raw | jsonify }},"isPartOf":{"@id":{{ seo_site_id | jsonify }}},"author":{"@id":{{ seo_person_id | jsonify }}},"inLanguage":"en","mainEntity":{"@type":"ItemList","numberOfItems":{{ topic_posts.size }},"itemListElement":[{{ seo_items | join: "," }}]}}{%- endcapture -%}
+  {%- assign seo_nodes = seo_nodes | push: seo_node | push: seo_person -%}
+  {%- assign seo_topics_url = "/topics/" | absolute_url -%}
+  {%- capture seo_crumb -%}{"@type":"ListItem","position":2,"name":"Topics","item":{{ seo_topics_url | jsonify }}}{%- endcapture -%}
+  {%- assign seo_crumbs = seo_crumbs | push: seo_crumb -%}
+  {%- assign seo_position = 3 -%}
+{%- else -%}
+  {%- if seo_is_home -%}{%- assign seo_page_type = "CollectionPage" -%}{%- else -%}{%- assign seo_page_type = "WebPage" -%}{%- endif -%}
+  {%- capture seo_node -%}{"@type":{{ seo_page_type | jsonify }},"@id":{{ seo_url | jsonify }},"url":{{ seo_url | jsonify }},"name":{{ seo_title | jsonify }},"description":{{ seo_desc_raw | jsonify }},"isPartOf":{"@id":{{ seo_site_id | jsonify }}},"author":{"@id":{{ seo_person_id | jsonify }}},"inLanguage":"en"{% if page.last_modified_at %},"dateModified":{{ page.last_modified_at | date_to_xmlschema | jsonify }}{% endif %}}{%- endcapture -%}
+  {%- assign seo_nodes = seo_nodes | push: seo_node | push: seo_person -%}
+  {%- assign seo_position = 2 -%}
+{%- endif -%}
+
+{%- if page.video -%}
+  {%- capture seo_node -%}{"@type":"VideoObject","@id":{{ seo_url | append: "#video" | jsonify }},"name":{{ page.video.name | default: page.title | jsonify }},"description":{{ page.video.description | default: seo_desc_raw | jsonify }},"thumbnailUrl":{{ page.video.poster | absolute_url | jsonify }},"uploadDate":{{ page.video.upload_date | default: page.date | date_to_xmlschema | jsonify }},"duration":{{ page.video.duration | jsonify }},"contentUrl":{{ page.video.url | absolute_url | jsonify }},"inLanguage":"en"}{%- endcapture -%}
+  {%- assign seo_nodes = seo_nodes | push: seo_node -%}
+{%- endif -%}
+
+{%- unless seo_is_home -%}
+  {%- capture seo_crumb -%}{"@type":"ListItem","position":{{ seo_position }},"name":{{ page.title | default: seo_title | jsonify }},"item":{{ seo_url | jsonify }}}{%- endcapture -%}
+  {%- assign seo_crumbs = seo_crumbs | push: seo_crumb -%}
+  {%- capture seo_node -%}{"@type":"BreadcrumbList","@id":{{ seo_url | append: "#breadcrumb" | jsonify }},"itemListElement":[{{ seo_crumbs | join: "," }}]}{%- endcapture -%}
+  {%- assign seo_nodes = seo_nodes | push: seo_node -%}
+{%- endunless %}
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{{ seo_nodes | join: "," }}]}</script>

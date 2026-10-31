@@ -1,3 +1,11 @@
+---
+layout: doc
+title: "Agent Garrett: security prompts and tool commands"
+seo_title: "Agent Garrett: Security Prompts and Tool Commands"
+description: "Prompts and argument templates for all 166 built-in Agent Garrett tools (94 Garrett tools and 72 Gary tools), plus workflows that combine them."
+last_modified_at: 2026-10-09
+---
+
 # Agent Garrett: security prompts and tool commands
 
 Use these prompts in Agent Garrett chat, or ask your MCP client to call the named tool with the example arguments. This reference covers **all 166 built-in tools: 94 Garrett tools and 72 Gary tools**, plus workflows that combine them. Natural language has unlimited variations; each built-in operation has a concrete prompt and an argument template below. For personal device protection, the recommended interface is the local **[NL-Veil harness](https://github.com/gary23w/nl-veil)**. Start with the integration and practical cases in [case.md](case.md).

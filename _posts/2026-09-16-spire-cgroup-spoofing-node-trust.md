@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Root on the Node Is Root in the Mesh: Spoofing SPIRE Workload Attestation With a Fake Cgroup"
+seo_title: "Spoofing SPIRE Workload Attestation With a Fake Cgroup"
 date: 2026-09-16
 categories: [cloud-security, linux, analysis]
 tags: [spiffe, spire, kubernetes, workload-identity, machine-identity, cgroup, attestation, post-exploitation, lateral-movement, red-team, defense, mitre-attack]

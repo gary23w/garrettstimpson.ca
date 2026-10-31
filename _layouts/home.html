@@ -10,11 +10,11 @@ layout: default
     </div>
     <h1 class="hero-title">{{ site.title | escape }}</h1>
     <p class="hero-desc">{{ site.description | strip_newlines }}</p>
-    <div class="hero-meta">
+    <h2 class="hero-meta">
       <span>[ in-the-wild exploits ]</span>
       <span>[ PoC breakdowns ]</span>
       <span>[ vulnerability research ]</span>
-    </div>
+    </h2>
     {%- if site.agent_url and site.agent_url != "" -%}
     <a class="hero-cta" href="{{ site.agent_url }}" target="_blank" rel="noopener">get Agent Garrett</a>
     {%- endif -%}

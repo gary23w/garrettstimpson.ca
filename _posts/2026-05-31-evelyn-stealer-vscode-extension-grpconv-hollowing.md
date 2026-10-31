@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds"
+seo_title: "Evelyn Stealer Ships Inside VS Code Extensions"
 date: 2026-05-31
 categories: [malware, analysis]
 tags: [evelyn-stealer, vscode, supply-chain, process-hollowing, infostealer, windows, mitre-attack]

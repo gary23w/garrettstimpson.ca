@@ -1,0 +1,51 @@
+# Topic hubs. A post belongs to every topic whose categories overlap its own;
+# its primary topic (breadcrumbs, post header) is the first match in this order.
+# Each topic needs a page at topics/<slug>.md using `layout: topic`.
+- slug: linux-kernel
+  name: Linux kernel & privilege escalation
+  description: Write-ups on Linux kernel vulnerabilities and local privilege escalation.
+  categories: [linux-kernel, kernel, lpe, linux]
+- slug: windows
+  name: Windows security
+  description: Write-ups on Windows vulnerabilities, services and attack techniques.
+  categories: [windows]
+- slug: malware
+  name: Malware & infostealers
+  description: Analyses of malware, loaders and infostealers seen in the wild.
+  categories: [malware, threats, threat-intel]
+- slug: web
+  name: Web application security
+  description: Write-ups on web application and server vulnerabilities.
+  categories: [web, ssrf, sqli, database]
+- slug: network-infrastructure
+  name: Network & edge infrastructure
+  description: Write-ups on network appliances, edge devices and enterprise infrastructure.
+  categories: [network-infrastructure, network, network-security]
+- slug: hardware
+  name: Hardware & side channels
+  description: Write-ups on hardware attacks, CPU side channels and firmware.
+  categories: [hardware, cpu-architecture, side-channels, side-channel, hardware-security, memory-attacks, firmware]
+- slug: embedded
+  name: Embedded, IoT & radio
+  description: Write-ups on embedded systems, IoT stacks, radio and sensor attacks.
+  categories: [iot, embedded, embedded-security, radio-security, critical-infrastructure, cryptography]
+- slug: cloud
+  name: Cloud, containers & supply chain
+  description: Write-ups on cloud, container and software supply-chain security.
+  categories: [cloud-security, supply-chain, devops]
+- slug: ai
+  name: AI systems & security
+  description: Writing on AI systems, agents and AI security.
+  categories: [ai]
+- slug: defense
+  name: Detection & defense
+  description: Detection, hardening and remediation guidance for defenders.
+  categories: [defense, detection, vulnerability-management, guides, forensics, email]
+- slug: agent-garrett
+  name: Agent Garrett
+  description: Posts about Agent Garrett, NL-VEIL and related projects.
+  categories: [agent-garrett, tooling, local-first, open-source, privacy, shell-dojo, garrettstimpson.ca]
+- slug: exploits
+  name: Exploits & attack techniques
+  description: Root-cause analyses, PoC breakdowns and attack techniques for disclosed vulnerabilities.
+  categories: [exploits, vuln-research, vulnerability-research, exploit-development, memory-safety, rce, cve, research, security-research, analysis, security, mobile, red-team, tricks, evasion, lateral-movement, dacl]

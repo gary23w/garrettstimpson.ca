@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "APT-C-60's 2026 Update: SpyGlace Through Proton Drive, mshta, and a Chain Built on Trusted Services"
+seo_title: "APT-C-60 2026: SpyGlace via Proton Drive and mshta"
 date: 2026-09-17
 categories: [malware, analysis, windows]
 tags: [apt-c-60, spyglace, japan, spear-phishing, proton-drive, lnk, mshta, living-off-the-land, jsdelivr, codeberg, github, gitlab, threat-intel, mitre-attack, defense]

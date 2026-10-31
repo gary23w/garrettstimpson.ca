@@ -1,3 +1,11 @@
+---
+layout: doc
+title: "On-prem directory path simulation"
+permalink: /labs/directory-simulation/
+description: "An offline, synthetic lab demonstrating an Agent Garrett style assessment against a fictional on-prem directory. It contacts no hosts and uses no credentials."
+last_modified_at: 2026-10-16
+---
+
 # On-prem directory path simulation
 
 This is an **offline, synthetic** lab for demonstrating an Agent Garrett style assessment workflow. It models a fictional on-prem directory, Windows Defender Firewall policy decisions, an identity delegation mistake, access to a canary, a durable role assignment, and a correlated detection alert. It does not contact a host, use credentials, change a firewall, install persistence, or test a real AI defender.

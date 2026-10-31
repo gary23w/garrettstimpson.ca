@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "The Spyware You Pay to Click: How Paid Ad Campaigns Deliver Infostealers, and How to Hunt Them"
+seo_title: "The Spyware You Pay to Click: Malvertising Infostealers"
 date: 2026-10-27
 author: Garrett Stimpson
 permalink: /posts/2026/10/27/malvertising-spyware-paid-ads-deep-dive/

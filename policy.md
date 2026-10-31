@@ -2,6 +2,8 @@
 layout: page
 title: Policy
 permalink: /policy/
+description: "Research policy for garrettstimpson.ca: educational and defensive use, Agent Garrett service terms, privacy, attribution and vulnerability disclosure."
+last_modified_at: 2026-10-17
 ---
 
 ## Content & Purpose

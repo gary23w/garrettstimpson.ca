@@ -1,0 +1,10 @@
+---
+layout: default
+---
+{%- comment -%} Like minima's page layout, for pages whose Markdown supplies its own H1. {%- endcomment -%}
+<article class="post">
+  <div class="post-content">
+    {%- unless page.toc == false -%}{%- include post-toc.html html=content -%}{%- endunless -%}
+    {{ content }}
+  </div>
+</article>

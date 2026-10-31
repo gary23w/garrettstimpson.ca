@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Perfex CRM 3.4.x and Earlier: Unauthenticated to RCE in Three Quiet Steps"
+seo_title: "Perfex CRM 3.4.x: Unauthenticated to RCE in Three Steps"
 date: 2026-08-18
 categories: [exploits, web, sqli]
 tags: [perfex-crm, sqli, rce, file-upload, account-takeover, webshell, php, blind-injection, cve-less]
