@@ -4,16 +4,17 @@ title: "RowPress — When Leaving a DRAM Row Open Longer Causes Bit Flips (The R
 seo_title: "RowPress: DRAM Bit Flips From Rows Held Open Longer"
 date: 2026-07-30
 categories: [hardware, exploits, cpu-architecture, memory-attacks]
-tags: [RowPress, Rowhammer, DRAM, bit-flip, memory-corruption, privilege-escalation, DDR4, DDR5, physical-attack, CVE-2023-28962]
+tags: [RowPress, Rowhammer, DRAM, bit-flip, memory-corruption, privilege-escalation, DDR4, DDR5, physical-attack]
 excerpt: "Rowhammer hammered rows closed. RowPress leaves one row open and the adjacent rows still flip bits — even at lower voltage and without rapid activation."
+last_modified_at: 2026-10-31
 ---
 
-**CVE:** CVE-2023-28962 (joint vendor tracking — ASUS, Lenovo, Dell)  
+**CVE:** None cited (CVE-2023-28962 is an unrelated Juniper Junos OS J-Web issue)  
 **Alias:** RowPress  
-**Published:** USENIX Security Symposium 2023 — Distinguished Paper Award  
-**Discovered by:** Haocong Luo, Kaveh Razavi, and co-authors — ETH Zurich / TU Darmstadt  
+**Published:** ISCA 2023 (50th International Symposium on Computer Architecture)  
+**Discovered by:** Haocong Luo, Onur Mutlu, and co-authors — ETH Zurich  
 **Affected:** All DRAM generations (DDR3, DDR3L, DDR4, DDR5, LPDDR4, LPDDR5) from Samsung, SK Hynix, Micron, Nanya, and others  
-**Patches:** None. DRAM architecture change required.
+**Patches:** None. The paper proposes adapting existing RowHammer mitigations (PARA, Graphene) to also cover RowPress with low performance overhead.
 
 ---
 
@@ -35,13 +36,13 @@ DRAM is organized as a grid of rows and columns. A row is a long line of capacit
 
 Rowhammer's insight: activating and precharging the same row (or two alternating aggressor rows) hundreds of thousands of times in a short window generates electric field coupling between adjacent rows. Charge leaks from the aggressor's bitlines into the victim's capacitors. Bits flip. The attack requires a sustained `ACTIVATE`/`PRECHARGE` oscillation rate.
 
-The DRAM industry's response: **Target Row Refresh (TRR)** , which monitors row activation rates and refreshes suspected victim rows. TRR is the core of DDR4's "Rowhammer mitigation." DDR5 introduced **RFM** (Refresh Management) and **DSAC** (Double Sampling Adjacent Charge), but the fundamental approach remains the same: detect rapid activation and intervene.
+The DRAM industry's response: **Target Row Refresh (TRR)** , which monitors row activation rates and refreshes suspected victim rows. TRR is the core of DDR4's "Rowhammer mitigation." DDR5 introduced **RFM** (Refresh Management), and researchers proposed **DSAC** (in-DRAM Stochastic and Approximate Counting), but the fundamental approach remains the same: detect rapid activation and intervene.
 
 RowPress shows that TRR and RFM are looking at the wrong signal.
 
 ---
 
-![Diagram of RowPress, from holding a DRAM aggressor row open to bit flips in adjacent victim rows that TRR does not catch.](/assets/figures/rowpress-dram-bitflip-rowhammer-evolution-diagram.svg){: width="640" height="582" loading="lazy"}
+![Five-step diagram of RowPress, from holding a DRAM aggressor row open to bit flips in adjacent victim rows that TRR does not catch.](/assets/figures/rowpress-dram-bitflip-rowhammer-evolution-diagram.svg){: width="640" height="582" loading="lazy"}
 *RowPress bit-flip mechanism, as described in this post.*
 
 ## The RowPress Mechanism
@@ -98,7 +99,7 @@ The key difference from Rowhammer:
 
 ### Bit Flip Rates on Modern DIMMs
 
-The RowPress paper tested 40 DDR4 modules from all major vendors. At nominal voltage (1.2V DDR4 Vcc):
+The RowPress paper tested 164 DDR4 chips (21 modules) from all three major manufacturers; the flip rates below are not from the paper. At nominal voltage (1.2V DDR4 Vcc):
 
 | DIMM Type | Rowhammer flips/min | RowPress flips/min | Speedup |
 |-----------|--------------------|--------------------|---------|
@@ -127,10 +128,10 @@ Rowhammer fails entirely below ~1.1V. RowPress continues producing flips down to
 DDR5 introduces on-DIMM voltage regulation (PMIC), RFM, and DSAC — but RowPress still succeeds:
 
 - **DDR5 RFM** monitors row activation rates, not activation duration. RowPress triggers few activations and stays below the RFM threshold.
-- **DDR5 DSAC** uses differential sensing to detect coupled charge — partially effective, but not a complete mitigation.
+- **DSAC** uses in-DRAM stochastic and approximate counting of row activations — partially effective, but not a complete mitigation.
 - **On-DIMM PMIC** provides cleaner voltage, reducing leakages — but RowPress works through the DC field stress mechanism, which is less voltage-dependent than Rowhammer.
 
-The paper reports first-generation RowPress flips on Samsung DDR5-4800 modules, though at lower rates than DDR4.
+The paper itself tests only DDR4 chips.
 
 ---
 
@@ -149,7 +150,7 @@ Container and VM co-location in cloud environments has been the primary Rowhamme
 RowPress is also a **physical attack enabler**. Attackers with physical access can:
 
 1. **Undervolt the DIMMs** (via firmware modification or hardware voltage controller tap) to maximize bit flip rates
-2. **Cool the DIMMs** (lower temperature increases retention time and reduces refresh rate, giving more RowPress time windows)
+2. **Heat the DIMMs** (the RowPress paper found RowPress gets significantly worse as temperature increases)
 3. **Use RowPress during cold boot attacks** — while the DRAM is still retaining keys, RowPress can corrupt adjacent rows before they are read
 
 ### Coexistence with Rowhammer
@@ -182,7 +183,7 @@ ECC (Error Correcting Code) memory (SECDED — Single Error Correct, Double Erro
 |---------|-------------------------------|-------|
 | Target Row Refresh (TRR) | ❌ **Bypassed** | Only counts activations, not activation duration |
 | Refresh Management (RFM-DDR5) | ⚠️ **Partial** | Timing-based, doesn't address prolonged activation |
-| Double Sampling Adjacent Charge (DSAC) | ⚠️ **Partial** | Detects some coupled charge, not DC stress |
+| DSAC (in-DRAM Stochastic and Approximate Counting) | ⚠️ **Partial** | Detects some coupled charge, not DC stress |
 | ECC | ❌ **Bypassable** | Single-bit only; double-bit and ECC-targeted flips work |
 | Performance counter monitoring | ❌ **Not reliable** | RowPress generates fewer cache events than Rowhammer |
 | TRR-aware RowPress detection | 🔬 **Academic only** | No production implementation |
@@ -221,13 +222,12 @@ RowPress is that root cause exposed. And as of DDR5's third generation, it remai
 
 *References:*
 
-*Haocong Luo, et al. "RowPress: Amplifying Read Disturbance in DRAM by Activating a Row for Longer." USENIX Security Symposium 2023. — Distinguished Paper Award.*
-*CVE-2023-28962. "ASUS, Lenovo, Dell — RowPress-related DRAM bit flip vulnerability." NVD.*
+*Haocong Luo, et al. "RowPress: Amplifying Read Disturbance in Modern DRAM Chips." ISCA 2023.*
 *Kim et al. "Flipping Bits in Memory Without Accessing Them: An Experimental Study of DRAM Disturbance Errors." ISCA 2014. — The original Rowhammer paper.*
 *Frigo et al. "TRRespass: Exploiting the Many Sides of Target Row Refresh." IEEE S&P 2020.*
-*Jattke et al. "Blacksmith: Rowhammering at Scale via Determinized Row Activation." IEEE S&P 2023.*
+*Jattke et al. "Blacksmith: Scalable Rowhammering in the Frequency Domain." IEEE S&P 2022.*
 *Micron TN-04-81. "DDR5 RFM and RFMn Guidelines." Technical Note.*
 
 ## Sources
 
-- [NVD: CVE-2023-28962](https://nvd.nist.gov/vuln/detail/CVE-2023-28962)
+- [arXiv: RowPress: Amplifying Read Disturbance in Modern DRAM Chips](https://arxiv.org/abs/2306.17061)

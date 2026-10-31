@@ -6,6 +6,7 @@ date: 2026-05-28
 categories: [malware, analysis]
 tags: [connectwise, screenconnect, asyncrat, authenticode, lolbas, rmm-abuse, mitre-attack]
 excerpt: "Attackers are shipping validly signed ConnectWise installers modified to phone home to attacker infrastructure, then using ScreenConnect's own automation features to drop AsyncRAT in memory."
+last_modified_at: 2026-10-31
 ---
 
 Two fresh ConnectWise samples landed on MalwareBazaar this morning. File names: `ScreenConnect.ClientSetup.exe` (SHA256: `aa116a6279aebc383ed7a9321d580f998436e34f06d07f2cb8ac2d7fd876ba60`) and `support.client.exe` (SHA256: `007872e9454fa9ea6c3ea27ed2fd345428297c02e64e9e516145ccc12d66af5e`). Both PE executables, both tagged ConnectWise family, both submitted by reporter BlinkzSec within seconds of each other at 15:09 UTC. Not a coincidence.
@@ -26,12 +27,12 @@ Researchers at G DATA documented this campaign beginning in March 2025. The payl
 
 Once the installer runs, the attacker has a persistent ScreenConnect session. That is already bad enough. But that is not where the campaign stops.
 
-![Six-step diagram of the ScreenConnect campaign from a PDF lure and signed installer to in-memory AsyncRAT and task persistence.](/assets/figures/screenconnect-authenticode-stuffing-asyncrat-diagram.svg){: width="640" height="686" loading="lazy"}
-*Signed ScreenConnect installer to AsyncRAT chain, as described in this post.*
+![Six steps: unhashed certificate table, a re-pointed signed installer, phishing delivery, in-memory loader, two RATs, and strict validation.](/assets/figures/screenconnect-authenticode-stuffing-asyncrat-diagram.svg){: width="640" height="686" loading="lazy"}
+*How signed ScreenConnect installers are abused to drop RATs, as described in this post.*
 
 ## The Full Attack Chain
 
-The phishing chain usually starts with a malicious PDF. The PDF links to a Canva page or a Cloudflare R2 bucket hosting the trojanized installer. The file arrives signed, and security tooling frequently lets it through because the signer is a known vendor.
+In the chain G DATA documented, a phishing email's OneDrive link redirects to a Canva page whose "View PDF" button downloads and runs the trojanized installer. The file arrives signed, and security tooling frequently lets it through because the signer is a known vendor.
 
 After ScreenConnect establishes its session, the attacker uses ScreenConnect's built-in automation features to push a second-stage dropper. This is typically a VBScript or JavaScript file that launches a shortcut, which then runs a PowerShell loader Acronis researchers named `Skype.ps1`. That name is intentional. The loader is designed to look like a Skype component sitting in `%APPDATA%\Skype\`.
 
@@ -39,9 +40,9 @@ After ScreenConnect establishes its session, the attacker uses ScreenConnect's b
 
 The final payloads are two RATs deployed simultaneously: AsyncRAT, the open-source .NET remote access tool, and a custom PowerShell-based RAT that handles credential and crypto wallet theft. Both connect back to attacker-controlled C2.
 
-Persistence comes via scheduled task. The task is named either `SystemInstallTask` or `3losh` and is configured to execute every two minutes. That frequency is aggressive. It ensures that even if the session drops or a component gets killed, it comes back fast.
+Persistence comes via scheduled task. The task is named either `SystemInstallTask` or `3losh` and is configured to execute every two to ten minutes (`3losh` every two, `SystemInstallTask` every ten). That frequency is aggressive. It ensures that even if the session drops or a component gets killed, it comes back fast.
 
-The full MITRE ATT&CK coverage runs: T1566.001 (Spearphishing Attachment), T1553.002 (Subvert Trust Controls: Code Signing), T1219 (Remote Access Software), T1059.001 (PowerShell), T1059.005 (Visual Basic), T1620 (Reflective Code Loading), T1055 (Process Injection), T1053.005 (Scheduled Task persistence).
+The full MITRE ATT&CK coverage runs: T1566.001 (Spearphishing Attachment), T1553.002 (Subvert Trust Controls: Code Signing), T1219 (Remote Access Tools), T1059.001 (PowerShell), T1059.005 (Visual Basic), T1620 (Reflective Code Loading), T1055 (Process Injection), T1053.005 (Scheduled Task persistence).
 
 ## Educational Sample: Reflective Assembly Load Skeleton
 

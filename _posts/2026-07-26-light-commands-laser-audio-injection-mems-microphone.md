@@ -6,6 +6,7 @@ date: 2026-07-26
 categories: [hardware, exploits, iot, side-channels]
 tags: [light-commands, laser, MEMS, microphone, voice-assistant, Amazon-Alexa, Google-Assistant, Apple-Siri, audio-injection, USENIX, physical-attack]
 excerpt: "MEMS microphones convert light to sound. A laser pointer can inject commands into smart speakers from 110 meters away — through windows, inaudible, untraceable."
+last_modified_at: 2026-10-31
 ---
 
 **CVE:** None assigned (architectural vulnerability class in MEMS microphone design)
@@ -35,33 +36,33 @@ The key insight is that the diaphragm absorbs light. When you shine a modulated 
 
 This is fundamentally different from conventional optical eavesdropping (like the LASER microphone used by intelligence agencies since the 1970s). Those bounce a laser off a window and detect the vibration of the glass. Light Commands goes directly into the device's microphone — no window vibration, no ambient noise, no glass alignment needed. The laser is aimed at the acoustic port of the device itself.
 
-The researchers demonstrated this with wavelengths from 532 nm (green) through 1064 nm (infrared). Infrared is particularly dangerous because it's completely invisible to the human eye — the attacker can be actively injecting commands and nobody in the room would see anything.
+The researchers demonstrated this with wavelengths from 450 nm (blue) through 980 nm (infrared). Infrared is particularly dangerous because it's completely invisible to the human eye — the attacker can be actively injecting commands and nobody in the room would see anything.
 
-![Diagram of the Light Commands attack, from a modulated laser on a MEMS microphone to a voice assistant running the injected command.](/assets/figures/light-commands-laser-audio-injection-mems-microphone-diagram.svg){: width="640" height="582" loading="lazy"}
+![Five-step diagram of the Light Commands attack, from a modulated laser aimed at a MEMS microphone to a voice assistant running the injected command.](/assets/figures/light-commands-laser-audio-injection-mems-microphone-diagram.svg){: width="640" height="582" loading="lazy"}
 *Laser audio injection chain for Light Commands, as described in this post.*
 
 ## What the Attackers Achieved
 
-The Light Commands team tested 27 different devices across Amazon Alexa, Google Assistant, Apple Siri, and Facebook Portal ecosystems. Their results:
+The Light Commands team tested 17 different devices across Amazon Alexa, Google Assistant, Apple Siri, and Facebook Portal ecosystems. Their results:
 
 | Device | Assistant | Max Distance (60 mW laser) |
 |--------|-----------|---------------------------|
-| Google Home | Google Assistant | 110+ meters |
-| Echo Plus 1st Gen | Amazon Alexa | 110+ meters |
-| Echo Plus 2nd Gen | Amazon Alexa | 50 meters |
+| Google Home | Google Assistant | 50+ meters |
+| Echo Plus 1st Gen | Amazon Alexa | 50+ meters |
+| Echo Plus 2nd Gen | Amazon Alexa | 50+ meters |
 | Echo (original) | Amazon Alexa | 50+ meters |
-| iPhone XR | Apple Siri | 110 meters |
+| iPhone XR | Apple Siri | 10 meters |
 | Google Home Mini | Google Assistant | 20 meters |
 | Nest Cam IQ | Google Assistant | 50+ meters |
-| Facebook Portal Mini | Alexa + Portal | 18 meters |
+| Facebook Portal Mini | Alexa + Portal | 5 meters |
 
-The attack works through standard double-pane windows with only minor power loss. At 60 mW — the legal limit for Class 3B lasers in many jurisdictions — they achieved reliable command injection at over 100 meters with telescoping optics.
+The attack works through standard double-pane windows with only minor power loss. At 60 mW — a Class 3B power level (5 to 500 mW) — most devices still responded at 50+ meters, the length of their test corridor, and with a 5 mW laser and a telephoto lens they reached 110 meters.
 
 Most critically, they demonstrated real-world impact:
 
-- **Unlocking smart locks** — They injected "Alexa, unlock the front door" into an Echo Plus controlling a smart lock
+- **Unlocking smart locks** — They brute-forced the voice PIN of an August Smart Lock Pro through a Google Home and unlocked the front door
 - **Opening garage doors** — Google Assistant commands sent to a connected garage door opener
-- **Vehicle unlock/start** — Using Google Assistant account integration to unlock and start a Tesla and a Ford via the victim's linked account
+- **Vehicle unlock/start** — Using Google Assistant account integration to unlock a Tesla and to unlock and start a Ford via the victim's linked account
 - **E-commerce purchases** — Ordering physical goods through Alexa voice purchasing
 
 None of these required the victim to be home. None left an audio trace of the attack.
@@ -80,7 +81,7 @@ MEMS microphones replaced electret condenser microphones in virtually every cons
 
 The photoresponse is a side effect of the MEMS design. The diaphragm is a thin polysilicon or metal film that sits directly in the path of any incoming light through the acoustic port. Shielding it would require adding an opaque physical barrier between the acoustic port and the diaphragm — which would change the acoustic response and potentially increase manufacturing cost.
 
-The researchers found that even a thin layer of dust on the diaphragm makes no difference to the photoresponse. This is not a manufacturing defect in one batch — it's a fundamental property of the MEMS architecture.
+This is not a manufacturing defect in one batch — it's a fundamental property of the MEMS architecture.
 
 ## No CVE, No Patch
 
@@ -100,8 +101,8 @@ Google and Amazon have added some high-risk command confirmations to their voice
 
 Light Commands belongs to a growing class of vulnerabilities where a sensor responds to a physical phenomenon outside its intended domain:
 
-- **Acoustic attacks on hard drives** (CVE-2016-3989) — where sound vibrations cause head-arm misalignment and corrupted writes
-- **Gyroscope resonance** (GAIROSCOPE, 2020) — where acoustic tones at the gyro's resonant frequency produce false rotation readings
+- **Acoustic attacks on hard drives** — where sound vibrations cause head-arm misalignment and corrupted writes
+- **Gyroscope resonance** (GAIROSCOPE, 2022) — where acoustic tones at the gyro's resonant frequency produce false rotation readings
 - **Accelerometer injection** — where ultrasound modulates accelerometer readings, potentially confusing step counters or vehicle airbag systems
 - **LED eavesdropping** — where a device's own power/status LED is used as a photodiode to exfiltrate audio from the room
 

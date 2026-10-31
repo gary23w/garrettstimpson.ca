@@ -6,6 +6,7 @@ date: 2026-05-27
 categories: [malware, analysis]
 tags: [darktortilla, darkcloud, dotnet, infostealer, reflective-loading, mitre-attack]
 excerpt: "A DarkTortilla-packed .NET executable dropped on MalwareBazaar today carries a DarkCloud stealer payload that weaponizes reflective Assembly.Load() to run entirely in memory, bypassing AV and dumping browser credentials before you notice it launched."
+last_modified_at: 2026-10-31
 ---
 
 A new sample hit MalwareBazaar this morning and it is a clean example of a two-layer attack that defenders routinely underestimate. The file, `Quotation No 550.exe`, arrived at 12:13 UTC on May 27, 2026, submitted by James_inthe_box. The outer layer is a DarkTortilla crypter, a .NET-based packer that has been quietly active since at least 2015. The inner payload, flagged by CAPE Sandbox, Intezer, and several others, is DarkCloud stealer.
@@ -22,24 +23,24 @@ One thing that stands out immediately is the imphash: `f34d5f2d4577ed6d9ceec516c
 
 The attack chain begins the way most credential theft operations do: a business-themed email. "Quotation No 550.exe" is designed to look like a legitimate procurement document, the kind of thing a purchasing manager opens without a second thought. The filename is the social engineering. Everything else is technical.
 
-DarkTortilla is a two-stage .NET assembly. The initial loader, a standalone PE, does not execute the real payload directly. Instead, it reads an encrypted blob, usually embedded in a .NET resource or appended to the file, decrypts it with AES or a similar symmetric cipher, and then calls `Assembly.Load()` on the raw bytes. That single call is the trick. The .NET runtime loads the decrypted DLL into memory directly, no file is written to disk, no path shows up in Prefetch, no artifact lands in `%TEMP%`. The loaded DLL is the DarkTortilla "core processor," a second .NET assembly that handles everything else.
+DarkTortilla is a two-stage .NET assembly. The initial loader, a standalone PE, does not execute the real payload directly. Instead, it reads an encrypted blob, usually embedded in a .NET resource or appended to the file, decodes it with a per-byte XOR routine keyed by a 16-byte key, and then calls `Assembly.Load()` on the raw bytes. That single call is the trick. The .NET runtime loads the decrypted DLL into memory directly, no file is written to disk, no path shows up in Prefetch, no artifact lands in `%TEMP%`. The loaded DLL is the DarkTortilla "core processor," a second .NET assembly that handles everything else.
 
-The core processor parses a configuration blob embedded within itself, which controls the behavior of the full infection chain. Before doing anything meaningful, it runs environment checks. DarkTortilla looks for common VM artifacts: MAC address prefixes associated with VirtualBox (`08:00:27`) and VMware (`00:0C:29`), registry keys under `HKLM\SOFTWARE\VMware, Inc.`, processor names containing "VBOX" or "VIRTUAL", and the presence of known analysis processes. If any check trips, the loader simply exits. This is T1497.001 (Virtualization/Sandbox Evasion: System Checks) and it works often enough that DarkTortilla has operated for over a decade without being widely burned.
+The core processor parses a configuration blob embedded within itself, which controls the behavior of the full infection chain. Before doing anything meaningful, it runs environment checks. DarkTortilla looks for common VM artifacts: WMI disk drive, BIOS, computer system and PnP device entries containing strings such as "vbox", "vmware", "qemu" or "virtual", VMware services, and the presence of known VM and sandbox processes. If any check trips, the loader simply exits. This is T1497.001 (Virtualization/Sandbox Evasion: System Checks) and it works often enough that DarkTortilla has operated for over a decade without being widely burned.
 
-Once the environment passes, the core processor injects the DarkCloud payload. The injection method commonly observed in DarkCloud campaigns uses `VirtualProtect()` to mark a memory region as executable and then calls `CallWindowProc()` to redirect execution into it. This sidesteps the classic `VirtualAllocEx` + `WriteProcessMemory` + `CreateRemoteThread` pattern that most behavior engines watch for. It is not novel but it is effective. The payload runs in memory under the original process. From the OS perspective, it is still just `Quotation No 550.exe`.
+Once the environment passes, the core processor injects the DarkCloud payload through a .NET DLL named `RunPe6`, into a host process chosen by its configuration (such as `RegAsm.exe`, `InstallUtil.exe` or a process with the loader's own name). DarkCloud's separate AutoIt-based delivery chain, documented by Unit 42, instead uses `VirtualProtect()` to mark a memory region as executable and then calls `CallWindowProc()` to redirect execution into it. This sidesteps the classic `VirtualAllocEx` + `WriteProcessMemory` + `CreateRemoteThread` pattern that most behavior engines watch for. It is not novel but it is effective. The payload runs in memory inside that host process. If the configuration picks the loader's own name, from the OS perspective it is still just `Quotation No 550.exe`.
 
 DarkCloud is an information stealer written in Visual Basic 6 at its core, though modern variants ship wrapped in .NET. Once active, it targets browser credential stores directly. For Chrome and Chromium-based browsers, it reads `%LOCALAPPDATA%\Google\Chrome\User Data\Default\Login Data`, an SQLite database that stores saved passwords encrypted with DPAPI. The Windows Data Protection API ties encryption to the logged-in user account and machine, which means DarkCloud calls `CryptUnprotectData()` directly in the context of the victim process to decrypt those passwords with no external key required. For Firefox, it queries the NSS database via `SELECT a11,length(a11) FROM nssPrivate` and recovers master password-protected entries where the user has not set a strong master password. It also pulls from Gecko-based browsers, email clients (Thunderbird, Outlook profile files), FTP clients, and any crypto wallet data it can locate.
 
 Persistence is straightforward. DarkCloud writes itself to `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce` with a path pointing to a copy of the loader it drops, usually in `%APPDATA%` or `%USERPROFILE%`. RunOnce executes once on next login and removes itself afterward, so the registry entry is only visible between infection and first reboot.
 
-Before exfiltration, DarkCloud checks for analysis tools. It looks for process names including `wireshark.exe`, `fiddler.exe`, `processhacker.exe`, `tcpview.exe`, `windbg.exe`, and `processhacker.exe` in the running process list. If it finds any, it sleeps or exits. The malware also fetches the victim's public IP from a site like `showip.net` to include in the exfil package, which is useful for the operator to geolocate victims and prioritize high-value targets.
+Before exfiltration, DarkCloud checks for analysis tools. It looks for process names including `wireshark.exe`, `fiddler.exe`, `tcpview.exe`, and `windbg.exe` in the running process list. If it finds any, it sleeps or exits. The malware also fetches the victim's public IP from a site like `showip.net` to include in the exfil package, which is useful for the operator to geolocate victims and prioritize high-value targets.
 
 The full MITRE ATT&CK coverage here: T1027 (Obfuscated Files), T1620 (Reflective Code Loading), T1497.001 (Sandbox Evasion: System Checks), T1055 (Process Injection), T1547.001 (Registry Run Keys), T1555.003 (Credentials from Web Browsers), T1056.001 (Keylogging), T1082 (System Information Discovery), T1113 (Screen Capture), T1071.001 (Web Protocols for C2 exfil).
 
 ---
 
-![Six-step diagram of the DarkTortilla crypter loading DarkCloud from a fake quotation email through credential theft.](/assets/figures/darktortilla-darkcloud-net-crypter-credential-stealer-diagram.svg){: width="640" height="686" loading="lazy"}
-*DarkTortilla and DarkCloud infection chain, as described in this post.*
+![Six steps from a fake quotation email through in-memory loading, sandbox checks and injection to credential theft, persistence and defences.](/assets/figures/darktortilla-darkcloud-net-crypter-credential-stealer-diagram.svg){: width="640" height="686" loading="lazy"}
+*How a .NET crypter delivers a credential stealer, as described in this post.*
 
 ## Educational Sample: Reflective .NET Loading Skeleton
 
@@ -58,7 +59,7 @@ using System.Security.Cryptography;
 
 class ReflectiveLoaderDemo
 {
-    // Anti-VM check: DarkTortilla looks for known VM MAC prefixes and registry keys
+    // Anti-VM check (simplified): DarkTortilla matches VM strings in WMI hardware data, processes and services
     static bool IsVirtualEnvironment()
     {
         try
@@ -138,7 +139,7 @@ The comment on the last two lines is the point. In the real chain, those two cal
 
 ## Detection and Defense
 
-The Stairwell team published a solid YARA hunting rule for DarkCloud variants in August 2025. Key strings to match include `SELECT a11,length(a11) FROM nssPrivate` (Firefox NSS query), `DarkCloud Credentials` and `DarkCloud Keylogger` (internal module names present in unobfuscated builds), and `C:\Users\Public\Libraries\vbsqlite3.dll` (a path the stealer drops its SQLite helper to). Three or more matches on the `$s*` strings or four matches on the `$c*` code-specific strings indicate a high-confidence hit.
+The Stairwell team published a solid YARA hunting rule for DarkCloud variants in August 2025. Key strings to match include `SELECT a11,length(a11) FROM nssPrivate` (Firefox NSS query), `DarkCloud Credentials` and `DarkCloud Keylogger` (internal module names present in unobfuscated builds), and `C:\Users\Public\Libraries\vbsqlite3.dll` (a path the stealer drops its SQLite helper to). Six or more matches on the `$s*` strings, any `$d*` string plus three `$t*` strings, or four matches on the `$c*` code-specific strings indicate a high-confidence hit.
 
 For Sysmon-based detection, the events that matter most here are Event ID 13 (Registry value set) watching for writes to `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce` by unexpected processes, Event ID 10 (Process access) for `Quotation*.exe` or similarly named business-lure processes opening `lsass.exe` or accessing Chrome's `Login Data` file, and Event ID 7 (Image loaded) watching for `clrjit.dll` and `mscorlib.dll` being loaded inside uncommon processes, which signals .NET runtime activation in something that should not be running managed code.
 
