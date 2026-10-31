@@ -88,17 +88,6 @@ To remove an EC-based implant, you need to either flash the EC firmware external
 
 Here's the detail that keeps me up: virtually every shipping laptop has JTAG or Serial Wire Debug (SWD) pins on the EC that are **not fused** on production units. The datasheets for the Nuvoton NPCX series document an OTP bit called `JTAG_EN` — once blown, the JTAG interface is permanently disabled. Units without it blown accept full debugger connections over the physical pins, giving an attacker with screwdriver access full EC register read/write, firmware dump, and firmware upload.
 
-## Autonomous EC Exploitation (2025 Proof-of-Concept)
-
-In early 2025, I developed a PoC that targets the Nuvoton NPCT750 (a TPM 2.0 chip with an embedded security controller). The key innovation: rather than attacking the main CPU's SPI controller, the attack uses a **malicious USB-C charger** (a USB-PD sink device programmed with Raspberry Pi Pico firmware) that connects to the JTAG pins of the EC exposed through a debug header on the motherboard edge. The Pico:
-
-1. Enumerates the EC via SWD
-2. Dumps the EC flash (512 KB — takes ~30 seconds at 1 MHz SWO speed)
-3. Patches the EC firmware's keyboard scan handler to XOR every keystroke with 0x80 before sending it to the OS (keyboard ghosting attack visible only to the attacker who can decode the XOR)
-4. Maintains a Bluetooth Low Energy (BLE) GATT server — the exfiltrated keystrokes are broadcast over BLE in the scan response packets, appearing as normal BLE advertisements to nearby Windows/macOS devices (which ignore them)
-
-The entire attack fits in a USB-C charging block. The victim sees a working laptop that charges normally. All keystrokes — including passwords, 2FA codes typed in, BitLocker recovery keys — are broadcast to anyone with a $20 nRF52840 dongle within 100 meters.
-
 ## Mitigations
 
 - **Blow the JTAG fuses** — Every EC datasheet documents an OTP bit for debug port disable. OEMs must set this before shipping. If you're building a security-focused deployment, open the chassis and verify with a logic analyzer that the SWD pins return `0xFF` when probed.
