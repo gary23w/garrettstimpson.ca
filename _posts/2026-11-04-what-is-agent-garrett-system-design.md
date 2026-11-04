@@ -2,7 +2,7 @@
 layout: post
 title: "What Is Agent Garrett? Inside the System Design of a Security Agent That Keeps Working After You Log Off"
 seo_title: "What Is Agent Garrett? Security Agent System Design"
-date: 2026-11-04 18:00:00 -0500
+date: 2026-11-04 09:00:00 -0500
 author: Garrett Stimpson
 permalink: /posts/2026/11/04/what-is-agent-garrett-system-design/
 categories: [agent-garrett, architecture]
