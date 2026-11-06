@@ -3,37 +3,44 @@ layout: post
 title: "How to Use Agent Garrett: Your Security Operator in the Cloud"
 seo_title: "How to Use Agent Garrett: Security Operator in the Cloud"
 date: 2026-10-16 09:00:00 -0400
+last_modified_at: 2026-11-06
 author: Garrett Stimpson
 permalink: /posts/2026/10/16/how-to-use-agent-garrett/
 categories: [agent-garrett, guides]
 tags: [agent-garrett, getting-started, website-protection, identity-monitoring, tater-tot, cloud-security]
-excerpt: "An 11-minute video guide to signing in, deploying your agent, protecting a website, setting up alerts, and following Garrett's persistent work cycle. No terminal required."
+excerpt: "A paid-launch setup guide with a narrated video covering deployment, website protection, verified alerts, and Garrett's persistent work cycle. No terminal required."
 description: "Learn to set up Agent Garrett for recurring cloud security checks, verified email alerts, identity monitoring, approved website recovery, and evidence-backed conversations."
 image: /assets/img/agent-garrett-how-to-poster.png
 video:
-  url: /assets/video/agent-garrett-how-to.mp4
-  poster: /assets/img/agent-garrett-how-to-poster.png
-  duration: PT11M14S
+  url: /assets/video/agent-garrett-how-to.mp4?v=paid-launch-20261106
+  poster: /assets/img/agent-garrett-how-to-poster.webp
+  duration: PT9M47S
 ---
 
-You should be able to put a security tool to work without learning a terminal first. This walkthrough starts at the sign-in screen and follows the setup through to an agent watching a website from the cloud.
+You should be able to put a security tool to work without learning a terminal first. Start by creating your account, choosing a paid subscription, and setting up the protection you want.
 
-In **11 minutes**, it covers the interface, website protection, identity monitoring, email alerts, chat, and the persistent **tater-tot** work cycle. You can watch it straight through or jump to the step you need.
-
-{% include agent-garrett-walkthrough.html %}
+Signup gives you access to the documentation and subscription options. Features activate only after your subscription is confirmed. The written steps below cover the current launch flow; the **9-minute, 47-second** video demonstrates manual deployment, website protection, identity monitoring, alerts, chat, and the persistent **tater-tot** work cycle.
 
 The recording uses the shipped interface with a demonstration account and simulated incidents, tool results, chat replies, and recovery receipts. Private Cloudflare login, payment entry, and inbox verification are explained and skipped. The incident replay illustrates the workflow; it is not a production incident or a live performance benchmark.
 
 ## 1. Sign in and deploy your agent
 
-Open [Agent Garrett](https://agent.garrettstimpson.ca) and choose **Sign in**. New users create a Cloudflare account; returning users use their existing login. Complete verification and review the requested permissions.
+Open [Agent Garrett](https://agent.garrettstimpson.ca) and choose **Sign in**. Confirm your email using the link sent to your inbox. You can read the docs before subscribing. Existing Cloudflare sign-in remains available; a Cloudflare account is only needed for optional Cloudflare infrastructure connections.
 
-In the dashboard, choose **Get started**, then **Protect my website**. The guide takes you through your goal, your plan, your agent, and the website you want to protect.
+In the dashboard, compare the paid plans and choose the subscription that fits your work. After activation, choose Auto setup or configure the websites and identities you want Garrett to monitor manually.
 
-- **Paid Agent access is CAD $4.99/month.** It includes automatic protection, chat, and service email alerts within the service's allowances.
-- The **card-required three-day trial** covers MCP and backend API tools. It automatically renews at CAD $4.99/month unless cancelled before it ends. Automatic protection and alerts require paid access or a valid service grant.
+| Subscription | Monthly price | Included access |
+| --- | --- | --- |
+| **Chat** | **CAD $2.99** | Dashboard conversations and on-demand investigation tools within Chat allowances. |
+| **Agent** | **CAD $4.99** | Automatic protection, chat, MCP, backend API tools, and service email alerts within Agent allowances. |
+| **Security** | **CAD $13.37** | The security suite with larger AI, hosted-compute, MCP and monitoring allowances. |
+| **Max** | **CAD $35** | All Agent features with larger finite product allowances. |
 
-Choose your authorized Cloudflare account, give the connection a recognizable name, and select **Deploy instance**. Garrett hosts the full agent backend. Your Cloudflare account receives a small connection Worker, which can run on Workers Free within its limits. You do not need to transfer your domain or run a computer around the clock. A first deployment can take several minutes; wait for readiness before continuing.
+Choose your plan and complete Stripe Checkout. Signing up or returning from checkout does not activate features until billing is confirmed.
+
+After an Agent, Security or Max subscription is active, choose Auto setup or configure your monitoring manually. Garrett hosts your agent backend, so you do not need to keep your computer running. Optional Cloudflare connections require you to authorize the account you own or manage. The video below demonstrates that manual connection flow; first-time workspace preparation can take several minutes.
+
+{% include agent-garrett-walkthrough.html %}
 
 ## 2. Choose what Garrett watches
 
@@ -61,7 +68,7 @@ Under **Identity protection**, add an email address or another identity you are 
 
 Tater-tot is Garrett's persistent work cycle. It recalls relevant context, chooses an allowed tool, records its intent, inspects the result, measures progress, and saves useful observations for the next iteration.
 
-In **Agent tasks**, give it an objective with a clear result. The video uses:
+In **Agent tasks**, give it an objective with a clear result. The demonstration uses:
 
 > Review my saved website findings and assets. Explain what needs my attention, cite the evidence, and separate confirmed observations from unanswered questions. Do not change infrastructure.
 

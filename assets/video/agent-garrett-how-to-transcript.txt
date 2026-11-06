@@ -1,20 +1,4 @@
-Start here / Your security operator in the cloud
-Agent Garrett helps you watch your website, follow identity exposure leads, and understand what needs attention. This walkthrough uses the real interface. The demonstration account and example incidents are simulated.
-
-Start here / Sign up or sign in
-Open agent dot garrett stimpson dot ca and choose Sign in. Cloudflare handles your account. New users create a Cloudflare account; returning users use their existing login.
-
-Start here / Your workspace, in plain English
-Finish Cloudflare’s verification and review the requested permissions. We skip private account entry in this recording. Your workspace brings together protection, conversations, activity, and settings.
-
-Start here / Follow the four-step guide
-Choose Get started, then Protect my website. The guide walks through your goal, your plan, your agent, and what you want to protect. No terminal or code is needed.
-
-Start here / Choose the plan for automatic protection
-For automatic protection, choose the paid Agent plan at four dollars and ninety-nine cents Canadian per month. The card-required three-day trial covers the MCP and backend API tools; automatic protection starts with paid access.
-
-Start here / Review billing securely
-The live app opens secure Stripe Checkout. Review the price and enter your own payment details there. This recording skips payment and continues with a sample paid plan.
+Agent Garrett: deployment and protection after subscribing
 
 Deploy your agent / Choose your Cloudflare account
 Choose the Cloudflare account you want Garrett to connect to. If setup is incomplete, open Cloudflare, finish its free Workers setup, and check again. You do not need to transfer a domain.
