@@ -240,8 +240,9 @@ body {
 @media screen and (max-width: 600px) {
   .wrapper {
     max-width: 100% !important;
-    padding: 0 16px !important;
+    padding: 0 12px !important;
   }
+  .site-header .wrapper { padding-left: 12px !important; padding-right: 12px !important; }
 }
 
 
@@ -772,6 +773,8 @@ h2.hero-meta { font-size: inherit !important; font-weight: 400 !important; margi
   background: var(--bg-card) !important; margin-bottom: 16px !important;
   transition: border-color .18s, box-shadow .18s, transform .18s !important;
 }
+/* The link supplies the card's padding and makes the whole card tappable. */
+.post-list > li.post-card { padding: 0 !important; }
 .post-card:hover {
   border-color: var(--border) !important; transform: translateY(-2px) !important;
   box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 16px var(--green-glow) !important;
@@ -790,6 +793,7 @@ h2.hero-meta { font-size: inherit !important; font-weight: 400 !important; margi
   padding: 2px 9px !important; background: var(--green-glow) !important; letter-spacing: 0.03em !important;
 }
 @media screen and (max-width: 600px) {
+  .home .hero { padding: 22px 16px !important; }
   .hero-title { font-size: 1.5em !important; }
   .post-card-link { padding: 15px 16px !important; }
 }
@@ -1057,19 +1061,19 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 .more-posts a:hover { color: var(--green) !important; }
 
 /* ============================================================
-   DEPLOY BANNER
+   AGENT GARRETT BANNER
    ============================================================ */
 #deploy-banner {
   position: relative;
   z-index: 100;
   background: #000;
   border-bottom: 1px solid rgba(0,239,114, 0.2);
-  padding: 9px 16px;
+  padding: 4px 54px 4px 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 14px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   font-family: var(--font-mono);
   font-size: 11px;
   color: #888;
@@ -1081,7 +1085,7 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   display: flex;
   align-items: center;
   gap: 8px;
-  white-space: nowrap;
+  min-width: 0;
 }
 .banner-label .banner-prefix {
   color: var(--green);
@@ -1098,6 +1102,9 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  min-height: 44px;
+  white-space: nowrap;
+  text-decoration: underline;
   opacity: .9;
   transition: opacity .15s;
 }
@@ -1106,7 +1113,7 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 
 .banner-dismiss {
   position: absolute;
-  right: 12px;
+  right: 4px;
   top: 50%;
   transform: translateY(-50%);
   background: none;
@@ -1116,17 +1123,21 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1;
-  padding: 2px 4px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   transition: color .15s;
 }
 .banner-dismiss:hover { color: var(--green); }
 
 @media (max-width: 600px) {
   #deploy-banner {
-    padding: 8px 36px 8px 10px;
+    padding: 4px 48px 4px 12px;
     gap: 8px;
-    font-size: 10px;
+    font-size: 11px;
+    justify-content: space-between;
   }
+  .banner-label { line-height: 1.4; }
   .banner-label .banner-prefix { display: none; }
   .banner-label .banner-text-full { display: none; }
   .banner-label .banner-text-short { display: inline; }
