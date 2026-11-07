@@ -29,7 +29,17 @@ layout: default
   <div class="post-content">
     {%- include post-toc.html html=content -%}
     {{ content }}
+    {%- include removal-ad.html -%}
   </div>
+  <script>
+  (function(){
+    var content=document.querySelector('.post-content');
+    var ad=content && content.querySelector('.removal-ad');
+    if(!ad) return;
+    var paragraphs=Array.prototype.filter.call(content.children,function(el){return el.tagName==='P' && el.textContent.trim();});
+    if(paragraphs.length) paragraphs[0].after(ad);
+  })();
+  </script>
 
   <nav class="post-nav" aria-label="Post navigation">
     {%- if page.previous.url -%}

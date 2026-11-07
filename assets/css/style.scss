@@ -1061,86 +1061,45 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 .more-posts a:hover { color: var(--green) !important; }
 
 /* ============================================================
-   AGENT GARRETT BANNER
+   IN-CONTENT AGENT GARRETT PROMOTION
    ============================================================ */
-#deploy-banner {
-  position: relative;
-  z-index: 100;
-  background: #000;
-  border-bottom: 1px solid rgba(0,239,114, 0.2);
-  padding: 4px 54px 4px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  flex-wrap: nowrap;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: #888;
-  letter-spacing: .04em;
+.removal-ad {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 130px;
+  align-items: center !important;
+  gap: 12px 20px;
+  margin: 26px 0 !important;
+  padding: 22px !important;
+  overflow: hidden;
+  border: 1px solid #295b3a !important;
+  border-left: 3px solid var(--green) !important;
+  border-radius: 4px;
+  background: #030b06 !important;
 }
-#deploy-banner.hidden { display: none !important; }
-
-.banner-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.banner-label .banner-prefix {
-  color: var(--green);
-  font-size: 10px;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-}
-.banner-label .banner-text-full { color: #aaa; }
-.banner-label .banner-text-full strong { color: #e0e0e0; font-weight: 700; }
-.banner-label .banner-text-short { display: none; color: #aaa; }
-.banner-label .banner-text-short strong { color: #e0e0e0; font-weight: 700; }
-
-.banner-badge {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  min-height: 44px;
-  white-space: nowrap;
-  text-decoration: underline;
-  opacity: .9;
-  transition: opacity .15s;
-}
-.banner-badge:hover { opacity: 1; }
-.banner-badge img { height: 22px; display: block; }
-
-.banner-dismiss {
-  position: absolute;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: #767676;
-  font-family: var(--font-mono);
-  font-size: 14px;
-  line-height: 1;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  transition: color .15s;
-}
-.banner-dismiss:hover { color: var(--green); }
-
-@media (max-width: 600px) {
-  #deploy-banner {
-    padding: 4px 48px 4px 12px;
-    gap: 8px;
-    font-size: 11px;
-    justify-content: space-between;
-  }
-  .banner-label { line-height: 1.4; }
-  .banner-label .banner-prefix { display: none; }
-  .banner-label .banner-text-full { display: none; }
-  .banner-label .banner-text-short { display: inline; }
+.removal-ad-copy { min-width: 0; }
+.removal-ad-label { color: var(--green) !important; font: 700 10px/1.5 var(--font-mono) !important; letter-spacing: .06em; }
+.removal-ad .removal-ad-title { margin: 8px 0 !important; color: #f1f8f2 !important; font-size: 23px !important; line-height: 1.2 !important; text-shadow: none !important; }
+.post-content .removal-ad .removal-ad-title::before { content: none !important; }
+.removal-ad .removal-ad-description,
+.post-list .removal-ad .removal-ad-description,
+.post-content .removal-ad .removal-ad-description { margin: 0 !important; color: #b7cabc !important; font-size: 13px !important; line-height: 1.65 !important; }
+.removal-ad > .removal-ad-art,
+.post-content .removal-ad > .removal-ad-art { display: block !important; width: 100% !important; height: auto !important; max-width: 130px !important; margin: 0 !important; border: 0 !important; box-shadow: none !important; }
+.removal-ad-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.removal-ad .removal-ad-cta { display: inline-flex !important; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; color: #001805 !important; background: var(--green) !important; border-radius: 3px; font-size: 12px !important; font-weight: 700; line-height: 1.4; text-decoration: none !important; }
+.removal-ad .removal-ad-cta:hover { background: #54ff9c !important; }
+.removal-ad .removal-ad-cta:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.removal-ad-price { color: #c5d4c8; font-size: 12px; }
+.post-list > li.feed-ad-slot,
+.post-list > li.feed-ad-slot:hover { padding: 0 !important; border: 0 !important; background: transparent !important; box-shadow: none !important; transform: none !important; }
+.post-list > li.feed-ad-slot::before { display: none; }
+.feed-ad-slot .removal-ad { margin: 0 !important; }
+.topic-list .feed-ad-slot { margin-bottom: 22px !important; }
+@media screen and (max-width: 480px) {
+  .removal-ad { grid-template-columns: minmax(0, 1fr) 74px; gap: 10px 12px; padding: 16px !important; }
+  .removal-ad .removal-ad-title { font-size: 20px !important; }
+  .removal-ad > .removal-ad-art,
+  .post-content .removal-ad > .removal-ad-art { max-width: 74px !important; }
 }
 
 /* Agent Garrett recorded demo */

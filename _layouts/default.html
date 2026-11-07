@@ -25,22 +25,6 @@
 </head>
 
 <body>
-  <!-- ============ AGENT GARRETT BANNER ============ -->
-  <div id="deploy-banner" role="complementary" aria-label="Agent Garrett data broker removal">
-    <span class="banner-label">
-      <span class="banner-prefix">// Agent Garrett</span>
-      <span class="banner-text-full"><strong>Get your data out.</strong> Data broker removal for CAD $4.99/month.</span>
-      <span class="banner-text-short"><strong>Agent Garrett:</strong> Get your data out. CAD $4.99/month.</span>
-    </span>
-    <a class="banner-badge"
-       href="https://agent.garrettstimpson.ca/remove"
-       target="_blank" rel="noopener noreferrer"
-       aria-label="Explore Agent Garrett data broker removal">
-      Learn more &rarr;
-    </a>
-    <button class="banner-dismiss" id="banner-dismiss" type="button" aria-label="Dismiss banner" title="Dismiss">&#x2715;</button>
-  </div>
-
   <div id="read-progress" aria-hidden="true"></div>
   <!-- Matrix rain canvas background -->
   <canvas id="matrix-canvas" aria-hidden="true"></canvas>
@@ -204,22 +188,6 @@
   <!-- Share: copy link -->
   <script>
   (function(){ var sc=document.getElementById('share-copy'); if(!sc) return; sc.addEventListener('click',function(){ if(navigator.clipboard){ navigator.clipboard.writeText(location.href).then(function(){ sc.textContent='copied!'; setTimeout(function(){ sc.textContent='copy link'; },1200); }); } }); })();
-  </script>
-
-  <!-- Deploy banner dismiss (persisted per session) -->
-  <script>
-  (function(){
-    var banner = document.getElementById('deploy-banner');
-    var btn    = document.getElementById('banner-dismiss');
-    if (!banner || !btn) return;
-    if (sessionStorage.getItem('banner-dismissed') === '1') {
-      banner.classList.add('hidden');
-    }
-    btn.addEventListener('click', function() {
-      banner.classList.add('hidden');
-      sessionStorage.setItem('banner-dismissed', '1');
-    });
-  })();
   </script>
 
   <!-- Mobile nav toggle (JS class-based — reliable on iOS/Android) -->

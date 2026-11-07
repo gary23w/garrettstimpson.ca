@@ -47,10 +47,14 @@ layout: default
         {%- endif -%}
       </a>
     </li>
+    {%- if forloop.index == 2 or forloop.last and forloop.index == 1 -%}
+    <li class="feed-ad-slot">{%- include removal-ad.html -%}</li>
+    {%- endif -%}
     {%- endfor -%}
   </ul>
   {%- else -%}
   <p class="text-muted">No posts yet.</p>
+  {%- include removal-ad.html -%}
   {%- endif -%}
 
 </div>
