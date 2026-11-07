@@ -23,4 +23,7 @@ description: "Every tag used across the research posts on garrettstimpson.ca, ea
   <li><span class="tag-post-date">{{ post.date | date: "%Y.%m.%d" }}</span><a href="{{ post.url | relative_url }}">{{ post.title | escape }}</a></li>
   {%- endfor -%}
 </ul>
+{%- if forloop.index == 2 or forloop.last and forloop.index == 1 -%}
+  {%- include removal-ad.html -%}
+{%- endif -%}
 {%- endfor -%}

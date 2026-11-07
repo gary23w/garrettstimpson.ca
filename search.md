@@ -10,6 +10,7 @@ robots: noindex, follow
 <input id="site-search" class="search-box" type="search" placeholder="search research — title, tag, or keyword…" autocomplete="off" autofocus>
 <div id="search-count" class="search-count"></div>
 <div id="search-results" class="search-results"></div>
+<template id="search-ad-template">{%- include removal-ad.html -%}</template>
 
 <script>
 (function(){
@@ -25,10 +26,13 @@ robots: noindex, follow
   }
   function run(){
     var q=(inp.value||'').toLowerCase().trim();
-    if(!q){ out.innerHTML=''; cnt.textContent=idx.length+' posts indexed — start typing.'; return; }
+    var ad=document.getElementById('search-ad-template').innerHTML;
+    if(!q){ out.innerHTML=ad; cnt.textContent=idx.length+' posts indexed — start typing.'; return; }
     var res=idx.filter(function(p){ var hay=(p.title+' '+(p.tags||[]).join(' ')+' '+(p.categories||[]).join(' ')+' '+p.excerpt).toLowerCase(); return q.split(/\s+/).every(function(w){ return hay.indexOf(w)>=0; }); });
     cnt.textContent=res.length+' result'+(res.length===1?'':'s')+' for "'+q+'"';
-    out.innerHTML=res.map(card).join('');
+    var cards=res.map(card);
+    cards.splice(Math.min(2,cards.length),0,ad);
+    out.innerHTML=cards.join('');
   }
   inp.addEventListener('input',run);
 })();

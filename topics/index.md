@@ -14,5 +14,8 @@ permalink: /topics/
     <h2 class="topic-name"><a href="{{ '/topics/' | append: topic.slug | append: '/' | relative_url }}">{{ topic.name }}</a> <span class="tag-count">{{ topic_posts.size }}</span></h2>
     <p>{{ topic.description }}</p>
   </li>
+  {%- if forloop.index == 2 or forloop.last and forloop.index == 1 -%}
+  <li class="feed-ad-slot">{%- include removal-ad.html -%}</li>
+  {%- endif -%}
 {%- endfor -%}
 </ul>
