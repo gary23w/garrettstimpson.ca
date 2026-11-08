@@ -957,6 +957,8 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   box-shadow: 0 0 18px var(--green-glow) !important; transition: transform .15s, box-shadow .15s !important;
 }
 .hero-cta:hover { transform: translateY(-2px) !important; box-shadow: 0 4px 26px rgba(0,239,114,0.5) !important; }
+.hero-scan-link { display: inline-flex !important; align-items: center; min-height: 44px; margin: 12px 0 0 15px; color: var(--green) !important; font-size: 13px; font-weight: 700; text-decoration: underline !important; text-underline-offset: 4px; }
+@media screen and (max-width: 480px) { .hero-scan-link { margin-left: 0; display: flex !important; } }
 .hero-community { margin: 22px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.8; max-width: 640px; }
 
 /* ============================================================
@@ -1089,6 +1091,8 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 .removal-ad .removal-ad-cta { display: inline-flex !important; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; color: #001805 !important; background: var(--green) !important; border-radius: 3px; font-size: 12px !important; font-weight: 700; line-height: 1.4; text-decoration: none !important; }
 .removal-ad .removal-ad-cta:hover { background: #54ff9c !important; }
 .removal-ad .removal-ad-cta:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.removal-ad .removal-ad-secondary { display: inline-flex !important; align-items: center; min-height: 44px; color: var(--green) !important; font-size: 12px !important; font-weight: 700; text-decoration: underline !important; text-underline-offset: 4px; }
+.removal-ad .removal-ad-secondary:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 .removal-ad-price { color: #c5d4c8; font-size: 12px; }
 .post-list > li.feed-ad-slot,
 .post-list > li.feed-ad-slot:hover { padding: 0 !important; border: 0 !important; background: transparent !important; box-shadow: none !important; transform: none !important; }
