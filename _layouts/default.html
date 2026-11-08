@@ -95,6 +95,7 @@
             {%- if site.discord_url -%}<li><a href="{{ site.discord_url | escape }}"><span>join Agent Garrett on Discord</span></a></li>{%- endif -%}
             {%- if site.twitch_url -%}<li><a href="{{ site.twitch_url | escape }}"><span>watch on Twitch</span></a></li>{%- endif -%}
             <li><a href="{{ '/about/' | relative_url }}"><span>about Garrett Stimpson</span></a></li>
+            {%- if site.agent_url and site.agent_url != "" -%}<li><a href="{{ site.agent_url }}/scan"><span>free privacy search</span></a></li>{%- endif -%}
             <li><a href="{{ '/feed.xml' | relative_url }}"><span>rss / feed.xml</span></a></li>
           </ul>
         </div>
