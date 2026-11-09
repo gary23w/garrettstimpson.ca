@@ -1,7 +1,7 @@
 title: Garrett Stimpson
 description: >-
-  Cybersecurity research and practical defensive guidance by Garrett Stimpson,
-  a software engineer with 10+ years across offensive and defensive cybersecurity.
+  Garrett Stimpson is a cybersecurity professional who has relentlessly advanced
+  within the field for 10+ years across offense, defense, and security engineering.
 baseurl: ""
 url: "https://garrettstimpson.ca"
 agent_url: "https://agent.garrettstimpson.ca"   # Agent Garrett account and subscription dashboard
@@ -19,12 +19,27 @@ cf_analytics_token: ""
 author:
   name: Garrett Stimpson
   url: "https://garrettstimpson.ca/about/"
+  alternate_name: gary23w
+  job_title: "Cybersecurity Professional and Software Engineer"
   # Person entity for structured data (_includes/seo.html); wording from about.md.
-  description: "Cybersecurity professional and software engineer based in the Greater Toronto Area, Canada."
+  description: "Garrett Stimpson has relentlessly advanced within cybersecurity for more than a decade across offensive security, defensive operations, and security engineering."
+  disambiguating_description: "Canadian cybersecurity professional and software engineer based in the Greater Toronto Area, with 10+ years across offensive and defensive security."
   location: "Greater Toronto Area, Canada"
+  occupation:
+    name: "Cybersecurity Professional"
+    description: "Offensive and defensive security, vulnerability research, threat hunting, detection engineering, incident response, and security engineering."
+    location: "Canada"
   knows_about:
     - Penetration testing
     - Vulnerability research
+    - Blue team operations
+    - Threat hunting
+    - Adversary simulation
+    - Detection engineering
+    - Incident response
+    - Malware analysis
+    - Cloud security
+    - Container security
     - Android development
     - Backend systems
     - Linux infrastructure
@@ -35,6 +50,9 @@ social:
     - https://www.linkedin.com/in/garrett-stimpson/
     - https://github.com/gary23w
     - https://about.me/garrettstimpson
+    - https://peerlist.io/garrettstimpson
+    - https://www.fiverr.com/garystimpson
+    - https://diib.com/featuredmembers/garrett-stimpson/
 
 github_username: gary23w
 

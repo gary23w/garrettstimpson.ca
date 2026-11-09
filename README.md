@@ -1,7 +1,9 @@
 # Garrett Stimpson — Security Research
 
-In-the-wild exploit analysis, CVE breakdowns, and offensive security research.
-10+ years in the industry. All research published for educational and defensive purposes.
+Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years,
+spanning offensive research, defensive operations, and security engineering.
+The site publishes in-the-wild exploit analysis, CVE breakdowns, and practical
+defensive guidance for educational and authorized security work.
 
 **[garrettstimpson.ca](https://garrettstimpson.ca)**
 
