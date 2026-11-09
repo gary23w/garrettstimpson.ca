@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Not the Key: Home Assistant Stores Every Bearer Token in Cleartext, and Changing Your Password Revokes Nothing"
-seo_title: "Home Assistant Token Custody: Cleartext Tokens, No Expiry, Password Change Revokes Nothing"
+seo_title: "Home Assistant Stores Every Bearer Token in Cleartext"
 date: 2026-11-08 09:00:00 -0500
 author: Garrett Stimpson
 permalink: /posts/2026/11/08/home-assistant-not-the-key-token-custody/
@@ -11,7 +11,7 @@ excerpt: "Every refresh token and JWT signing key in Home Assistant lives in cle
 description: "A source-read and live proof of Home Assistant's bearer-token custody: cleartext storage in .storage/auth, permanent token classes, self-renewing expiry, and a password change that rehashes the password and revokes no tokens."
 ---
 
-# Not the Key
+## Not the Key
 
 Home Assistant's authentication documentation tells its users: "Your password is the key to your home, so choose a strong, unique one."
 

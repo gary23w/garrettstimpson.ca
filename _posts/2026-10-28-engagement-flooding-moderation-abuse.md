@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "Turning the Moderation System Into the Weapon: Engagement Flooding and the Economics of Getting Someone Banned"
+seo_title: "Engagement Flooding: How Bots Weaponize Platform Moderation"
 date: 2026-10-28
 author: Garrett Stimpson
 permalink: /posts/2026/10/28/engagement-flooding-moderation-abuse/
