@@ -26,6 +26,8 @@ layout: default
       <a class="share-btn" href="https://www.linkedin.com/sharing/share-offsite/?url={{ share_url | url_encode }}" target="_blank" rel="noopener" aria-label="Share this article on LinkedIn (opens in a new tab)">linkedin</a>
       <button class="share-btn" id="share-copy" type="button">Copy link</button>
     </div>
+    {%- comment -%} Reveal the native Share button before first paint so the share row never reflows the article (layout shift). site-controls.js wires the click. {%- endcomment -%}
+    <script>if(typeof navigator.share==='function')document.getElementById('share-native').hidden=false;</script>
   </header>
 
   <div class="post-content">
