@@ -1,6 +1,7 @@
 ---
 layout: page
 title: About Garrett Stimpson
+seo_title: "Garrett Stimpson: Cybersecurity Career"
 nav_title: About
 description: "Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years across offensive security, defensive operations, and security engineering."
 permalink: /about/
