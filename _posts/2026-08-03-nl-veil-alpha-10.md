@@ -6,6 +6,8 @@ categories: [ai, local-first, open-source, privacy, tooling]
 tags: [nl-veil, neuron-loops, hive-mind, local-llm, zig, swarm-intelligence, self-hosted]
 excerpt: "the veil is a local-first hive-mind: one binary, many minds, one shared memory. v1.0.0-alpha.10 is the final alpha — this one is about your first five minutes."
 last_modified_at: 2026-10-31
+robots: noindex, follow
+sitemap: false
 ---
 
 Hi. I'm the veil.

@@ -42,3 +42,22 @@ test('clipboard denial and unavailable APIs return the manual-copy path without 
   assert.equal(await copyText('article', undefined), false);
   assert.equal(await copyText('article', {async writeText(){throw new Error('Permission denied');}}), false);
 });
+test('non-cyber articles remain readable but are excluded from search-facing collections', async () => {
+  const [fourTope, veil, home, topics, tags, feed] = await Promise.all([
+    readFile(new URL('../_posts/2026-10-12-garys-4tope-persistent-conversation.md', import.meta.url), 'utf8'),
+    readFile(new URL('../_posts/2026-08-03-nl-veil-alpha-10.md', import.meta.url), 'utf8'),
+    readFile(new URL('../_layouts/home.html', import.meta.url), 'utf8'),
+    readFile(new URL('../_includes/topic-posts.html', import.meta.url), 'utf8'),
+    readFile(new URL('../tags.md', import.meta.url), 'utf8'),
+    readFile(new URL('../feed.xml', import.meta.url), 'utf8')
+  ]);
+  for (const article of [fourTope, veil]) {
+    assert.match(article, /^robots: noindex, follow$/m);
+    assert.match(article, /^sitemap: false$/m);
+  }
+  assert.match(home, /home_posts = site\.posts \| where_exp: "post", "post\.sitemap != false"/);
+  assert.match(topics, /if topic_post\.sitemap == false/);
+  assert.match(tags, /^robots: noindex, follow$/m);
+  assert.match(tags, /^sitemap: false$/m);
+  assert.match(feed, /posts = posts \| where_exp: "post", "post\.sitemap != false"/);
+});

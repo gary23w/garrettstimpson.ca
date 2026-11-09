@@ -28,9 +28,10 @@ layout: default
 
   <h2 class="post-list-heading">// latest research</h2>
 
-  {%- if site.posts.size > 0 -%}
+  {%- assign home_posts = site.posts | where_exp: "post", "post.sitemap != false" -%}
+  {%- if home_posts.size > 0 -%}
   <ul class="post-list">
-    {%- for post in site.posts -%}
+    {%- for post in home_posts -%}
     <li class="post-card">
       <a class="post-card-link" href="{{ post.url | relative_url }}">
         <div class="post-card-meta">
