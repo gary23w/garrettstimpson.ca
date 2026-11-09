@@ -15,8 +15,8 @@ from pathlib import Path
 SITE_URL    = "https://garrettstimpson.ca"
 AUTHOR      = "Garrett Stimpson"
 REPO        = "https://github.com/gary23w/garrettstimpson.ca"
-SITE_DESC   = ("Cybersecurity research and practical defensive guidance by Garrett Stimpson, "
-               "a software engineer with 10+ years across offensive and defensive security.")
+SITE_DESC   = ("Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years "
+               "across offensive security, defensive operations, and security engineering.")
 POSTS_DIR   = Path(__file__).parent / "_posts"
 TOPICS_FILE = Path(__file__).parent / "_data" / "topics.yml"
 OUTPUT_FILE = Path(__file__).parent / "llms.txt"
@@ -48,6 +48,13 @@ def parse_post(path: Path) -> dict | None:
             if val.startswith('[') and val.endswith(']'):
                 val = [v.strip().strip('"\'') for v in val[1:-1].split(',')]
             fm[key] = val
+
+    # Keep AI-facing corpora aligned with search eligibility. A post deliberately
+    # excluded from search must not reappear through llms.txt or llms-full.txt.
+    robots = str(fm.get("robots", "")).lower()
+    sitemap = str(fm.get("sitemap", "")).lower()
+    if "noindex" in robots or sitemap == "false":
+        return None
 
     # Derive permalink from filename: YYYY-MM-DD-slug.md
     stem  = path.stem                          # e.g. 2026-05-27-cve-2026-31431-...
@@ -114,7 +121,7 @@ def build_index(parsed: list[dict], topics: list[dict]) -> str:
     lines.append("")
     lines.append("## About")
     lines.append("")
-    lines.append(f"- [About {AUTHOR}]({SITE_URL}/about/): background, software projects and professional profiles")
+    lines.append(f"- [About {AUTHOR}]({SITE_URL}/about/): cybersecurity career progression, research and professional profiles")
     lines.append(f"- [Research policy]({SITE_URL}/policy/): educational and defensive use, privacy and vulnerability disclosure")
     lines.append("")
     if topics:
@@ -142,6 +149,7 @@ def build_corpus(parsed: list[dict]) -> str:
     lines.append("=" * 80)
     lines.append(f"GENERATED    : {now}")
     lines.append(f"AUTHOR       : {AUTHOR}")
+    lines.append(f"PROFILE      : {SITE_DESC}")
     lines.append(f"SITE         : {SITE_URL}")
     lines.append(f"REPOSITORY   : {REPO}")
     lines.append(f"TOTAL POSTS  : {len(parsed)}")
@@ -194,7 +202,7 @@ if __name__ == "__main__":
     parsed = load_posts(POSTS_DIR)
     corpus = build_corpus(parsed)
     FULL_FILE.write_text(corpus, encoding="utf-8")
-    print(f"✓ llms-full.txt written — {len(corpus):,} bytes")
+    print(f"OK llms-full.txt written - {len(corpus):,} bytes")
     index = build_index(parsed, load_topics(TOPICS_FILE))
     OUTPUT_FILE.write_text(index, encoding="utf-8")
-    print(f"✓ llms.txt written — {len(index):,} bytes")
+    print(f"OK llms.txt written - {len(index):,} bytes")
