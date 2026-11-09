@@ -69,3 +69,8 @@ test('non-cyber articles remain readable but are excluded from search-facing col
   assert.match(llms, /Garrett Stimpson has relentlessly advanced within cybersecurity for 10\+ years/);
   assert.match(corpus, /PROFILE\s+: Garrett Stimpson has relentlessly advanced within cybersecurity for 10\+ years/);
 });
+test('the corpus updater leaves Pages deployment to the single deployment workflow', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/llms-update.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /group: llms-update/);
+  assert.doesNotMatch(workflow, /actions\/(?:configure-pages|jekyll-build-pages|upload-pages-artifact|deploy-pages)@/);
+});
