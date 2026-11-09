@@ -60,18 +60,24 @@ layout: default
     {%- endif -%}
   </nav>
 
-  {%- assign related = "" | split: "," -%}
+  {%- comment -%} Related posts ranked by shared tags: three or more first, then two, then one; newest first inside each group. {%- endcomment -%}
+  {%- assign related_3 = "" | split: "," -%}
+  {%- assign related_2 = "" | split: "," -%}
+  {%- assign related_1 = "" | split: "," -%}
   {%- for p in site.posts -%}
-    {%- if p.url != page.url -%}
+    {%- if p.url != page.url and p.sitemap != false -%}
       {%- assign common = p.tags | where_exp: "t", "page.tags contains t" -%}
-      {%- if common.size > 0 -%}{%- assign related = related | push: p -%}{%- endif -%}
+      {%- if common.size >= 3 -%}{%- assign related_3 = related_3 | push: p -%}
+      {%- elsif common.size == 2 -%}{%- assign related_2 = related_2 | push: p -%}
+      {%- elsif common.size == 1 -%}{%- assign related_1 = related_1 | push: p -%}{%- endif -%}
     {%- endif -%}
   {%- endfor -%}
+  {%- assign related = related_3 | concat: related_2 | concat: related_1 -%}
   {%- if related.size > 0 -%}
   <aside class="more-posts" aria-label="Related research">
     <h2 class="more-title">// related research</h2>
     <ul>
-      {%- for p in related limit: 3 -%}
+      {%- for p in related limit: 5 -%}
       <li><span class="post-date">{{ p.date | date: "%Y.%m.%d" }}</span><a href="{{ p.url | relative_url }}">{{ p.title | escape }}</a></li>
       {%- endfor -%}
     </ul>
