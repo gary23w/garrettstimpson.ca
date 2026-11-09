@@ -5,6 +5,7 @@
 {%- assign topic_entry = site.data.topics | where: "slug", include.slug | first -%}
 {%- assign topic_posts = "" | split: "" -%}
 {%- for topic_post in site.posts -%}
+  {%- if topic_post.sitemap == false %}{% continue %}{% endif -%}
   {%- assign topic_post_hit = false -%}
   {%- for cat in topic_post.categories -%}
     {%- if topic_entry.categories contains cat -%}{%- assign topic_post_hit = true -%}{%- endif -%}

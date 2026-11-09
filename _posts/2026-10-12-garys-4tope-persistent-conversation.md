@@ -8,6 +8,8 @@ tags: [garys-4tope, nl-veil, agent-memory, context-management, graph-algorithms,
 excerpt: "The formula, implementation, and reproducible benchmarks behind Gary's 4tope: protecting a dependency path and unfolding a conversation from its current step."
 description: "Garrett Stimpson's engineering paper on Gary's 4tope, its NL-Veil implementation, graph benchmarks, and the question of persistent conversation."
 permalink: /posts/2026/10/12/garys-4tope-persistent-conversation/
+robots: noindex, follow
+sitemap: false
 ---
 
 [Paper, reference code, and raw benchmark data on Hugging Face](https://huggingface.co/datasets/gary23w/garys-4tope) · [Download the PDF](https://huggingface.co/datasets/gary23w/garys-4tope/resolve/main/garys-4tope-paper.pdf?download=true)
