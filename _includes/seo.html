@@ -20,7 +20,11 @@
 {%- comment -%} <title>: keep the brand suffix only while the whole title fits in 60 characters. {%- endcomment -%}
 {%- assign seo_base = page.seo_title | default: page.title | default: site.title -%}
 {%- if seo_is_home -%}
-  {%- assign seo_title = seo_base | append: " | " | append: site.title -%}
+  {%- if seo_base contains site.title -%}
+    {%- assign seo_title = seo_base -%}
+  {%- else -%}
+    {%- assign seo_title = seo_base | append: " | " | append: site.title -%}
+  {%- endif -%}
 {%- elsif seo_base contains site.title -%}
   {%- assign seo_title = seo_base -%}
 {%- else -%}
@@ -106,7 +110,7 @@
 <meta name="twitter:image:alt" content="{{ seo_image_alt | escape }}">
 {%- comment -%} ---------- JSON-LD graph ---------- {%- endcomment -%}
 {%- capture seo_person_ref -%}{"@type":"Person","@id":{{ seo_person_id | jsonify }},"name":{{ site.author.name | jsonify }},"url":{{ site.author.url | jsonify }}}{%- endcapture -%}
-{%- capture seo_person -%}{"@type":"Person","@id":{{ seo_person_id | jsonify }},"name":{{ site.author.name | jsonify }},"url":{{ site.author.url | jsonify }},"description":{{ site.author.description | jsonify }},"homeLocation":{"@type":"Place","name":{{ site.author.location | jsonify }}},"knowsAbout":{{ site.author.knows_about | jsonify }},"sameAs":{{ site.social.links | jsonify }}}{%- endcapture -%}
+{%- capture seo_person -%}{"@type":"Person","@id":{{ seo_person_id | jsonify }},"name":{{ site.author.name | jsonify }},"alternateName":{{ site.author.alternate_name | jsonify }},"url":{{ site.author.url | jsonify }},"mainEntityOfPage":{{ site.author.url | jsonify }},"jobTitle":{{ site.author.job_title | jsonify }},"description":{{ site.author.description | jsonify }},"disambiguatingDescription":{{ site.author.disambiguating_description | jsonify }},"homeLocation":{"@type":"Place","name":{{ site.author.location | jsonify }}},"hasOccupation":{"@type":"Occupation","name":{{ site.author.occupation.name | jsonify }},"description":{{ site.author.occupation.description | jsonify }},"occupationLocation":{"@type":"Country","name":{{ site.author.occupation.location | jsonify }}}},"knowsAbout":{{ site.author.knows_about | jsonify }},"sameAs":{{ site.social.links | jsonify }}}{%- endcapture -%}
 {%- capture seo_image_obj -%}{"@type":"ImageObject","url":{{ seo_image_url | jsonify }}{% if seo_image_meta %},"width":{{ seo_image_meta.width }},"height":{{ seo_image_meta.height }}{% endif %}}{%- endcapture -%}
 {%- capture seo_website -%}{"@type":"WebSite","@id":{{ seo_site_id | jsonify }},"url":{{ seo_home_url | jsonify }},"name":{{ site.title | jsonify }},"description":{{ site.description | normalize_whitespace | strip | jsonify }},"inLanguage":"en","publisher":{"@id":{{ seo_person_id | jsonify }}}}{%- endcapture -%}
 {%- assign seo_nodes = "" | split: "" | push: seo_website -%}
