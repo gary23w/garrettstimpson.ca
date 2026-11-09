@@ -3,7 +3,7 @@ layout: page
 title: Policy
 permalink: /policy/
 description: "Research policy for garrettstimpson.ca: educational and defensive use, Agent Garrett service terms, privacy, attribution and vulnerability disclosure."
-last_modified_at: 2026-10-17
+last_modified_at: 2026-11-09
 ---
 
 ## Content & Purpose
@@ -24,11 +24,11 @@ Agent Garrett is a separate subscription service at [agent.garrettstimpson.ca](h
 
 Agent Garrett can be connected to your existing, authorized workflows and can help assess findings, coordinate defensive work, and act as a security-engineering intermediary. It is intended to support your security efforts—not to replace your judgment, your security team, or other professional advice appropriate to your situation.
 
-**Agent Garrett does not and cannot guarantee complete immunity from cyberattacks, data loss, service disruption, or any other digital threat.** No security product or service can eliminate all risk. Agent Garrett will make reasonable and EXTENSIVE efforts to help protect your digital interests and assets, but its effectiveness depends on factors including your configuration, integrations, permissions, available information, and the threats you face. It may not identify or stop every threat, and its recommendations or actions may be incomplete, delayed, or unsuitable for your circumstances.
+**Agent Garrett does not and cannot guarantee complete immunity from cyberattacks, data loss, service disruption, or any other digital threat.** No security product or service can eliminate all risk. Agent Garrett is designed to help protect your digital interests and assets. Its effectiveness depends on factors including your configuration, integrations, permissions, available information, and the threats you face. It may not identify or stop every threat, and its recommendations or actions may be incomplete, delayed, or unsuitable for your circumstances.
 
 Your needs and the defenses required depend on your systems, the sensitivity and value of your assets, your risk tolerance, and any legal, contractual, or regulatory obligations that apply to you. Agent Garrett alone may not provide the level of protection you need. You are responsible for determining whether additional safeguards, qualified security professionals, incident-response support, or other services are appropriate, and for reviewing and authorizing actions taken in your environment.
 
-**By using Agent Garrett, you agree to these terms.** You remain responsible for using the service only with systems and data you are authorized to access, for configuring connected workflows and permissions appropriately, and for decisions made based on its findings or recommendations.
+**Your use of Agent Garrett is governed by its [Terms of Service](https://agent.garrettstimpson.ca/terms) and [Privacy Policy](https://agent.garrettstimpson.ca/privacy).** The Terms cover subscriptions, monthly renewal, cancellation, refunds, acceptable use and limits of liability. You remain responsible for using the service only with systems and data you are authorized to access, for configuring connected workflows and permissions appropriately, and for decisions made based on its findings or recommendations.
 
 ## Privacy
 
