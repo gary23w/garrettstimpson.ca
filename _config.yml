@@ -71,6 +71,7 @@ exclude:
   - build_llms.py
   - Gemfile
   - Gemfile.lock
+  - tests/
   - "*.py"
 
 # Giscus comments (GitHub Discussions). Enable Discussions on the repo, install the

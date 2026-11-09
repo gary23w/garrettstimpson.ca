@@ -12,6 +12,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check search and sharing behavior
+        run: node --test tests/experience.test.mjs
       - name: Reject Agent source in public history
         run: |
           if [ -n "$(git log --all --format=%H -- agent/ broker/)" ]; then

@@ -16,13 +16,15 @@ layout: default
     {%- if page.tags.size > 0 -%}
     <div class="post-tags">{%- for tag in page.tags -%}<span class="tag">{{ tag }}</span>{%- endfor -%}</div>
     {%- endif -%}
-    <div class="post-share">
+    {%- assign share_url = page.canonical_url | default: page.url | absolute_url -%}
+    <div class="post-share" role="group" aria-label="Share this article">
       <span class="share-label">share &rarr;</span>
-      <a class="share-btn" href="https://twitter.com/intent/tweet?url={{ page.url | absolute_url | url_encode }}&text={{ page.title | url_encode }}" target="_blank" rel="noopener">X</a>
-      <a class="share-btn" href="https://news.ycombinator.com/submitlink?u={{ page.url | absolute_url | url_encode }}&t={{ page.title | url_encode }}" target="_blank" rel="noopener">HN</a>
-      <a class="share-btn" href="https://www.reddit.com/submit?url={{ page.url | absolute_url | url_encode }}&title={{ page.title | url_encode }}" target="_blank" rel="noopener">reddit</a>
-      <a class="share-btn" href="https://www.linkedin.com/sharing/share-offsite/?url={{ page.url | absolute_url | url_encode }}" target="_blank" rel="noopener">linkedin</a>
-      <button class="share-btn" id="share-copy" type="button">copy link</button>
+      <button class="share-btn" id="share-native" type="button" hidden>Share…</button>
+      <a class="share-btn" href="https://twitter.com/intent/tweet?url={{ share_url | url_encode }}&text={{ page.title | url_encode }}" target="_blank" rel="noopener" aria-label="Share this article on X (opens in a new tab)">X</a>
+      <a class="share-btn" href="https://news.ycombinator.com/submitlink?u={{ share_url | url_encode }}&t={{ page.title | url_encode }}" target="_blank" rel="noopener" aria-label="Share this article on Hacker News (opens in a new tab)">HN</a>
+      <a class="share-btn" href="https://www.reddit.com/submit?url={{ share_url | url_encode }}&title={{ page.title | url_encode }}" target="_blank" rel="noopener" aria-label="Share this article on Reddit (opens in a new tab)">reddit</a>
+      <a class="share-btn" href="https://www.linkedin.com/sharing/share-offsite/?url={{ share_url | url_encode }}" target="_blank" rel="noopener" aria-label="Share this article on LinkedIn (opens in a new tab)">linkedin</a>
+      <button class="share-btn" id="share-copy" type="button">Copy link</button>
     </div>
   </header>
 

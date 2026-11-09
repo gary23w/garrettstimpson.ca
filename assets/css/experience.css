@@ -1,0 +1,76 @@
+/* Reading and interaction refinements within the original Garrett theme. */
+:root [hidden] { display: none !important; }
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.skip-link { position: fixed; top: 12px; left: 16px; z-index: 500; transform: translateY(-180%); padding: 12px 16px; border: 1px solid var(--green); border-radius: 3px; background: var(--bg); color: var(--green) !important; font-weight: 700; }
+.skip-link:focus { transform: none; }
+body :is(a,button,input,select,textarea,summary):focus-visible, .site-nav .nav-toggle:focus-visible { outline: 2px solid var(--blue-accent) !important; outline-offset: 4px !important; }
+#main-content { scroll-margin-top: 96px; }
+#main-content:focus { outline: none; }
+.site-nav a[aria-current="page"] { color: var(--green) !important; border-color: var(--border) !important; background: var(--green-glow) !important; }
+.site-nav .page-link { min-height: 44px; display: inline-flex; align-items: center; }
+.site-footer .social-media-list a { display: inline-flex; align-items: center; min-height: 40px; line-height: 1.6; padding-block: 7px; }
+.site-footer .social-media-list li + li { margin-top: 4px; }
+
+/* Each share action keeps a comfortable, visible target. */
+.post-share { gap: 10px !important; margin-top: 24px !important; }
+.post-share .share-label { margin-right: 4px; }
+.share-btn { display: inline-flex !important; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 9px 13px !important; line-height: 1.5; }
+.share-btn:disabled { cursor: wait !important; opacity: .7; }
+.post-toc a { display: inline-block; padding-block: 6px; line-height: 1.7; }
+.post-toc li { margin-block: 2px !important; }
+.post-nav-link { overflow-wrap: anywhere; }
+.more-posts li { gap: 10px 16px !important; flex-wrap: wrap; padding-block: 10px !important; }
+
+/* Reserve the copy control's row so it never covers a code line. */
+div.highlight, figure.highlight, pre.highlight { position: relative; }
+div.highlight > pre, figure.highlight > pre, pre.highlight { padding-top: 52px !important; }
+.code-copy { min-height: 36px !important; min-width: 80px !important; padding: 6px 10px !important; top: 8px !important; right: 8px !important; opacity: 1 !important; }
+.code-copy:focus-visible { opacity: 1 !important; }
+.site-feedback { position: fixed; z-index: 350; bottom: max(18px,env(safe-area-inset-bottom)); left: 16px; right: 16px; width: fit-content; max-width: min(480px,calc(100% - 32px)); margin: 0 auto; padding: 12px 18px; border: 1px solid var(--green-dim); border-radius: 4px; background: var(--bg-surface); color: var(--text); box-shadow: 0 8px 28px #0009; font: 12px/1.7 var(--font-mono); }
+.site-feedback:empty { padding: 0; border: 0; box-shadow: none; background: transparent; pointer-events: none; }
+.copy-dialog { width: min(680px,calc(100% - 32px)); max-height: calc(100dvh - 40px); overflow: auto; padding: 26px; border: 1px solid var(--green-dim); border-radius: 6px; background: var(--bg-surface); color: var(--text); font: 14px/1.7 var(--font-mono); }
+.copy-dialog::backdrop { background: #000c; }
+.copy-dialog h2 { margin: 0 0 12px; font-size: 20px; }
+.copy-dialog label { display: block; margin-bottom: 8px; color: var(--text-muted); font-size: 12px; }
+.copy-dialog textarea { width: 100%; min-height: 160px; max-height: 45dvh; padding: 14px; resize: vertical; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); color: var(--text); font: 13px/1.7 var(--font-mono); }
+.copy-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+.copy-dialog-actions form { margin: 0; }
+
+/* Search has a useful first view and a clear route out of every state. */
+.research-search { margin: 24px 0 16px; }
+.research-search > label { display: block; margin-bottom: 8px; font-size: 12px; color: var(--green); }
+.search-hint { color: var(--text-muted); font-size: 12px; margin: 0 0 16px; }
+.search-input-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: stretch; }
+.search-input-row .search-box { min-width: 0; min-height: 48px; margin: 0 !important; font-size: 16px !important; }
+.research-button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 9px 14px; border: 1px solid var(--green-dark); border-radius: 3px; background: var(--bg-surface); color: var(--green); font: 12px/1.5 var(--font-mono); cursor: pointer; text-decoration: none !important; }
+.research-button:hover { border-color: var(--green); background: var(--green-glow); }
+.research-text-link { display: inline-flex; align-items: center; min-height: 44px; padding-block: 8px; line-height: 1.6; }
+.search-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; margin: 16px 0 28px; }
+.search-toolbar .search-count { flex: 1 1 260px; margin: 0 !important; line-height: 1.8; overflow-wrap: anywhere; }
+.search-results-title { font-size: 18px !important; margin-bottom: 18px !important; }
+.search-results { min-height: 160px; }
+.search-state { border: 1px solid var(--border); border-left: 2px solid var(--green-dim); border-radius: 4px; padding: 24px; margin-bottom: 28px; background: var(--bg-surface); }
+.search-state h3 { margin: 0 0 12px; font-size: 18px; }
+.search-state p { color: var(--text-muted); max-width: 60ch; margin: 0 0 18px; }
+.search-state-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; }
+
+@media (max-width:800px) {
+  .site-nav .nav-toggle { min-height: 44px !important; }
+  .site-nav .trigger { right: 16px !important; top: calc(100% + 8px) !important; width: min(280px,calc(100vw - 32px)); min-width: 0 !important; max-height: calc(100dvh - 100px); overflow-y: auto; overscroll-behavior: contain; }
+}
+@media (max-width:480px) {
+  .code-copy { min-height: 44px !important; }
+  div.highlight > pre, figure.highlight > pre, pre.highlight { padding-top: 60px !important; }
+  .post-share .share-label { flex-basis: 100%; margin-bottom: 2px; }
+  .post-share { gap: 8px !important; }
+  .share-btn { padding-inline: 11px !important; }
+  .copy-dialog { padding: 20px; }
+  .search-state { padding: 20px 18px; }
+  .site-footer .social-media-list a { min-height: 44px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  html { scroll-behavior: auto !important; }
+  #matrix-canvas { display: none !important; }
+  .site-title::after, .hero-cmd::after { animation: none !important; }
+  .skip-link, .share-btn, .research-button, .code-copy { transition: none !important; }
+}

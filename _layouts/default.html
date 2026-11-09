@@ -14,6 +14,7 @@
 
   {%- include seo.html -%}
   <link rel="stylesheet" href="{{ "/assets/css/style.css" | relative_url }}?v={{ site.time | date: '%s' }}">
+  <link rel="stylesheet" href="{{ '/assets/css/experience.css' | relative_url }}?v={{ site.time | date: '%s' }}">
   {%- feed_meta -%}
   {% if site.plugins contains 'jekyll-seo-tag' %}{% else %}<title>{{ page.title | default: site.title }}</title>{% endif %}
 
@@ -25,6 +26,7 @@
 </head>
 
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <div id="read-progress" aria-hidden="true"></div>
   <!-- Matrix rain canvas background -->
   <canvas id="matrix-canvas" aria-hidden="true"></canvas>
@@ -34,8 +36,8 @@
     <div class="wrapper">
       <a class="site-title" rel="author" href="{{ "/" | relative_url }}">{{ site.title | escape }}</a>
 
-      <nav class="site-nav">
-        <button type="button" class="nav-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-menu">
+      <nav class="site-nav" aria-label="Main navigation">
+        <button type="button" class="nav-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="nav-menu">
           <svg class="ico-open" viewBox="0 0 24 24" width="22px" height="22px" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke="#00ff41" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
           <svg class="ico-close" viewBox="0 0 24 24" width="22px" height="22px" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="#00ff41" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
         </button>
@@ -46,7 +48,7 @@
           {%- for path in page_paths -%}
             {%- assign my_page = site.pages | where: "path", path | first -%}
             {%- if my_page.title -%}
-            <a class="page-link" href="{{ my_page.url | relative_url }}">{{ my_page.nav_title | default: my_page.title | escape }}</a>
+            <a class="page-link" href="{{ my_page.url | relative_url }}"{% if my_page.url == page.url %} aria-current="page"{% endif %}>{{ my_page.nav_title | default: my_page.title | escape }}</a>
             {%- endif -%}
           {%- endfor -%}
 
@@ -60,7 +62,7 @@
   </header>
 
   <!-- ============ CONTENT ============ -->
-  <main class="page-content" aria-label="Content">
+  <main id="main-content" class="page-content" aria-label="Content" tabindex="-1">
     <div class="wrapper">
       {{ content }}
       {%- if page.layout == 'post' and site.giscus and site.giscus.repo_id and site.giscus.repo_id != "" -%}
@@ -127,6 +129,7 @@
     }
 
     function draw() {
+      if (document.hidden || (reduceMotion && reduceMotion.matches)) { animId = null; return; }
       ctx.fillStyle = 'rgba(0,0,0,0.05)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#00ff41';
@@ -142,7 +145,6 @@
     }
 
     var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (reduceMotion && reduceMotion.matches) return;
 
     resize();
     draw();
@@ -154,6 +156,11 @@
     document.addEventListener('visibilitychange', function() {
       cancelAnimationFrame(animId);
       if (!document.hidden) draw();
+    });
+    if (reduceMotion) reduceMotion.addEventListener('change', function() {
+      cancelAnimationFrame(animId);
+      if (reduceMotion.matches) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      else { resize(); draw(); }
     });
   })();
   </script>
@@ -167,41 +174,14 @@
   })();
   </script>
 
-  <!-- Code copy buttons -->
-  <script>
-  (function(){
-    var blocks=document.querySelectorAll('div.highlight, figure.highlight, pre.highlight');
-    blocks.forEach(function(b){
-      if(b.querySelector('.code-copy')) return;
-      if(b.parentElement && b.parentElement.closest('div.highlight, figure.highlight')) return; /* one button per block */
-      var btn=document.createElement('button'); btn.className='code-copy'; btn.type='button'; btn.textContent='copy';
-      btn.addEventListener('click',function(){
-        var code=b.querySelector('code')||b.querySelector('pre')||b;
-        var text=code.innerText||code.textContent||'';
-        if(navigator.clipboard){ navigator.clipboard.writeText(text).then(function(){ btn.textContent='copied'; setTimeout(function(){ btn.textContent='copy'; },1200); }); }
-      });
-      b.style.position='relative';
-      b.appendChild(btn);
-    });
-  })();
-  </script>
-
-  <!-- Share: copy link -->
-  <script>
-  (function(){ var sc=document.getElementById('share-copy'); if(!sc) return; sc.addEventListener('click',function(){ if(navigator.clipboard){ navigator.clipboard.writeText(location.href).then(function(){ sc.textContent='copied!'; setTimeout(function(){ sc.textContent='copy link'; },1200); }); } }); })();
-  </script>
-
-  <!-- Mobile nav toggle (JS class-based — reliable on iOS/Android) -->
-  <script>
-  (function(){
-    var nav=document.querySelector('.site-nav'); if(!nav) return;
-    var tog=nav.querySelector('.nav-toggle'); if(!tog) return;
-    function close(){ nav.classList.remove('nav-open'); tog.setAttribute('aria-expanded','false'); }
-    tog.addEventListener('click',function(e){ e.stopPropagation(); var open=nav.classList.toggle('nav-open'); tog.setAttribute('aria-expanded', open?'true':'false'); });
-    document.addEventListener('click',function(e){ if(!nav.contains(e.target)) close(); });
-    document.addEventListener('keydown',function(e){ if(e.key==='Escape') close(); });
-    nav.querySelectorAll('.trigger a').forEach(function(a){ a.addEventListener('click',close); });
-  })();
-  </script>
+  <div id="site-feedback" class="site-feedback" role="status" aria-live="polite" aria-atomic="true"></div>
+  <dialog id="copy-dialog" class="copy-dialog" aria-labelledby="copy-dialog-title" aria-describedby="copy-dialog-description">
+    <h2 id="copy-dialog-title">Copy this text</h2>
+    <p id="copy-dialog-description">Your browser could not copy automatically. Select the text below and use your device’s Copy command.</p>
+    <label for="copy-dialog-text">Text to copy</label>
+    <textarea id="copy-dialog-text" readonly rows="7" spellcheck="false"></textarea>
+    <div class="copy-dialog-actions"><button class="research-button" type="button" data-select-copy>Select text</button><form method="dialog"><button class="research-button" type="submit">Done</button></form></div>
+  </dialog>
+  <script type="module" src="{{ '/assets/js/site-controls.js' | relative_url }}?v={{ site.time | date: '%s' }}"></script>
 </body>
 </html>
