@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "The Socket Nobody Owns: Hijacking Vim's Server Socket in /tmp (Vim < 9.2.1308)"
-date: 2026-11-09 09:00:00 -0500
+date: 2026-11-09 04:00:00 -0500
 categories: [exploits, linux, analysis]
 tags: [vim, socketserver, clientserver, unix-socket, privesc, tmp-race, cwe-283, cwe-276, local-attack]
 excerpt: "Vim's socketserver drops its control socket into /tmp/vim-<uid> without checking who owns the directory. Pre-create it as another user and you can evaluate arbitrary Vim expressions in the victim's editor - which means a shell. No CVE assigned yet."
