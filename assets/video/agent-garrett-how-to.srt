@@ -1,367 +1,171 @@
 1
-00:00:00,326 --> 00:00:06,794
-Choose the Cloudflare account you want Garrett to connect to. If setup is incomplete, open
+00:00:00,000 --> 00:00:06,080
+Start with the plan that fits the help you need. Chat is for on-demand
 
 2
-00:00:06,794 --> 00:00:14,123
-Cloudflare, finish its free Workers setup, and check again. You do not need to transfer a domain.
+00:00:06,080 --> 00:00:12,160
+questions and investigations. Agent, at four dollars and ninety-nine cents Canadian a month, adds
 
 3
-00:00:15,423 --> 00:00:22,808
-Give the agent a name you will recognize, such as My security operator. Check Cloudflare setup.
+00:00:12,160 --> 00:00:18,239
+scheduled protection, data-broker removal, monitoring and email updates. Security and Max keep the protection
 
 4
-00:00:22,808 --> 00:00:28,346
-Garrett hosts the agent backend; your account receives a small connection Worker.
+00:00:18,239 --> 00:00:24,319
+features with larger allowances. Sign in with Google, Facebook or email, then review your
 
 5
-00:00:29,646 --> 00:00:36,854
-Select Deploy instance. On a new real workspace, the first build can take several minutes. Wait for
+00:00:24,319 --> 00:00:30,399
+plan before checkout. After payment is confirmed, open your dashboard. Garrett prepares your protection
 
 6
-00:00:36,854 --> 00:00:41,518
-the ready state, or use Check agent readiness to try again.
+00:00:30,399 --> 00:00:36,479
+profile automatically from the information available in your account. Review what is monitored and
 
 7
-00:00:42,818 --> 00:00:50,377
-Continue to Put Garrett to work. Enter a website you own or manage. Your public website address tells
+00:00:36,479 --> 00:00:38,650
+anything that needs your attention.
 
 8
-00:00:50,377 --> 00:00:52,476
-Garrett exactly what to watch.
+00:00:39,601 --> 00:00:45,087
+Open Data removal from your dashboard. Review your removal profile and add the details
 
 9
-00:00:53,776 --> 00:00:59,760
-Watch checks public availability and selected changes. Investigate adds bounded evidence gathering.
+00:00:45,087 --> 00:00:50,573
+needed to identify your listings. Check the authorization before starting broker requests. Your profile
 
 10
-00:00:59,760 --> 00:01:07,240
-Here we choose Investigate, a five-minute schedule, and text that should appear. Confirm you are
+00:00:50,573 --> 00:00:56,059
+helps Garrett find supported listings and prepare the right removal work. Follow the campaign
 
 11
-00:01:07,240 --> 00:01:09,733
-authorized to monitor the site.
+00:00:56,059 --> 00:01:01,545
+and individual requests to see what was prepared, what was sent, and whether a
 
 12
-00:01:11,033 --> 00:01:18,255
-Select Start protecting my website. Garrett schedules cloud checks. The saved baseline here is sample
+00:01:01,545 --> 00:01:07,031
+broker needs a step from you. A sent request and a confirmed removal are
 
 13
-00:01:18,255 --> 00:01:23,071
-data; your account shows the observations from its own checks.
+00:01:07,031 --> 00:01:12,517
+different stages. Return here for progress and follow-up. Use the pause controls when you
 
 14
-00:01:24,371 --> 00:01:31,629
-Open Websites to review the mode, last check, next wake, and recorded activity. A successful check is
+00:01:12,517 --> 00:01:14,476
+want to stop scheduled work.
 
 15
-00:01:31,629 --> 00:01:36,753
-a last-known observation. Look at the timestamp when deciding what it means.
+00:01:15,458 --> 00:01:21,228
+Choose Message checks when an email, text or link looks suspicious. Start a private
 
 16
-00:01:38,053 --> 00:01:44,806
-For a supported Cloudflare website Worker, open Protection settings and choose Handle. This adds a
+00:01:21,228 --> 00:01:26,997
+case and paste the message, or attach supported evidence. Leave out passwords, payment details
 
 17
-00:01:44,806 --> 00:01:51,109
-specific recovery action: restoring a healthy version you approve after a newer deployment repeatedly
+00:01:26,997 --> 00:01:32,767
+and unrelated personal information. Start the investigation, then read the recorded indicators, risk assessment
 
 18
-00:01:51,109 --> 00:01:52,460
-returns server errors.
+00:01:32,767 --> 00:01:38,536
+and suggested next steps. You can add context to the same case and follow
 
 19
-00:01:53,760 --> 00:02:00,309
-Load eligible website Workers and select the one serving your site. Read the approval carefully.
+00:01:38,536 --> 00:01:44,306
+the work without starting over. Automated follow-ups stay with the case, within your plan
 
 20
-00:02:00,309 --> 00:02:05,112
-Garrett verifies the healthy version before saving permission to restore it.
+00:01:44,306 --> 00:01:50,076
+allowance. Changes to accounts, payments and external reports are decisions you make yourself. If
 
 21
-00:02:06,412 --> 00:02:13,152
-Save the mode and check that the approved healthy version is listed. Handle does not edit your site
+00:01:50,076 --> 00:01:55,433
+money or account access is at risk, begin the relevant recovery steps promptly.
 
 22
-00:02:13,152 --> 00:02:18,019
-or remove intruders. It recovers the approved Worker version and checks the result.
+00:01:56,290 --> 00:02:01,845
+Open Online identity to review the identifiers Garrett monitors. Add an email address or
 
 23
-00:02:19,319 --> 00:02:26,129
-Open Email alerts. Enter an address you control and turn on service alerts. This is how Garrett can
+00:02:01,845 --> 00:02:07,400
+identity you own or are authorized to represent, and complete any required ownership step.
 
 24
-00:02:26,129 --> 00:02:31,046
-tell you when a website needs attention or an investigation has an update.
+00:02:07,400 --> 00:02:12,955
+Read the latest observation, its timestamp and the sources that answered. A breach-source mention
 
 25
-00:02:32,346 --> 00:02:39,508
-Save your email preferences, then open the confirmation link sent to your inbox. Alerts stay off
+00:02:12,955 --> 00:02:18,509
+is a lead to review, not proof that an account was taken over. Open
 
 26
-00:02:39,508 --> 00:02:43,984
-until you confirm. We skip inbox access in this recording.
+00:02:18,509 --> 00:02:24,064
+the evidence and check what information was exposed before choosing your response. Keep important
 
 27
-00:02:45,284 --> 00:02:52,300
-After confirmation, check that Email alerts are on and send a test. Accepted means the sending
+00:02:24,064 --> 00:02:29,619
+account passwords unique and turn on stronger sign-in protection where available. You can pause
 
 28
-00:02:52,300 --> 00:02:58,001
-service accepted the email. Check your inbox and spam folder to confirm delivery.
+00:02:29,619 --> 00:02:33,190
+a monitor and return later to review its schedule.
 
 29
-00:02:59,301 --> 00:03:06,592
-Open Identity protection and add a monitoring target. You can watch an email address, full name,
+00:02:34,184 --> 00:02:39,780
+Open Websites and add the public address of a site you own or manage.
 
 30
-00:03:06,592 --> 00:03:13,883
-username, company, or domain. Add only your own identity or one you are authorized to represent.
+00:02:39,780 --> 00:02:45,377
+Watch checks public website signals. Investigate adds bounded evidence gathering when something needs attention.
 
 31
-00:03:15,183 --> 00:03:21,211
-Enter the address and read the ownership consent. Public leak-post search has a separate opt-in
+00:02:45,377 --> 00:02:50,973
+Handle adds supported recovery for an eligible connected website Worker, using a healthy version
 
 32
-00:03:21,211 --> 00:03:27,640
-because it sends the target to that search provider. Here, we leave that optional search off.
+00:02:50,973 --> 00:02:56,569
+you explicitly approved. Start with the mode you need and review the saved target.
 
 33
-00:03:28,940 --> 00:03:35,118
-Choose Verify and protect this address, then confirm address ownership through the email link. A
+00:02:56,569 --> 00:03:02,166
+Check the latest result, recorded time and next scheduled check. Open the evidence when
 
 34
-00:03:35,118 --> 00:03:41,708
-saved target is not the same as a completed source check. Check its status and coverage.
+00:03:02,166 --> 00:03:07,762
+a result needs attention. An incomplete check is a gap to review. Cloud checks
 
 35
-00:03:43,008 --> 00:03:48,673
-After verification, new leads appear under Findings, attribution and activity. This sample notice
+00:03:07,762 --> 00:03:12,559
+continue with your browser closed, within the configured schedule and plan allowance.
 
 36
-00:03:48,673 --> 00:03:56,080
-demonstrates the review screen. An exact mention is a lead to investigate; it does not establish a
+00:03:13,515 --> 00:03:19,125
+Open Chat to ask Garrett about a concern in plain English. Keep follow-up questions
 
 37
-00:03:56,080 --> 00:03:58,259
-breach or who caused it.
+00:03:19,125 --> 00:03:24,736
+in the same saved conversation and inspect the evidence behind the answer. In Email
 
 38
-00:03:59,559 --> 00:04:05,771
-Review the containment checklist and removal-request draft. Use official service channels to change
+00:03:24,736 --> 00:03:30,346
+updates, review your address, confirmation status and notification preferences. Send a test when available,
 
 39
-00:04:05,771 --> 00:04:11,983
-passwords, revoke sessions, or request removal. Record actions you actually completed. Garrett can
+00:03:30,346 --> 00:03:35,956
+then check your inbox and spam folder. An accepted send is not proof of
 
 40
-00:04:11,983 --> 00:04:18,195
-recheck sources, but a missing mention does not prove every copy was erased.
+00:03:35,956 --> 00:03:41,566
+inbox delivery. Open Plan and settings to review your subscription, usage and billing controls.
 
 41
-00:04:19,495 --> 00:04:26,495
-Open Agent tasks and create a runtime task. Tater-tot is Garrett’s persistent work cycle: recall
+00:03:41,566 --> 00:03:47,177
+Each monitor or case has its own pause control. Cancelling future renewals is managed
 
 42
-00:04:26,495 --> 00:04:33,496
-useful context, choose an allowed action, inspect the result, measure progress, and remember what it
+00:03:47,177 --> 00:03:52,787
+in Billing. Return to Help for plan details and the walkthrough for the task
 
 43
-00:04:33,496 --> 00:04:33,962
-learned.
-
-44
-00:04:35,262 --> 00:04:42,753
-Ask for a report supported by evidence. For example: review my saved website findings and assets,
-
-45
-00:04:42,753 --> 00:04:48,839
-explain what needs attention, and separate confirmed observations from unanswered questions. The task
-
-46
-00:04:48,839 --> 00:04:52,584
-tools define which saved evidence it may read.
-
-47
-00:04:53,884 --> 00:05:00,438
-Save the task. Automatic work normally advances one step per five-minute heartbeat. You can leave
-
-48
-00:05:00,438 --> 00:05:07,866
-this page. For the next example, we advance the sample task so you can see each stage.
-
-49
-00:05:09,166 --> 00:05:16,706
-Open the task context. The sample cycle chooses a findings tool, records the intent before execution,
-
-50
-00:05:16,706 --> 00:05:23,303
-and saves the returned evidence. A separate measurement step assesses what that evidence supports.
-
-51
-00:05:24,603 --> 00:05:31,601
-Expand Observed tool evidence. This is where you check the actual result behind a summary. A tool
-
-52
-00:05:31,601 --> 00:05:36,541
-error, missing source, or old observation should remain visible as a gap.
-
-53
-00:05:37,841 --> 00:05:44,667
-Open Extended memory. Owner notes and useful observations stay with this agent context. The next
-
-54
-00:05:44,667 --> 00:05:48,763
-iteration can recall them instead of beginning from scratch.
-
-55
-00:05:50,063 --> 00:05:56,336
-Save a short memory note about your priorities, expected evidence, and existing approval boundaries.
-
-56
-00:05:56,336 --> 00:06:01,266
-Notes guide the work; they do not expand the agent’s permissions.
-
-57
-00:06:02,566 --> 00:06:10,106
-You remain in control. Pause task stops its scheduled progress. Pausing this task does not pause
-
-58
-00:06:10,106 --> 00:06:14,818
-separate website or identity monitors; those have their own controls.
-
-59
-00:06:16,118 --> 00:06:23,345
-The saved priorities are still here after the pause. Memory is useful context, not independent proof.
-
-60
-00:06:23,345 --> 00:06:28,765
-Check the source and timestamp before treating a saved observation as current.
-
-61
-00:06:30,065 --> 00:06:37,491
-Resume the task when you are ready. In this sample, a second evidence step leads to owner review.
-
-62
-00:06:37,491 --> 00:06:44,505
-Tasks also stop at their limits or after repeated lack of progress. More activity alone is not
-
-63
-00:06:44,505 --> 00:06:44,917
-success.
-
-64
-00:06:46,217 --> 00:06:52,873
-Here is a shortened, scripted incident replay. A newer deployment repeatedly returns server errors.
-
-65
-00:06:52,873 --> 00:07:00,003
-The healthy version was already approved, so the sample recovery restores that version and schedules
-
-66
-00:07:00,003 --> 00:07:00,954
-follow-up checks.
-
-67
-00:07:02,254 --> 00:07:08,958
-Open Evidence and activity, then Agent memory and evidence. Review the observations, chosen actions,
-
-68
-00:07:08,958 --> 00:07:15,661
-recovery receipt, and remaining uncertainty. This is how you inspect what the operator did.
-
-69
-00:07:16,961 --> 00:07:23,586
-The sample follow-up probes returned HTTP two hundred and the expected text. That supports recovered
-
-70
-00:07:23,586 --> 00:07:30,653
-availability at that time. It does not establish attribution or prove that an intruder was removed.
-
-71
-00:07:31,953 --> 00:07:38,306
-Live activity brings tool starts, returned results, measurements, and updates together. Filters help
-
-72
-00:07:38,306 --> 00:07:46,615
-you focus. Reading these saved logs does not itself wake the agent container or invoke the model.
-
-73
-00:07:47,915 --> 00:07:54,773
-Open Chat and choose the website, task, or general workspace you want to discuss. Shared contexts
-
-74
-00:07:54,773 --> 00:07:58,202
-keep the conversation attached to the relevant evidence.
-
-75
-00:07:59,502 --> 00:08:05,587
-A useful question is: explain the latest evidence, what you checked, what changed, and what still
-
-76
-00:08:05,587 --> 00:08:10,530
-needs my attention. You do not need to know tool names to ask.
-
-77
-00:08:11,830 --> 00:08:18,320
-The sample answer explains the recorded retest and the next useful owner actions. It distinguishes
-
-78
-00:08:18,320 --> 00:08:24,377
-saved evidence from a new live check. Ask for observation times and unresolved gaps.
-
-79
-00:08:25,677 --> 00:08:32,732
-Workspace details explains the workflow and offers task controls. Chat uses read-only evidence tools.
-
-80
-00:08:32,732 --> 00:08:39,788
-Starting a task or changing protection settings is a deliberate action; conversation does not
-
-81
-00:08:39,788 --> 00:08:41,803
-silently broaden recovery approval.
-
-82
-00:08:43,103 --> 00:08:50,210
-You can also connect NL-Veil or another MCP client with an instance URL and key. The documentation
-
-83
-00:08:50,210 --> 00:08:56,480
-describes the one hundred and sixty-six tool catalog. Dashboard protection works without an API key
-
-84
-00:08:56,480 --> 00:08:58,570
-or an open AI app.
-
-85
-00:08:59,870 --> 00:09:07,011
-Before leaving, confirm the correct website and mode, a recent check, the next scheduled wake,
-
-86
-00:09:07,011 --> 00:09:13,676
-verified email alerts, and the identity targets you intended to watch. Review any source-coverage
-
-87
-00:09:13,676 --> 00:09:14,152
-gaps.
-
-88
-00:09:15,452 --> 00:09:23,247
-Pause a website here when you want its checks to stop. The card shows that the next wake is paused.
-
-89
-00:09:23,247 --> 00:09:27,144
-Use the corresponding controls for identity monitors and agent tasks.
-
-90
-00:09:28,444 --> 00:09:35,537
-Resume and confirm the next wake. Your computer can be off while enabled cloud checks continue within
-
-91
-00:09:35,537 --> 00:09:41,796
-your plan and allowances. Garrett protects configured websites and digital identities; it is not a
-
-92
-00:09:41,796 --> 00:09:45,551
-device-wide firewall or a guarantee of complete internet coverage.
+00:03:52,787 --> 00:03:54,390
+you want to complete.
