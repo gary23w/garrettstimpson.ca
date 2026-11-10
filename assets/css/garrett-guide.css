@@ -4,4 +4,7 @@
 .post-content .guide-chapters time{color:var(--green);font-size:11px;flex-shrink:0}
 .post-content .guide-downloads{font-size:12px}
 .post-content .garrett-walkthrough{scroll-margin-top:90px}
+.post-content .guide-plan-table{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;margin:24px 0}
+.post-content .guide-plan-table:focus-visible{outline:2px solid var(--green);outline-offset:4px}
+.post-content .guide-plan-table table{min-width:620px;margin:0}
 @media(max-width:620px){.post-content .guide-chapters{grid-template-columns:1fr}}

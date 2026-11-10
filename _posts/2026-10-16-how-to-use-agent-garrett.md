@@ -29,12 +29,16 @@ Start with the concern you want help with. Agent Garrett brings data removal, ex
 
 **Agent at CAD $4.99/month is the starting point for automatic protection.** It includes the recurring protection workflows, rather than requiring you to ask for every check in chat. Security and Max keep those protection features with larger allowances. Chat is for on-demand help.
 
+<div class="guide-plan-table" role="region" aria-label="Subscription comparison" tabindex="0" markdown="1">
+
 | Plan | Monthly price | Best starting point | Scheduled protection |
 | --- | --- | --- | --- |
 | **Agent** | **CAD $4.99** | Everyday automatic protection, broker removal, monitoring, private cases and updates | Included |
 | Chat | CAD $2.99 | Questions and on-demand investigations in dashboard chat | Requires Agent or another protection plan |
 | Security | CAD $13.37 | Professional security research and MCP/API delegation with more capacity | Included |
 | Max | CAD $35 | Agent protection with larger allowances for ongoing work | Included |
+
+</div>
 
 Prices are billed monthly. Taxes may apply. Account creation is free; paid features start after payment is confirmed. Cancel future renewals in Billing.
 
