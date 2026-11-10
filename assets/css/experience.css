@@ -71,6 +71,6 @@ div.highlight > pre, figure.highlight > pre, pre.highlight { padding-top: 52px !
 @media (prefers-reduced-motion:reduce) {
   html { scroll-behavior: auto !important; }
   #matrix-canvas { display: none !important; }
-  .site-title::after, .hero-cmd::after { animation: none !important; }
+  .hero-cmd::after { animation: none !important; }
   .skip-link, .share-btn, .research-button, .code-copy { transition: none !important; }
 }

@@ -97,7 +97,7 @@ body {
   align-items: center !important;
   justify-content: space-between !important;
   padding: 14px 24px !important;
-  max-width: 900px !important;
+  max-width: 1200px !important;
 }
 
 .site-title,
@@ -112,16 +112,7 @@ body {
   position: relative !important;
 }
 
-/* Blinking cursor after site title */
-.site-title::after {
-  content: '█';
-  animation: blink 1.1s step-end infinite;
-  margin-left: 4px;
-  font-size: 14px;
-  opacity: 0.8;
-  color: var(--green);
-}
-
+/* The terminal intro keeps its blinking command cursor. */
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0; }
@@ -233,7 +224,7 @@ body {
 }
 
 .wrapper {
-  max-width: 900px !important;
+  max-width: 1200px !important;
   margin: 0 auto !important;
   padding: 0 24px !important;
 }
@@ -793,9 +784,9 @@ h2.hero-meta { font-size: inherit !important; font-weight: 400 !important; margi
   padding: 2px 9px !important; background: var(--green-glow) !important; letter-spacing: 0.03em !important;
 }
 @media screen and (max-width: 600px) {
-  .home .hero { padding: 22px 16px !important; }
+  .home .hero { padding: 22px 14px !important; }
   .hero-title { font-size: 1.5em !important; }
-  .post-card-link { padding: 15px 16px !important; }
+  .post-card-link { padding: 16px 14px !important; }
 }
 
 /* ============================================================
@@ -970,7 +961,7 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   border: 1px solid var(--border) !important; border-left: 4px solid var(--green) !important;
   border-radius: 7px !important; box-shadow: 0 0 26px rgba(0,239,114,0.06) !important;
 }
-.mcp-page { max-width: 900px !important; margin: 0 auto !important; }
+.mcp-page { max-width: 1200px !important; margin: 0 auto !important; }
 .mcp-page table {
   width: 100% !important;
   margin: 1.8em 0 !important;
@@ -1145,3 +1136,50 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
    ============================================================ */
 .post-list > .post-card:nth-child(n+4) { content-visibility: auto; contain-intrinsic-size: auto 210px; }
 ul.tag-posts { content-visibility: auto; contain-intrinsic-size: auto 90px; }
+
+/* One outer gutter across feeds, articles, guides and navigation. */
+:root { --site-gutter: 24px; }
+.wrapper, .site-header .wrapper {
+  width: 100% !important;
+  padding-left: max(var(--site-gutter), env(safe-area-inset-left)) !important;
+  padding-right: max(var(--site-gutter), env(safe-area-inset-right)) !important;
+}
+.site-title { min-width: 0; white-space: nowrap; }
+.site-header .wrapper { gap: 12px; }
+.home, .post, .post-content, .mcp-page, .post-card-link { min-width: 0; }
+.post-content { overflow-wrap: anywhere; }
+.post-content :is(p,li) { max-width: 88ch; }
+.post-content :is(pre, .highlight, .table-scroll) { max-width: 100%; min-width: 0; }
+.post-content pre { overflow-x: auto; overflow-wrap: normal; }
+.post-content > figure { margin-inline: 0; }
+.post-content :is(video,iframe) { max-width: 100%; }
+.post-content :is(ul,ol) { margin-left: 0 !important; }
+.post-toc { max-width: 100%; }
+.post-card-meta, .post-meta, .post-tags { min-width: 0; flex-wrap: wrap !important; }
+.post-card-title, .post-title, .tag { overflow-wrap: anywhere; }
+.hero-cta, .removal-ad-cta { box-sizing: border-box; max-width: 100%; min-height: 48px; text-align: center; white-space: normal; }
+.pagination { flex-wrap: wrap !important; }
+.pagination :is(a,span) { min-height: 44px; display: inline-flex; align-items: center; }
+.footer-col-wrapper { width: 100%; margin-left: 0 !important; }
+.footer-col { width: 100%; margin-bottom: 0; }
+@media screen and (max-width: 700px) {
+  :root { --site-gutter: 12px; }
+  .page-content { padding: 28px 0 !important; }
+  .home .hero { padding: 22px 14px !important; }
+  .post-card-link { padding: 16px 14px !important; }
+  .post-toc { padding: 16px 14px !important; }
+  .post-content blockquote { padding: 14px !important; }
+  .post-content :is(ul,ol) { padding-left: 20px !important; }
+  .post-content table :is(th,td) { padding: 10px !important; }
+  .post-nav-link { min-width: 0 !important; }
+  .mcp-hero, .mcp-card { padding: 20px 14px !important; }
+  .tag-posts li { flex-wrap: wrap !important; gap: 2px 12px !important; padding-block: 10px !important; }
+  .tag-posts .tag-post-date { flex-basis: 100%; }
+  .removal-ad { padding: 18px 14px !important; }
+  .removal-ad-actions { align-items: stretch; }
+  .removal-ad-cta { display: inline-flex !important; align-items: center; justify-content: center; }
+}
+@media screen and (max-width: 360px) {
+  .site-title, .site-title:visited { font-size: 14px !important; letter-spacing: .025em !important; }
+  .hero-cta, .removal-ad-cta { width: 100%; }
+}
