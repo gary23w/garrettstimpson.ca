@@ -957,7 +957,7 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
   box-shadow: 0 0 18px var(--green-glow) !important; transition: transform .15s, box-shadow .15s !important;
 }
 .hero-cta:hover { transform: translateY(-2px) !important; box-shadow: 0 4px 26px rgba(0,239,114,0.5) !important; }
-.hero-scan-link { display: inline-flex !important; align-items: center; min-height: 44px; margin: 12px 0 0 15px; color: var(--green) !important; font-size: 13px; font-weight: 700; text-decoration: underline !important; text-underline-offset: 4px; }
+.hero-scan-link { display: inline-flex !important; align-items: center; min-height: 44px; margin: 12px 0 0 15px; color: var(--green) !important; font-size: 13px; font-weight: 700; text-decoration: none !important; border-bottom: 0 !important; }
 @media screen and (max-width: 480px) { .hero-scan-link { margin-left: 0; display: flex !important; } }
 .hero-community { margin: 22px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.8; max-width: 640px; }
 
