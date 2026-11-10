@@ -1067,9 +1067,9 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
    ============================================================ */
 .removal-ad {
   display: grid !important;
-  grid-template-columns: minmax(0, 1fr) 130px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center !important;
-  gap: 12px 20px;
+  gap: 12px;
   margin: 26px 0 !important;
   padding: 22px !important;
   overflow: hidden;
@@ -1085,13 +1085,14 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 .removal-ad .removal-ad-description,
 .post-list .removal-ad .removal-ad-description,
 .post-content .removal-ad .removal-ad-description { margin: 0 !important; color: #b7cabc !important; font-size: 13px !important; line-height: 1.65 !important; }
-.removal-ad > .removal-ad-art,
-.post-content .removal-ad > .removal-ad-art { display: block !important; width: 100% !important; height: auto !important; max-width: 130px !important; margin: 0 !important; border: 0 !important; box-shadow: none !important; }
-.removal-ad-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
-.removal-ad .removal-ad-cta { display: inline-flex !important; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; color: #001805 !important; background: var(--green) !important; border-radius: 3px; font-size: 12px !important; font-weight: 700; line-height: 1.4; text-decoration: none !important; }
+.removal-ad-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.removal-ad .removal-ad-cta,
+.removal-ad .removal-ad-secondary { text-decoration: none !important; border-bottom: 0 !important; text-shadow: none !important; }
+.removal-ad .removal-ad-cta { display: inline-flex !important; align-items: center; justify-content: center; min-height: 44px; padding: 10px 14px; color: #001805 !important; background: var(--green) !important; border-radius: 3px; font-size: 12px !important; font-weight: 700; line-height: 1.4; }
 .removal-ad .removal-ad-cta:hover { background: #54ff9c !important; }
 .removal-ad .removal-ad-cta:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
-.removal-ad .removal-ad-secondary { display: inline-flex !important; align-items: center; min-height: 44px; color: var(--green) !important; font-size: 12px !important; font-weight: 700; text-decoration: underline !important; text-underline-offset: 4px; }
+.removal-ad .removal-ad-secondary { display: inline-flex !important; align-items: center; min-height: 44px; color: var(--green) !important; font-size: 12px !important; font-weight: 700; }
+.removal-ad .removal-ad-secondary:hover { color: #54ff9c !important; }
 .removal-ad .removal-ad-secondary:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 .removal-ad-price { color: #c5d4c8; font-size: 12px; }
 .post-list > li.feed-ad-slot,
@@ -1100,10 +1101,8 @@ div.highlight:hover .code-copy, figure.highlight:hover .code-copy, pre.highlight
 .feed-ad-slot .removal-ad { margin: 0 !important; }
 .topic-list .feed-ad-slot { margin-bottom: 22px !important; }
 @media screen and (max-width: 480px) {
-  .removal-ad { grid-template-columns: minmax(0, 1fr) 74px; gap: 10px 12px; padding: 16px !important; }
+  .removal-ad { gap: 10px; padding: 16px !important; }
   .removal-ad .removal-ad-title { font-size: 20px !important; }
-  .removal-ad > .removal-ad-art,
-  .post-content .removal-ad > .removal-ad-art { max-width: 74px !important; }
 }
 
 /* Agent Garrett recorded demo */
