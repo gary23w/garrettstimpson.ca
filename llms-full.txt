@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-11-11T16:44:27Z
+GENERATED    : 2026-11-11T21:35:35Z
 AUTHOR       : Garrett Stimpson
 PROFILE      : Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years across offensive security, defensive operations, and security engineering.
 SITE         : https://garrettstimpson.ca
@@ -92,115 +92,77 @@ That last clause is the story. Everything else is a detail.
 
 <DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
-TITLE      : Caught Microsoft Red-Handed with Hodometer
+TITLE      : Microsoft Defender was uploading my unreleased programs
 DATE       : 2026-11-11 11:33:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/11/caught-microsoft-red-handed-with-hodometer/
 CVE        : none
 CATEGORIES : security, privacy, windows
 TAGS       : windows-11, microsoft-defender, telemetry, copilot, hodometer, sentinel, network-monitoring, blue-team
-WORD_COUNT : 1621
-EXCERPT    : Microsoft Defender uploaded my unreleased programs to Microsoft 217 times in three months. I only know because I built a tool that lets an AI watch the wire. If you compile anything on Windows, go and check yours.
+WORD_COUNT : 945
+EXCERPT    : Defender logged 217 file uploads from my PC in three months. Most were a Go test binary I kept rebuilding; others were programs I hadn't released. I found them while investigating network traffic with Hodometer.
 </FRONTMATTER>
 <BODY>
-A while back my connection started lagging for no reason I could see, with the router getting hammered by something I couldn't name. I got tired of guessing which program to blame.
+Microsoft Defender's event log recorded 217 file uploads from my PC over three months. Of those, 201 entries were for a Go test binary I kept rebuilding. Most of the other 16 were programs I'd written and hadn't released. I hadn't seen a prompt for any of them.
 
-So I pointed [Hodometer](https://github.com/gary23w/hodometer) at it.
+I found this while trying to work out why my connection was lagging. I used [Hodometer](https://github.com/gary23w/hodometer), a Windows tray tool I built to track traffic by process and destination.
 
-Hodometer is a Windows tray tool I built that shows exactly which program is sending and receiving bytes, and where they're going. I left it running for a few days and went looking for a culprit.
+Microsoft's programs accounted for 4.7 percent of downloads and 4.5 percent of uploads across about 100 hours. Most of the traffic was my browser, development tools and game patches. But Defender's uploads needed a closer look.
 
-The first thing it told me was not what I wanted to hear. Across about 100 hours, Microsoft's programs were 4.7 percent of my download and 4.5 percent of my upload. The rest was me. Browser, dev tools, game patches. Fine. Guilty.
+## Following the Defender uploads
 
-Then I looked at what was actually inside that 4.5 percent, and I stopped feeling guilty pretty quickly.
+`MpCmdRun.exe`, Defender's command-line utility, sent 224 MB to Azure storage in one day. The uploads came in bursts of around 28 MB a minute, with very little traffic coming back.
 
-## The upload that had no business being there
+The traffic was encrypted, so the network capture couldn't tell me which files were being sent. Defender's own Operational log could. Event 2050 reports:
 
-One row didn't belong. `MpCmdRun.exe`, which is Microsoft Defender, had pushed 224 MB up to Azure storage in a single day. It went in bursts of about 28 MB a minute, scattered across the day, and almost nothing came back down.
+> Microsoft Defender Antivirus has uploaded a file for further analysis
 
-Think about that for a second. Antivirus definitions are a download. This was an upload, and every burst was roughly the size of a file.
+The entries included file names and hashes. That's where the 217 uploads came from, and how I identified my own builds among them. On the busiest day, Defender logged 75 submissions.
 
-This is the bit other tools can't give you. Wireshark will happily show you ten thousand packets and not one word about which program sent them. Hodometer reads the packets off the wire and pins each one to a process, picks up the real host names from the DNS lookups and the handshakes, and will dump one program's traffic, and only that program's, to a pcapng you can keep.
+Windows' per-app data usage records put `MpCmdRun.exe` at 2.8 GB uploaded over the last 30 days, about 80 percent of this PC's uploads to Microsoft in that period. That's the process's total traffic; I can't assign all 2.8 GB to the files listed in those events.
 
-So now I had Defender, by name, shoving file-sized uploads at named Microsoft storage hosts, logged minute by minute. The contents were encrypted on the way out, which is true for any tool on earth that isn't holding Microsoft's keys. One question left: which files?
+## The default includes executable files
 
-Turns out Defender keeps a diary. Event 2050 in its own log reads, word for word, "Microsoft Defender Antivirus has uploaded a file for further analysis" and then gives you the file name and the hash.
+[Microsoft documents automatic sample submission](https://learn.microsoft.com/en-us/defender-endpoint/cloud-protection-microsoft-antivirus-sample-submission). The default is "Send safe samples automatically." Its examples of safe samples include `.bat`, `.scr`, `.dll` and `.exe` files. Here, safe means unlikely to contain personally identifiable information.
 
-I had 217 of them in three months.
+I don't consider an unreleased program a safe thing to upload just because it probably lacks personal information. I wrote it, I haven't published it, and I want to decide whether Microsoft gets a copy.
 
-201 of them were the same Go test binary, rebuilt and sent again every time my tests ran. The other 16 were mostly programs I built and haven't released. On the worst day it uploaded 75 times.
+New, unsigned binaries are a normal part of working on software. In my case, repeated builds of one test program made up almost all the submissions. I only learned about them after checking network traffic and an event log.
 
-Windows keeps its own per-app data ledger, so I could put a size on it. In the last 30 days `MpCmdRun.exe` uploaded 2.8 GB. By my adding up that's around 80 percent of everything this PC sent to Microsoft that month.
+## Copilot and the remaining telemetry
 
-The single biggest thing Microsoft got from my computer was my own work.
+The connection audit also showed Copilot activity around sign-in. Across 22 hours of records, it made connections during three hours, each corresponding to a sign-in, with 41 to 54 connections each time. I hadn't opened the app, and I couldn't find an enabled startup entry for it. I haven't established what launched it.
 
-## They wrote it down. I'm still calling it stealing.
+Copilot's monthly traffic was small: 31 MB down and 6 MB up. What bothered me was that an app I wasn't using was making connections when I signed in.
 
-I have to be fair here, and I don't enjoy it.
+I'd already disabled the main Windows telemetry service on this PC. Its records showed no upload for three months. That hadn't stopped `devicecensus.exe` from running twice in one morning, or Defender's core service from making 104 connections in 22 hours to `ecs.office.com` and `mobile.events.data.microsoft.com`. Office and OneDrive helpers also connected to the latter host, and the queued error-reporting task ran that morning.
 
-Microsoft documents this. It's called automatic sample submission, the default is "Send safe samples automatically", and their own page defines safe samples as ones "considered to not commonly contain PII data". The examples it gives are `.bat`, `.scr`, `.dll` and `.exe`. [The full table is on Microsoft Learn.](https://learn.microsoft.com/en-us/defender-endpoint/cloud-protection-microsoft-antivirus-sample-submission)
+Those records show which programs connected and where. They don't reveal the contents of encrypted requests. The traffic was also a tiny part of the total: in a separate 15-minute capture, Microsoft destinations accounted for 0.9 MB out of 343 MB. Disabling that one service clearly hadn't stopped the other components from communicating.
 
-If you write software, read that list twice. An `.exe` is a "safe sample." To Microsoft that means there's probably no personal data in it. To me it means the thing I've been building all month.
+## How I used Hodometer
 
-Nobody asked me. I never saw a prompt. The only record I could find is an event log that practically nobody opens. And the worst part is how well it fits: a brand new unsigned binary is exactly what a cloud antivirus is hungry for, and a compiler spits one out every few minutes. For most people that default is harmless. For a developer it's a hose pointed straight at the build folder.
+An AI agent did most of the digging. I approved it as a client on Hodometer's local socket, where it could read process history, inspect connections and capture packets. It picked out Defender's upload, then read the Windows event log to identify the files.
 
-You can call that whatever you like. I call it taking my work without asking, and the switch that did it is the Windows default, so if you build anything on a Windows machine, it's very likely doing it to you as well.
+That's why I built the socket interface: I wanted an agent to have access to the traffic data instead of needing me to copy it out of a window. The [Sentinel design](https://github.com/gary23w/hodometer/blob/main/SENTINEL.md) in the same repository describes using it for continuous monitoring.
 
-## Copilot let itself in
+## Check your own machine
 
-The second catch came from the Windows connection audit log, which Hodometer keeps switched on for you. Every connection, stamped with the program that made it.
-
-Over 22 hours the Copilot desktop app was awake in exactly three of them. Those were the three hours I signed in. Each time it made between 41 and 54 connections to Microsoft before I'd touched a thing. I never opened it, and when I went looking for an enabled startup entry I couldn't find one.
-
-It hardly moved any data, 31 MB down and 6 MB up over a month. I don't care about the megabytes. An app I don't use was getting up every time I sat down and phoning home, and I'd never have known.
-
-## "Telemetry off" turns off one thing
-
-I'd already killed the main Windows telemetry service on this box. Its own records say the last upload was three months ago. Job done, I thought.
-
-Not even close. With that service dead, `devicecensus.exe` still ran twice in one morning. Defender's core service made 104 connections in 22 hours to `ecs.office.com` and `mobile.events.data.microsoft.com`, which is a telemetry intake. Office and OneDrive helpers were hitting the same intake. The task that uploads queued error reports ran that morning too.
-
-None of it is big. In a 15 minute live recording, everything headed to Microsoft came to 0.9 MB out of 343 MB. But I turned off the thing with "telemetry" in its name and found four more doing a version of the same job. That's the game.
-
-## Why Hodometer exists: so an AI can see
-
-Here's the part I care about most.
-
-I didn't catch any of this by squinting at a table all week. Hodometer has a local socket that streams everything it sees as JSON, to programs I've explicitly allowed and nothing else, and it takes orders back: list the processes, inspect this one, watch its handshakes, capture its packets, kill it, block it.
-
-That socket is the whole reason the tool exists. I wanted an AI to be able to truly see what Microsoft is up to on my own machine, with the same view I've got.
-
-So for this one I put an AI agent on the socket and told it to work out what was eating my bandwidth. It pulled the per-process history, picked out the Defender upload, and went and read the event log. I got the answer handed to me.
-
-Sentinel is the always-on version of that, and the design ships in the same repo. A plain daemon follows the entire stream and scores every process. A coordinator reviews every program that reaches the internet. Investigators hook the suspicious ones, dig through their packets, and can block or kill a harmful process tree under hard limits.
-
-Hodometer is the eyes and Sentinel is the thing behind them that never looks away. Put the two together and Windows doesn't get to do things quietly on your machine any more.
-
-## Go catch them yourself
-
-Don't take my word for it. Run it.
-
-Grab `Hodometer.exe` from the [releases page](https://github.com/gary23w/hodometer/releases). It's one native executable, and the source is a single C file in the same repo if you'd rather read it before you run it. It needs admin, because it reads the kernel's own network events.
-
-Leave it in the tray and get on with your day. Build something, run your tests. Then open the window and find `MpCmdRun.exe` in the process table. If it's showing megabytes going out to a `blob.core.windows.net` host, you're looking at exactly what I was looking at.
-
-You don't have to babysit it either. It throws a tray alert when upload spikes past a threshold you set, and logs which programs did it.
-
-Double-click the row for the Inspector. Every connection that one process has made, the host on the other end, how much went each way, and its packets decoded live as they go by: TLS hellos with the server name, DNS lookups, plain HTTP requests, QUIC. One button captures 30 seconds of just that program's traffic to a pcapng, so you've got evidence you can open in Wireshark and put in front of someone. And if you find a program you don't want talking at all, you can kill it or block it at the Windows Firewall right there.
-
-Once Hodometer has shown you the upload, make Defender tell you which files it took:
+You can check Defender's upload log without installing Hodometer. This PowerShell command shows Event 2050 entries from the last 90 days:
 
 ```powershell
 Get-WinEvent -FilterHashtable @{
-  LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 2050
-} | Select-Object TimeCreated, Message
+    LogName = 'Microsoft-Windows-Windows Defender/Operational'
+    Id = 2050
+    StartTime = (Get-Date).AddDays(-90)
+} | Select-Object TimeCreated, Message | Format-List
 ```
 
-If file names you recognise scroll past, it has your work too.
+Check the file paths in those messages. That's how I found my builds.
 
-The switch is in Windows Security under Virus & threat protection settings, and it's called Automatic sample submission. Know what it costs before you flip it: Microsoft says turning it off also turns off block at first sight, and that metadata about detections gets sent regardless. On a machine that builds unreleased software I think that's a trade worth making. On the family laptop I'd probably leave it.
+To watch the traffic, download `Hodometer.exe` from the [releases page](https://github.com/gary23w/hodometer/releases) and run it as administrator. Find `MpCmdRun.exe` in the process table and double-click it to inspect its connections. You can export a capture of that process's packets as pcapng for Wireshark. An Azure storage connection alone doesn't identify a sample upload; check it against the Defender events.
 
-Then leave Hodometer running. I only found any of this because one number in a table looked wrong.
+The relevant setting is **Automatic sample submission**, under **Windows Security → Virus & threat protection → Manage settings**. Microsoft's documentation says disabling it also disables block at first sight based on sample analysis. Detection metadata is still sent, so turning it off doesn't stop all communication with Microsoft, and you lose that part of Defender's protection.
 
-Garrett
+On a machine where I'm building unreleased software, I want a prompt before those files leave the PC.
 </BODY>
 </DOCUMENT>
 
@@ -13622,5 +13584,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 93 documents — 2026-11-11T16:44:27Z
+END OF CORPUS — 93 documents — 2026-11-11T21:35:35Z
 ================================================================================
