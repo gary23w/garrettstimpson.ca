@@ -56,6 +56,7 @@ div.highlight > pre, figure.highlight > pre, pre.highlight { padding-top: 52px !
 
 @media (max-width:800px) {
   .site-nav .nav-toggle { min-height: 44px !important; }
+  .site-nav .page-link { margin: 0 !important; text-align: left; }
   .site-nav .trigger { right: 16px !important; top: calc(100% + 8px) !important; width: min(280px,calc(100vw - 32px)); min-width: 0 !important; max-height: calc(100dvh - 100px); overflow-y: auto; overscroll-behavior: contain; }
 }
 @media (max-width:480px) {
@@ -70,7 +71,7 @@ div.highlight > pre, figure.highlight > pre, pre.highlight { padding-top: 52px !
 }
 @media (prefers-reduced-motion:reduce) {
   html { scroll-behavior: auto !important; }
-  #matrix-canvas { display: none !important; }
+  #digital-storm { display: none !important; }
   .hero-cmd::after { animation: none !important; }
   .skip-link, .share-btn, .research-button, .code-copy { transition: none !important; }
 }

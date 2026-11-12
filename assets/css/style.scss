@@ -696,18 +696,8 @@ table tr:nth-child(even),
   border-bottom: 1px solid var(--green) !important;
 }
 
-/* ============================================================
-   MATRIX RAIN CANVAS  (injected by default.html)
-   ============================================================ */
-#matrix-canvas {
-  position: fixed !important;
-  top: 0; left: 0 !important;
-  width: 100%; height: 100% !important;
-  z-index: -1 !important;
-  opacity: 0.18 !important;
-  filter: hue-rotate(14deg);
-  pointer-events: none !important;
-}
+/* Three.js digital weather, sharing the current blog palette. */
+@import "digital-storm";
 
 /* ============================================================
    UTILITY — CVE / SEVERITY BADGES

@@ -28,8 +28,7 @@
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
   <div id="read-progress" aria-hidden="true"></div>
-  <!-- Matrix rain canvas background -->
-  <canvas id="matrix-canvas" aria-hidden="true"></canvas>
+  {%- include digital-storm.html -%}
 
   <!-- ============ HEADER ============ -->
   <header class="site-header" role="banner">
@@ -111,59 +110,7 @@
     </div>
   </footer>
 
-  <!-- ============ MATRIX RAIN ============ -->
-  <script>
-  (function() {
-    var canvas = document.getElementById('matrix-canvas');
-    if (!canvas) return;
-    var ctx = canvas.getContext('2d');
-    var cols, drops, animId;
-    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    var nameDrop = 'Garrett Stimpson';
-
-    function resize() {
-      canvas.width  = window.innerWidth;
-      canvas.height = window.innerHeight;
-      cols  = Math.floor(canvas.width / 16);
-      drops = Array(cols).fill(1);
-    }
-
-    function draw() {
-      if (document.hidden || (reduceMotion && reduceMotion.matches)) { animId = null; return; }
-      ctx.fillStyle = 'rgba(0,0,0,0.05)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#00ff41';
-      ctx.font = '13px monospace';
-      for (var i = 0; i < drops.length; i++) {
-        var useNameDrop = Math.random() < 0.0025;
-        var token = useNameDrop ? nameDrop : chars[Math.floor(Math.random() * chars.length)];
-        ctx.fillText(token, i * 16, drops[i] * 16);
-        if (drops[i] * 16 > canvas.height && Math.random() > 0.975) drops[i] = 0;
-        drops[i]++;
-      }
-      animId = requestAnimationFrame(draw);
-    }
-
-    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
-
-    resize();
-    draw();
-    window.addEventListener('resize', function() {
-      cancelAnimationFrame(animId);
-      resize();
-      draw();
-    });
-    document.addEventListener('visibilitychange', function() {
-      cancelAnimationFrame(animId);
-      if (!document.hidden) draw();
-    });
-    if (reduceMotion) reduceMotion.addEventListener('change', function() {
-      cancelAnimationFrame(animId);
-      if (reduceMotion.matches) ctx.clearRect(0, 0, canvas.width, canvas.height);
-      else { resize(); draw(); }
-    });
-  })();
-  </script>
+  <script type="module" src="{{ '/assets/js/digital-storm.js' | relative_url }}?v={{ site.time | date: '%s' }}"></script>
 
   <!-- Reading progress -->
   <script>
