@@ -43,7 +43,7 @@ async function startStorm() {
     uWind: { value: 0 },
     uAspectScale: { value: 1 },
     uRainColor: { value: themeColor('--green', '#00ef72') },
-    uLightningColor: { value: themeColor('--blue-accent', '#7eb7ff') },
+    uLightningColor: { value: themeColor('--green-bright', '#09f77b') },
     uWhite: { value: themeColor('--heading', '#f3f7f1') },
   };
   let time = 12;
@@ -52,7 +52,7 @@ async function startStorm() {
   let frameId = 0;
   let previousFrame = 0;
   let lastStrike = -100;
-  let nextStrike = time + rand(8, 16);
+  let nextStrike = time + rand(4, 7);
   let flash = 0;
   let slowFrames = 0;
 
@@ -86,7 +86,6 @@ async function startStorm() {
       float halo = exp(-length((vUv-uStrike)*vec2(1.1, 1.))*4.);
       vec3 col = uRainColor * (.001 + .018 * cloud * bank);
       col += uLightningColor * .3 * uFlash * (cloud * .65 + .35) * halo;
-      col += uRainColor * .009 * exp(-abs(vUv.y-.22)*7.);
       col *= 1. - .5 * length(vUv-.5);
       gl_FragColor = vec4(col, 1.);
     }`, { depthTest: false, depthWrite: false }));
@@ -148,7 +147,7 @@ async function startStorm() {
     attribute vec2 aToken;
     uniform float uTime, uWind, uAspectScale;
     varying vec2 vUv;
-    varying float vTail, vSeed, vDepth, vY;
+    varying float vTail, vSeed, vDepth;
     void main() {
       float head = 24. - mod(uTime * aMotion.x + aMotion.y, 42.);
       float tail = aToken.x / aMotion.w;
@@ -162,16 +161,15 @@ async function startStorm() {
       gl_Position = projectionMatrix * mv;
       vUv = uv; vTail = tail; vSeed = aToken.y;
       vDepth = clamp(1. - (-aOrigin.z + 6.) / 85., .16, 1.);
-      vY = p.y;
     }`, `
     uniform sampler2D uAtlas;
     uniform float uTime, uFlash;
     uniform vec3 uRainColor, uLightningColor, uWhite;
     varying vec2 vUv;
-    varying float vTail, vSeed, vDepth, vY;
+    varying float vTail, vSeed, vDepth;
     float hash(float n) { return fract(sin(n)*43758.5453); }
     void main() {
-      if (vTail > 1. || vY < -7.8) discard;
+      if (vTail > 1.) discard;
       float character = floor(hash(vSeed + floor(uTime * (2. + hash(vSeed)*5.))) * 64.);
       vec2 cell = vec2(mod(character,16.), floor(character/16.));
       vec2 at = vec2((cell.x+vUv.x)/16., 1.-(cell.y+1.-vUv.y)/4.);
@@ -208,7 +206,7 @@ async function startStorm() {
       mv.xy += position.xy * vec2(.014,aMotion.z);
       gl_Position = projectionMatrix * mv;
       vUv = uv;
-      vAlpha = aMotion.w * smoothstep(-9.,-6.,p.y) * clamp(1.-(-p.z+10.)/75.,.1,1.);
+      vAlpha = aMotion.w * clamp(1.-(-p.z+10.)/75.,.1,1.);
     }`, `
     varying vec2 vUv; varying float vAlpha; uniform float uFlash;
     uniform vec3 uRainColor, uLightningColor;
@@ -219,37 +217,11 @@ async function startStorm() {
   streaks.frustumCulled = false;
   scene.add(streaks);
 
-  // A wet ground plane: perspective grid, pooled light and expanding drop impacts.
-  const floor = new THREE.Mesh(track(new THREE.PlaneGeometry(130, 100)), shaderMaterial(`
-    varying vec2 vWorld;
-    void main() { vec4 p=modelMatrix*vec4(position,1.); vWorld=p.xz; gl_Position=projectionMatrix*viewMatrix*p; }`, `
-    varying vec2 vWorld; uniform float uTime,uFlash;
-    uniform vec3 uRainColor, uLightningColor;
-    float hash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
-    void main() {
-      vec2 p=vWorld;
-      vec2 cell=floor(p/3.);
-      float seed=hash(cell);
-      vec2 center=(cell+vec2(hash(cell+4.),hash(cell+9.)))*3.;
-      float life=fract(uTime*(.45+seed*.35)+seed*14.);
-      float dist=length(p-center);
-      float ripple=exp(-abs(dist-life*1.45)*55.)*pow(1.-life,2.);
-      vec2 g=abs(fract(p*.32-.5)-.5)/max(fwidth(p*.32),vec2(.001));
-      float grid=1.-min(min(g.x,g.y),1.);
-      float fog=exp(-length(p-vec2(0.,10.))*.038);
-      float shimmer=pow(.5+.5*sin(p.y*2.+sin(p.x*4.)*.4+uTime),16.);
-      vec3 color=uRainColor*.16*(grid*.27+ripple*.85)*fog;
-      color+=uLightningColor*.2*shimmer*fog*(.025+uFlash*.25);
-      gl_FragColor=vec4(color,clamp(fog*.8,0.,.85));
-    }`, { transparent: true, depthWrite: false, side: THREE.DoubleSide }));
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.set(0, -8, -20);
-  scene.add(floor);
-
-  // Forked lightning is actual 3D geometry with a broad halo and a narrow white core.
+  // Mint-green cores and a wider green halo keep the lightning clear in the margins.
   const bolts = new THREE.Group();
   scene.add(bolts);
-  const boltMaterial = track(new THREE.MeshBasicMaterial({ color: uniforms.uWhite.value, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  const boltColor = uniforms.uLightningColor.value.clone().lerp(uniforms.uWhite.value, .38);
+  const boltMaterial = track(new THREE.MeshBasicMaterial({ color: boltColor, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
   const glowMaterial = track(new THREE.MeshBasicMaterial({ color: uniforms.uLightningColor.value, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
   function boltPath(start, end, jitter, steps = 17) {
     const points = [start];
@@ -265,7 +237,7 @@ async function startStorm() {
   function addBolt(points, thickness) {
     const path = new THREE.CurvePath();
     for (let i = 1; i < points.length; i++) path.add(new THREE.LineCurve3(points[i-1], points[i]));
-    for (const [radius, material] of [[thickness, boltMaterial], [thickness * 5, glowMaterial]]) {
+    for (const [radius, material] of [[thickness, boltMaterial], [thickness * 7, glowMaterial]]) {
       const geometry = new THREE.TubeGeometry(path, points.length * 2, radius, 4, false);
       bolts.add(new THREE.Mesh(geometry, material));
     }
@@ -277,17 +249,17 @@ async function startStorm() {
     if (contextLost || motionPreference.matches) return;
     clearBolts();
     const side = Math.random() > .5 ? 1 : -1;
-    const halfWidth = Math.tan(24*Math.PI/180)*38*camera.aspect;
-    const x = side * rand(halfWidth*.38, halfWidth*.8);
-    const points = boltPath(new THREE.Vector3(x, 20, -15), new THREE.Vector3(x+rand(-5,5), -7.8, -12), 1.1, 24);
-    addBolt(points, .04);
+    const halfWidth = Math.tan(24*Math.PI/180)*41*camera.aspect;
+    const x = side * rand(halfWidth*.88, halfWidth*.96);
+    const points = boltPath(new THREE.Vector3(x, 20, -15), new THREE.Vector3(x+rand(-1.6,1.6), -18, -15), .85, 24);
+    addBolt(points, .065);
     for (const index of [5, 9, 14]) {
       const start = points[index];
-      addBolt(boltPath(start, start.clone().add(new THREE.Vector3(side*rand(3,6), -rand(3,7), 0)), .6, 8), .009);
+      addBolt(boltPath(start, start.clone().add(new THREE.Vector3(-side*rand(2.5,5), -rand(3,7), 0)), .6, 8), .018);
     }
     lastStrike = time;
     nextStrike = time + rand(18, 34);
-    uniforms.uStrike.value.set(.5 + x / 70, .75);
+    uniforms.uStrike.value.set(.5 + side*.45, .75);
   }
   function draw() {
     uniforms.uTime.value = time;
@@ -307,10 +279,11 @@ async function startStorm() {
     time += delta;
     if (!motionPreference.matches && time >= nextStrike) strike();
     const age = time-lastStrike;
-    flash = age < 2.5 ? Math.exp(-age*2.7)*.45 : 0;
-    boltMaterial.opacity = flash;
-    glowMaterial.opacity = flash*.2;
-    bolts.visible = age < 2.5;
+    const lightningFade = age < 3.2 ? Math.exp(-age*1.55) : 0;
+    flash = lightningFade*.6;
+    boltMaterial.opacity = lightningFade;
+    glowMaterial.opacity = lightningFade*.32;
+    bolts.visible = age < 3.2;
     draw();
     // Reduce resolution on a busy device while keeping text at native resolution.
     slowFrames = elapsed > 42 ? slowFrames+1 : Math.max(0,slowFrames-1);
