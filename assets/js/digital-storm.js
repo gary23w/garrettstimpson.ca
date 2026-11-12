@@ -217,10 +217,10 @@ async function startStorm() {
   streaks.frustumCulled = false;
   scene.add(streaks);
 
-  // Mint-green cores and a wider green halo keep the lightning clear in the margins.
+  // Translucent green arcs and a soft halo blend the lightning into the rain.
   const bolts = new THREE.Group();
   scene.add(bolts);
-  const boltColor = uniforms.uLightningColor.value.clone().lerp(uniforms.uWhite.value, .38);
+  const boltColor = uniforms.uLightningColor.value.clone().lerp(uniforms.uWhite.value, .2);
   const boltMaterial = track(new THREE.MeshBasicMaterial({ color: boltColor, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
   const glowMaterial = track(new THREE.MeshBasicMaterial({ color: uniforms.uLightningColor.value, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
   function boltPath(start, end, jitter, steps = 17) {
@@ -280,9 +280,9 @@ async function startStorm() {
     if (!motionPreference.matches && time >= nextStrike) strike();
     const age = time-lastStrike;
     const lightningFade = age < 3.2 ? Math.exp(-age*1.55) : 0;
-    flash = lightningFade*.6;
-    boltMaterial.opacity = lightningFade;
-    glowMaterial.opacity = lightningFade*.32;
+    flash = lightningFade*.2;
+    boltMaterial.opacity = lightningFade*.35;
+    glowMaterial.opacity = lightningFade*.1;
     bolts.visible = age < 3.2;
     draw();
     // Reduce resolution on a busy device while keeping text at native resolution.
