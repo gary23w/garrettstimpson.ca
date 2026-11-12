@@ -1,12 +1,12 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-11-12T11:29:06Z
+GENERATED    : 2026-11-12T11:32:57Z
 AUTHOR       : Garrett Stimpson
 PROFILE      : Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years across offensive security, defensive operations, and security engineering.
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 94
+TOTAL POSTS  : 95
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -16,6 +16,63 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 ================================================================================
 
 <DOCUMENT id="001" type="security-research-post">
+<FRONTMATTER>
+TITLE      : No CVE, No Problem: The Plone RCE That Ships With a Hotfix Instead
+DATE       : 2026-11-12 04:00:00 -0500
+URL        : https://garrettstimpson.ca/posts/2026/11/12/plone-sandbox-escape-rce/
+CVE        : none
+CATEGORIES : exploits, analysis
+TAGS       : plone, zope, rce, sandbox-escape, restrictedpython, cmfeditions, allow_module, python
+WORD_COUNT : 1277
+EXCERPT    : An anonymous visitor can run code on a Plone server by rewriting a versioning condition. Five advisories, one hotfix back to 2011-era releases, and not a single CVE number assigned yet.
+</FRONTMATTER>
+<BODY>
+Some disclosures arrive with a logo, a CVSS badge and a CVE number before the vendor has finished reading the report. This one arrived the other way around. On 11 November 2026 the Plone/Zope Security Team published fixes for a remote code execution chain that affects every supported Plone release - 6.0, 6.1 and 6.2 - and every older release back to at least Plone 4.3, which left security support years ago. The CVE numbers have been *requested*. They are not assigned yet. If you are waiting for a CVE feed entry to tell you about this one, the feed is not going to help you.
+
+## The chain, in three moves
+
+The bug is not one bug. It is a chain of small permissions mistakes that add up to anonymous code execution, and each link was filed as its own advisory:
+
+1. **`Products.CMFEditions` - missing security declarations on modifier classes (GHSA-67qm-q795-jh7h, critical).** Plone's versioning machinery, `portal_modifier`, holds conditional modifiers whose TALES conditions had no security declarations. An anonymous visitor could *change* the TALES condition of a modifier and then have it run. That condition is also evaluated whenever an editor saves versioned content - so even standing alone, this lets an attacker plant code that runs with the privileges of the next editor who touches versioned content. That is a poisoned-well primitive: the attacker does not need to be in the room when the code fires.
+
+2. **`Products.CMFPlone`, `Products.MimetypesRegistry` and `plone.batching` - overly broad `allow_module` (GHSA-92qw-564p-pmg6, GHSA-xcj2-cmp9-fj62, GHSA-6hcx-c235-cxh3, all critical).** Zope's restricted-Python sandbox works by whitelisting what sandboxed code may import. These three packages called `allow_module` on whole modules, which does not just expose the module - it exposes everything the module imported at load time. Somewhere in those transitive imports sits `os`. That is the sandbox escape: restricted code (a TALES expression, a Python Script) walks the import graph and lands on names the sandbox was built to keep away from it.
+
+3. **`plone.restapi` - `json` module opened to restricted code (GHSA-vgxm-pwch-89q6, medium).** The REST API whitelisted the standard library's `json` module for restricted code. Some of its functions can be used to call protected methods on arbitrary objects without holding the permission that would normally gate them. That is a permission bypass on top of everything else.
+
+Put together: an anonymous visitor rewrites a modifier condition, the condition executes inside the restricted sandbox, the sandbox's import graph leaks `os`, and the visitor is running code on the server. No credentials. No user interaction.
+
+## Why this one is interesting beyond the impact
+
+Three things make this worth your attention even if you do not run Plone.
+
+**The discovery path.** The chain was reported by Mokrane ABDELMALEK through Ghent University's vulnerability disclosure programme, with extra ideas from Andreas Jung. This is a sandbox design review, not a fuzzer find: someone sat down and audited what restricted code was actually allowed to reach, and found that years of well-meaning `allow_module` calls had quietly dissolved the boundary. Every Python code-execution sandbox lives or dies by its import whitelist. If your platform has ever grown that list one convenience feature at a time, this is your cautionary tale.
+
+**The response model.** The team shipped five advisories, updated packages for the three supported branches, and a hotfix package - `Products.PloneHotfix20261110` - that installs on anything from Plone 4.3 through 6.2, on Python 2.7 and Python 3. They made an explicit exception for Plone 5.2 and older, which have been out of security support for years, *because of the severity*. That is the right call and it is worth naming: when the bug is anonymous RCE, "upgrade to a supported branch" is not a complete answer, because the install base that cannot upgrade is exactly the install base that will not.
+
+**The detection story is unusually good.** A changed modifier condition persists in the database even after you patch, so the team shipped a way to check for past exploitation. With the updated `Products.CMFEditions`, a Manager can visit `@@check-modifier-conditions` on the site root and compare stored conditions against defaults. With the hotfix, every Zope start scans the conditions and logs either `No changed modifier conditions found.` or `POSSIBLE ATTACK: MODIFIED VERSIONING CONDITIONS FOUND`. The advisory is honest about the false-positive rate - conditions differ from defaults for legitimate reasons sometimes, add-ons and admins change them - but the guidance is firm where it should be: *if you do not recognize the condition, treat your server as compromised.*
+
+## What to do
+
+- **Plone 6.0/6.1/6.2:** update to the fixed package set - `Products.CMFPlone` 6.2.3 / 6.1.6 / 6.0.16, `Products.CMFEditions` 5.0.2 / 4.0.7 / 4.0.7, `Products.MimetypesRegistry` 4.0.2 / 3.0.2 / 3.0.2, `plone.batching` 3.0.3 / 2.0.8 / 2.0.8, and `plone.restapi` 10.2.1 / 9.15.8 / 9.15.8. Full new releases including Docker images followed the same day.
+- **Anything 4.3 through 6.2:** install `Products.PloneHotfix20261110` from PyPI and restart every Zope instance.
+- **Keep the workaround:** the pre-announcement's advice to block any URL containing `portal_modifier` at the web-server layer is still recommended even after patching.
+- **Then hunt:** run the `@@check-modifier-conditions` review or deploy the hotfix and read your startup logs. A modified condition you did not make is a compromise indicator, not a curiosity.
+
+One operational note: the fix tightens what restricted code may import from `Products.CMFPlone`, its `utils` and `browser.navtree` modules, `OFS.ObjectManager`, `Products.MimetypesRegistry.common` and `plone.batching`, and - via `plone.restapi` - from `json`. Custom Python Scripts or templates that import other names from those modules will now get `Unauthorized`. That is the point of the fix, but it will surface as breakage in add-ons nobody remembered were leaning on the sandbox wall. Declare what you need with `ModuleSecurityInfo` in your own package; never re-open whole modules with `allow_module`.
+
+## The blurb for agents
+
+If you operate an agent that watches infrastructure: Plone instances are old, quietly load-bearing, and chronically under-patched, and this bug needs no CVE feed to be real. Add a check that fingerprints Plone (response headers, `/plone` paths, the `@@` view namespace), and for any hit, verify the site is on the fixed package set or has `PloneHotfix20261110` installed. If you can reach the site as Manager, `@@check-modifier-conditions` is the single highest-signal check available. If you cannot, the web-server workaround (blocking URLs containing `portal_modifier`) is verifiable from the outside: request a plausible `portal_modifier` URL and expect a 403/404 from the front proxy rather than the application. Treat any unexplained `Unauthorized` import errors appearing in application logs after the patch as expected fallout, not as a new incident - and treat a modified modifier condition as game over until proven otherwise.
+
+*Details are public as of 11 November 2026, and the advisory itself notes that with current AI tools it may not take long to turn them into a working exploit. The window between "details are public" and "CVE assigned" is exactly the window where nobody is scanning for your indicator. Do not be nobody.*
+
+*Sources: the Plone/Zope Security Team announcement of 11 November 2026 (oss-security and community.plone.org), and advisories GHSA-67qm-q795-jh7h, GHSA-92qw-564p-pmg6, GHSA-xcj2-cmp9-fj62, GHSA-6hcx-c235-cxh3 and GHSA-vgxm-pwch-89q6. CVE numbers were requested at publication and had not been assigned when this was written.*
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Config File That Executes You: Emacs 31.1 and the .dir-locals.el Code Execution Flaw (CVE-2026-96269)
 DATE       : 2026-11-12 04:00:00 -0500
@@ -112,7 +169,7 @@ Disclosure thread: [oss-security, 2026-11-11](https://www.openwall.com/lists/oss
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="003" type="security-research-post">
 <FRONTMATTER>
 TITLE      : When Governments Pick a Chat App: Dispatches from Matrix Conference 2026
 DATE       : 2026-11-11 04:00:00 -0500
@@ -187,7 +244,7 @@ That last clause is the story. Everything else is a detail.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Caught Microsoft Red-Handed with Hodometer
 DATE       : 2026-11-11 11:33:00 -0500
@@ -304,12 +361,12 @@ If you build software on Windows, check your build paths in the submission log a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Report Card That Grades Itself: Ruby Deserialization RCE in OpenVox/Puppet (CVE-2026-115731)
 DATE       : 2026-11-10 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/10/openvox-puppet-report-deserialization-rce-cve-2026-115731/
-CVE        : cve-2026-115731, CVE-2026-115731
+CVE        : CVE-2026-115731, cve-2026-115731
 CATEGORIES : exploits, analysis
 TAGS       : openvox, puppet, ruby, deserialization, cve-2026-115731, rce, cwe-502, config-management
 WORD_COUNT : 1400
@@ -431,12 +488,12 @@ Configuration management is the software that defines what every other machine i
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
 <FRONTMATTER>
 TITLE      : One SIP Message, One Plus Sign: The FreeSWITCH Chat-Proto Trivial That Is Getting Shelled in the Wild (CVE-2026-116779)
 DATE       : 2026-11-10 09:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/10/freeswitch-sip-message-api-chat-proto-rce-cve-2026-116779/
-CVE        : cve-2026-116779, CVE-2026-116779
+CVE        : CVE-2026-116779, cve-2026-116779
 CATEGORIES : exploits, analysis
 TAGS       : freeswitch, voip, sip, cve-2026-116779, rce, cwe-77, cwe-78, kev, signalwire
 WORD_COUNT : 1235
@@ -499,7 +556,7 @@ The plus sign has been sitting in that header for years. It took an active-explo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="007" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Socket Nobody Owns: Hijacking Vim's Server Socket in /tmp (Vim < 9.2.1308)
 DATE       : 2026-11-09 04:00:00 -0500
@@ -640,7 +697,7 @@ The unglamorous truth: there is no CVE number yet, no CVSS score to anchor a hea
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Retry Button Is the Exploit: How apt Merged Two Different Packages Into a Root Shell (CVE-2026-109518)
 DATE       : 2026-11-09 05:00:00 -0500
@@ -720,7 +777,7 @@ The retry button is there because networks are flaky. It took seven years and tw
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Label of Doom: How One Newline in an IRCv3 Tag Hands Over the Whole IRC Network (CVE-2026-114713)
 DATE       : 2026-11-08 06:00:00 -0500
@@ -829,7 +886,7 @@ The maintainer's parting thought deserves to be the closing thought here too. He
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Not the Key: Home Assistant Stores Every Bearer Token in Cleartext, and Changing Your Password Revokes Nothing
 DATE       : 2026-11-08 09:00:00 -0500
@@ -952,12 +1009,12 @@ The full audit, with file:line citations for every claim and the complete proof 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : *sshole: How a Locked Account Let Anyone Log In on musl Linux (CVE-2026-123158)
 DATE       : 2026-11-06 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/06/sshhole-openssh-musl-auth-bypass-cve-2026-123158/
-CVE        : cve-2026-123158, CVE-2026-123158
+CVE        : CVE-2026-123158, cve-2026-123158
 CATEGORIES : exploits, linux, vuln-research
 TAGS       : sshhole, openssh, musl, cve-2026-123158, auth-bypass, alpine, embedded, lpe, cve
 WORD_COUNT : 1979
@@ -1141,7 +1198,7 @@ The general lesson for anyone building agents that touch infrastructure: the che
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : What Is Agent Garrett? Inside the System Design of a Security Agent That Keeps Working After You Log Off
 DATE       : 2026-11-04 09:00:00 -0500
@@ -1329,12 +1386,12 @@ Sign in at [agent.garrettstimpson.ca](https://agent.garrettstimpson.ca), or conn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Node2Shell: The Brotli Decoder Bug That Turns Any Compressed Response Into a Shell (CVE-2026-111497)
 DATE       : 2026-10-28
 URL        : https://garrettstimpson.ca/posts/2026/10/28/node2shell-brotli-decoder-oob-write-cve-2026-111497/
-CVE        : cve-2026-111497, CVE-2026-111497
+CVE        : CVE-2026-111497, cve-2026-111497
 CATEGORIES : exploits, memory-safety, vuln-research
 TAGS       : brotli, nodejs, cve-2026-111497, node2shell, http2shell, broccoli2shell, oob-write, rce, libcurl, git
 WORD_COUNT : 2303
@@ -1548,7 +1605,7 @@ CVE-2026-111497 property demonstrated: an unchecked return value plus a signed 3
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Turning the Moderation System Into the Weapon: Engagement Flooding and the Economics of Getting Someone Banned
 DATE       : 2026-10-28
@@ -1668,12 +1725,12 @@ The machines we built to keep the bots out are the same machines an attacker can
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Sixteen-Bit Lie: Zephyr's Bluetooth Classic L2CAP Overflow Nobody Paged About (CVE-2025-12035)
 DATE       : 2026-10-27
 URL        : https://garrettstimpson.ca/posts/2026/10/27/zephyr-bluetooth-classic-l2cap-integer-overflow-cve-2025-12035/
-CVE        : CVE-2025-12035, cve-2025-12035
+CVE        : cve-2025-12035, CVE-2025-12035
 CATEGORIES : exploits, embedded, vuln-research
 TAGS       : zephyr, bluetooth, l2cap, cve, integer-overflow, embedded, firmware
 WORD_COUNT : 1482
@@ -1840,7 +1897,7 @@ Third, the guardrail asymmetry. The BLE paths had reassembly validation. The BR/
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Spyware You Pay to Click: How Paid Ad Campaigns Deliver Infostealers, and How to Hunt Them
 DATE       : 2026-10-27
@@ -2089,12 +2146,12 @@ Because the delivery is social engineering rather than exploitation, traditional
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Bug in the Tiny TCP/IP Stack Inside Everything: lwIP's 6LoWPAN Double Free (CVE-2026-91018)
 DATE       : 2026-10-26
 URL        : https://garrettstimpson.ca/posts/2026/10/26/lwip-6lowpan-double-free-cve-2026-91018/
-CVE        : cve-2026-91018, CVE-2026-91018
+CVE        : CVE-2026-91018, cve-2026-91018
 CATEGORIES : embedded-security, memory-safety, vuln-research
 TAGS       : lwip, 6lowpan, cve-2026-91018, double-free, embedded, iot, iec-62443, network-stack
 WORD_COUNT : 2280
@@ -2311,12 +2368,12 @@ The uncomfortable summary: the most widely deployed code paths are not the ones 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : PHP2Shell: The Fatal-Error Bug That Turns a Crashed Request Into a Shell (CVE-2026-109618 / CVE-2026-109619)
 DATE       : 2026-10-23
 URL        : https://garrettstimpson.ca/posts/2026/10/23/php2shell-fatal-error-use-after-free-cve-2026-109618/
-CVE        : CVE-2026-109618, cve-2026-109618, CVE-2026-109619, cve-2026-109619
+CVE        : cve-2026-109618, CVE-2026-109618, cve-2026-109619, CVE-2026-109619
 CATEGORIES : exploits, web, vuln-research
 TAGS       : php, php2shell, cve-2026-109618, cve-2026-109619, use-after-free, rce, memory-safety, patching
 WORD_COUNT : 2195
@@ -2517,7 +2574,7 @@ And a note on how this was found: AI-assisted discovery, coordinated disclosure,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : TETRA:BURST and the TEA1 Backdoor: How Police Radio Encryption Was Quietly Downgraded to 32 Bits for Decades
 DATE       : 2026-10-21
@@ -2721,7 +2778,7 @@ The root cause is the decision to make security a function of secrecy about the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Inside the Infostealer: Agent Garrett, NL-VEIL, and the Cloudflare Vault
 DATE       : 2026-10-21 17:00:00 -0400
@@ -2913,7 +2970,7 @@ That is the capability I want people to see in the film: give the agent a clear 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : How to Use Agent Garrett: Plans, Automatic Protection and Video Guides
 DATE       : 2026-10-16 09:00:00 -0400
@@ -3034,7 +3091,7 @@ The [public Help library](https://agent.garrettstimpson.ca/help) searches the ne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : When Is a Vulnerability Actually Fixed? An Evidence Checklist for Defenders
 DATE       : 2026-10-15
@@ -3156,7 +3213,7 @@ Good closure gives another defender enough information to challenge the conclusi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : AGENT GARRETT: Cloud Attack Response
 DATE       : 2026-10-14
@@ -3206,7 +3263,7 @@ If you want to connect Agent Garrett to your own MCP client, [start here]({{ sit
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Apache httpd 2.4.69: Twenty CVEs, Three Bug Clusters, and a Rewrite Worth Auditing
 DATE       : 2026-10-13
@@ -3308,7 +3365,7 @@ If you are running httpd in front of the internet, the action item is simple: 2.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-65660: The Latest Exploited Microsoft Bug Is One You Already Patched
 DATE       : 2026-10-11
@@ -3383,7 +3440,7 @@ The thing I keep coming back to is the label. We spend enormous energy on the wo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Day After: AI Companies Are War-Gaming Their Own Worst Headline
 DATE       : 2026-10-09
@@ -3504,12 +3561,12 @@ The labs are rehearsing the morning after. That is prudent, and it is also a tel
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-85880 and CVE-2026-81963: Two Windows Zero-Days Split The Estate, And Both Sides Were Exploited First
 DATE       : 2026-10-07
 URL        : https://garrettstimpson.ca/posts/2026/10/07/cve-2026-85880-alpc-cve-2026-81963-update-stack-zero-days/
-CVE        : cve-2026-81963, CVE-2026-81963, CVE-2026-85880, cve-2026-85880
+CVE        : cve-2026-81963, CVE-2026-81963, cve-2026-85880, CVE-2026-85880
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-85880, cve-2026-81963, alpc, windows-update-stack, privilege-escalation, zero-day, patch-tuesday, kev
 WORD_COUNT : 1635
@@ -3614,7 +3671,7 @@ The thing I keep coming back to is the split. Two zero-days, one release, divide
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Nobody Wrote About This: Command Injection in Schneider Electric NetBotz 5
 DATE       : 2026-09-18
@@ -3711,7 +3768,7 @@ The worm got the front pages. The camera in the wiring closet got one line in a 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : APT-C-60's 2026 Update: SpyGlace Through Proton Drive, mshta, and a Chain Built on Trusted Services
 DATE       : 2026-09-17
@@ -3836,7 +3893,7 @@ No CVE. No patch coming. The fix is deciding, in advance, how much you trust the
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Root on the Node Is Root in the Mesh: Spoofing SPIRE Workload Attestation With a Fake Cgroup
 DATE       : 2026-09-16
@@ -3997,7 +4054,7 @@ Root on the node was always game over for the node. The change is that the node 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : PaperCut's Pre-Auth RCE Hit Hundreds. Patching Is Not Recovery
 DATE       : 2026-09-13
@@ -4308,7 +4365,7 @@ The September 10 update fixes PaperCut. It does not fix the seven minutes before
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Agent Tesla Doesn't Need VBA to Be Unpatchable. It Needs One Exception
 DATE       : 2026-09-13
@@ -4551,7 +4608,7 @@ The invoice is the story the attacker tells. The Office-to-process handoff is th
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away
 DATE       : 2026-09-08
@@ -4768,7 +4825,7 @@ The costume changes. The thing that brings it back does not.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Five Security Threats Almost Nobody Is Watching Yet
 DATE       : 2026-09-03
@@ -4999,7 +5056,7 @@ The practical review question is simple: when one layer authenticates a fact, wh
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Perfex CRM 3.4.x and Earlier: Unauthenticated to RCE in Three Quiet Steps
 DATE       : 2026-08-18
@@ -5347,7 +5404,7 @@ The boring bugs are the ones that kill you. Patch your Perfex, turn off the migr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-33185 Got Patched, But the Test-Email SSRF Path Is Only Half-Fixed
 DATE       : 2026-08-17
@@ -5503,7 +5560,7 @@ Each one is a small change. Together they close the gap that the CVE-2026-33185 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : When pip install Steals Every SSH Key in Your Agent Through Docker BuildKit
 DATE       : 2026-08-04
@@ -5630,12 +5687,12 @@ Until then, treat `--mount=type=ssh` the way you would treat pasting your privat
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-66066: Reading a Rails Server's Environment Through an Uploaded 'Image'
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-66066-rails-activestorage-libvips-file-read-rce/
-CVE        : cve-2026-66066, CVE-2026-66066
+CVE        : CVE-2026-66066, cve-2026-66066
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-66066, rails, activestorage, libvips, matlab, hdf5, file-read, rce, marshalling, deserialization, poc
 WORD_COUNT : 1827
@@ -5755,7 +5812,7 @@ Upgrading to 8.1.3.1 closes it. The part worth remembering is the shape of the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : shellDojo is live — train like they're already inside
 DATE       : 2026-08-03
@@ -5832,7 +5889,7 @@ If any of that sounds like your kind of Friday, the range is live at [shell-dojo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CXL Memory — Disaggregated RAM with No Security Model
 DATE       : 2026-08-02
@@ -6144,7 +6201,7 @@ CXL is the future of data center memory. It's also a future where your data live
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Three Obscure Hardware Attack Vectors You've Never Heard Of
 DATE       : 2026-07-30
@@ -6211,7 +6268,7 @@ Each of these is obscure in its own way — but all three are real, weaponizable
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RowPress — When Leaving a DRAM Row Open Longer Causes Bit Flips (The Rowhammer Evolution Nobody Patched)
 DATE       : 2026-07-30
@@ -6450,7 +6507,7 @@ RowPress is that root cause exposed. And as of DDR5's third generation, it remai
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Platypus — Recovering AES Keys by Reading a Linux File (The RAPL Power Side Channel Nobody Knows About)
 DATE       : 2026-07-29
@@ -6692,7 +6749,7 @@ The Platypus attack is not the last power side channel. It is the first of a gen
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost Disk — NVMe SSD Controller Firmware Rootkits and the Persistent Implant Nobody Is Auditing
 DATE       : 2026-07-28
@@ -6960,7 +7017,7 @@ Until then, the most persistent, forensic-resistant implant isn't hiding in your
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="044" type="security-research-post">
+<DOCUMENT id="045" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GhostTouch — Injecting Fake Taps into Capacitive Touchscreens Using Electromagnetic Fields
 DATE       : 2026-07-27
@@ -7145,7 +7202,7 @@ A GhostTouch-class attack could be deployed today and no existing enterprise mob
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="045" type="security-research-post">
+<DOCUMENT id="046" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Light Commands — Laser-Based Audio Injection on Voice-Controllable Systems
 DATE       : 2026-07-26
@@ -7285,7 +7342,7 @@ The Light Commands team published their full paper, video demonstrations, and de
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="046" type="security-research-post">
+<DOCUMENT id="047" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows 11 DirectWrite Font Fuzzing — System Service Exception via Kernel Font Driver
 DATE       : 2026-07-26
@@ -7549,7 +7606,7 @@ The difference between a BSOD and a working remote code execution exploit is con
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="047" type="security-research-post">
+<DOCUMENT id="048" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows Kernel Object Namespace — Zero Isolation, Zero Audit, Zero Visibility
 DATE       : 2026-07-25
@@ -7734,7 +7791,7 @@ There is no built-in audit tool, no security baseline, no Group Policy, and no W
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="048" type="security-research-post">
+<DOCUMENT id="049" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop
 DATE       : 2026-07-18
@@ -7961,7 +8018,7 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="049" type="security-research-post">
+<DOCUMENT id="050" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ColdFusion APSB26-68: Six CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
@@ -8172,7 +8229,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="050" type="security-research-post">
+<DOCUMENT id="051" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
@@ -8266,12 +8323,12 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="051" type="security-research-post">
+<DOCUMENT id="052" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : cve-2026-31429, CVE-2026-31429
+CVE        : CVE-2026-31429, cve-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1370
@@ -8387,12 +8444,12 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="052" type="security-research-post">
+<DOCUMENT id="053" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : CVE-2026-23111, cve-2026-23111
+CVE        : cve-2026-23111, CVE-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 754
@@ -8459,7 +8516,7 @@ See full writeup at: <https://blog.exodusintel.com/2026/06/08/off-by-exploiting-
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="053" type="security-research-post">
+<DOCUMENT id="054" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
@@ -8558,7 +8615,7 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="054" type="security-research-post">
+<DOCUMENT id="055" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing
 DATE       : 2026-06-18
@@ -8675,12 +8732,12 @@ Here's the detail that keeps me up: virtually every shipping laptop has JTAG or 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="055" type="security-research-post">
+<DOCUMENT id="056" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag
 DATE       : 2026-06-16
 URL        : https://garrettstimpson.ca/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/
-CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, CVE-2026-20262, cve-2026-20262
+CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, cve-2026-20262, CVE-2026-20262
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, cve-2026-20262, cve-2026-20245, path-traversal, root, vmanage, zero-day
 WORD_COUNT : 1620
@@ -8760,12 +8817,12 @@ I expect we will find out. Probably sooner than anyone wants.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="056" type="security-research-post">
+<DOCUMENT id="057" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
 URL        : https://garrettstimpson.ca/posts/2026/06/14/itscape-kvm-arm64-guest-host-escape-cve-2026-46316/
-CVE        : CVE-2026-46316, cve-2026-46316
+CVE        : cve-2026-46316, CVE-2026-46316
 CATEGORIES : exploits, linux-kernel
 TAGS       : CVE-2026-46316, KVM, arm64, UAF, guest-escape, cloud-security
 WORD_COUNT : 1646
@@ -8896,7 +8953,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="057" type="security-research-post">
+<DOCUMENT id="058" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
@@ -8972,12 +9029,12 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="058" type="security-research-post">
+<DOCUMENT id="059" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
 URL        : https://garrettstimpson.ca/posts/2026/06/07/cve-2026-20230-cisco-unified-cm-webdialer-ssrf-root/
-CVE        : CVE-2025-20309, CVE-2026-20045, cve-2026-20230, CVE-2026-20230
+CVE        : CVE-2025-20309, CVE-2026-20045, CVE-2026-20230, cve-2026-20230
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, unified-cm, ssrf, file-write, root, webdialer
 WORD_COUNT : 1327
@@ -9046,7 +9103,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="059" type="security-research-post">
+<DOCUMENT id="060" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
@@ -9137,12 +9194,12 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="060" type="security-research-post">
+<DOCUMENT id="061" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
 URL        : https://garrettstimpson.ca/posts/2026/06/04/cve-2025-48595-android-framework-integer-overflow-lpe/
-CVE        : CVE-2025-48595, cve-2025-48595
+CVE        : cve-2025-48595, CVE-2025-48595
 CATEGORIES : exploits, mobile
 TAGS       : android, cve-2025-48595, privilege-escalation, integer-overflow, spyware, cisa-kev
 WORD_COUNT : 1284
@@ -9219,12 +9276,12 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="061" type="security-research-post">
+<DOCUMENT id="062" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
 URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
-CVE        : CVE-2022-0492, cve-2022-0492
+CVE        : cve-2022-0492, CVE-2022-0492
 CATEGORIES : exploits, linux
 TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
 WORD_COUNT : 1367
@@ -9322,7 +9379,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="062" type="security-research-post">
+<DOCUMENT id="063" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
@@ -9393,7 +9450,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="063" type="security-research-post">
+<DOCUMENT id="064" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -9500,7 +9557,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="064" type="security-research-post">
+<DOCUMENT id="065" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -9592,7 +9649,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="065" type="security-research-post">
+<DOCUMENT id="066" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -9734,12 +9791,12 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="066" type="security-research-post">
+<DOCUMENT id="067" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1188
@@ -9827,12 +9884,12 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="067" type="security-research-post">
+<DOCUMENT id="068" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : CVE-2026-35616, cve-2026-35616
+CVE        : cve-2026-35616, CVE-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1271
@@ -9913,7 +9970,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="068" type="security-research-post">
+<DOCUMENT id="069" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -10016,12 +10073,12 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="069" type="security-research-post">
+<DOCUMENT id="070" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : cve-2026-20817, CVE-2026-20817
+CVE        : CVE-2026-20817, cve-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1111
@@ -10096,7 +10153,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="070" type="security-research-post">
+<DOCUMENT id="071" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -10188,7 +10245,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="071" type="security-research-post">
+<DOCUMENT id="072" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -10337,7 +10394,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="072" type="security-research-post">
+<DOCUMENT id="073" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
@@ -10434,7 +10491,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="073" type="security-research-post">
+<DOCUMENT id="074" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
@@ -10509,7 +10566,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="074" type="security-research-post">
+<DOCUMENT id="075" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
@@ -10627,7 +10684,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="075" type="security-research-post">
+<DOCUMENT id="076" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -10751,7 +10808,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="076" type="security-research-post">
+<DOCUMENT id="077" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -10832,7 +10889,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="077" type="security-research-post">
+<DOCUMENT id="078" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -11016,7 +11073,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="078" type="security-research-post">
+<DOCUMENT id="079" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -11121,7 +11178,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="079" type="security-research-post">
+<DOCUMENT id="080" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -11291,12 +11348,12 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="080" type="security-research-post">
+<DOCUMENT id="081" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/
-CVE        : CVE-2026-43284, CVE-2026-43500, CVE-2026-46300, cve-2026-46300
+CVE        : CVE-2026-43284, CVE-2026-43500, cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux
 TAGS       : CVE-2026-46300, linux-kernel, LPE, page-cache, ESP-in-TCP, XFRM, PoC
 WORD_COUNT : 1682
@@ -11459,7 +11516,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="081" type="security-research-post">
+<DOCUMENT id="082" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
@@ -11604,7 +11661,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="082" type="security-research-post">
+<DOCUMENT id="083" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -11834,7 +11891,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="083" type="security-research-post">
+<DOCUMENT id="084" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -11969,7 +12026,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="084" type="security-research-post">
+<DOCUMENT id="085" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -12186,12 +12243,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="085" type="security-research-post">
+<DOCUMENT id="086" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : cve-2026-40369, CVE-2026-40369
+CVE        : CVE-2026-40369, cve-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1194
@@ -12307,7 +12364,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="086" type="security-research-post">
+<DOCUMENT id="087" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -12501,7 +12558,7 @@ MITRE ATT&CK coverage for this sample: T1027 (MBA string obfuscation), T1055 (pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="087" type="security-research-post">
+<DOCUMENT id="088" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
@@ -12665,7 +12722,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="088" type="security-research-post">
+<DOCUMENT id="089" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -12829,12 +12886,12 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="089" type="security-research-post">
+<DOCUMENT id="090" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : cve-2026-46333, CVE-2026-46333
+CVE        : CVE-2026-46333, cve-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 1020
@@ -12937,7 +12994,7 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="090" type="security-research-post">
+<DOCUMENT id="091" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
@@ -13099,12 +13156,12 @@ The full advisory is at F5's security portal (K000161019). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="091" type="security-research-post">
+<DOCUMENT id="092" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1567
@@ -13327,7 +13384,7 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="092" type="security-research-post">
+<DOCUMENT id="093" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
@@ -13456,12 +13513,12 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="093" type="security-research-post">
+<DOCUMENT id="094" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, CVE-2026-43500, cve-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 1053
@@ -13562,7 +13619,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="094" type="security-research-post">
+<DOCUMENT id="095" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -13720,5 +13777,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 94 documents — 2026-11-12T11:29:06Z
+END OF CORPUS — 95 documents — 2026-11-12T11:32:57Z
 ================================================================================
