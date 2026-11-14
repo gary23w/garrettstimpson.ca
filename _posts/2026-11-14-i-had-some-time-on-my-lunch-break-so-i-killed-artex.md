@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "I had some time on my lunch break so i k*lled ARTEX"
-date: 2026-11-14 18:30:00 -0500
+date: 2026-11-14 12:30:00 -0500
 categories: [projects, security]
 tags: [intrusion-detection, cloudflare-workers, python, d1, agent-garrett, sentinel, artex]
 excerpt: "The FBI put out a FLASH on agentic intrusion frameworks, so I built a host intrusion sentinel that ends an attacking program on the spot. Here is how Agent Garrett Sentinel Service works and how to deploy it into your own workflow in about ten minutes."
