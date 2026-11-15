@@ -26,6 +26,7 @@ Vulnerability research, exploit breakdowns and malware analysis. The full text o
 
 ## Posts
 
+- [Three Exploitation Stories Wreaking Havoc That Nobody Is Talking About](https://garrettstimpson.ca/posts/2026/11/15/three-quiet-exploitation-stories-nobody-is-covering/): GSocket turns patched servers into permanently owned servers, a 4,837-account GitHub campaign is stealing cloud credentials through pull requests, and an N-central zero-day was popped hours after its PoC dropped. None of these got the Log4Shell treatment.
 - [I killed ARTEX on my lunch break](https://garrettstimpson.ca/posts/2026/11/14/i-had-some-time-on-my-lunch-break-so-i-killed-artex/): I started Sentinels on a lunch break. It's a host intrusion detector for Linux, macOS and Windows, built to stop automated attacks from tools such as ARTEX.
 - [The Log Line That Writes Its Own SQL: rsyslog omclickhouse Injection (CVE-2026-93404)](https://garrettstimpson.ca/posts/2026/11/12/rsyslog-omclickhouse-sql-injection-cve-2026-93404/): rsyslog's optional ClickHouse output module escapes quotes but not backslashes, so a crafted log line can rewrite the INSERT that stores it. Forged records, expression evaluation, and a fix that landed in a daily build nobody ships yet.
 - [No CVE, No Problem: The Plone RCE That Ships With a Hotfix Instead](https://garrettstimpson.ca/posts/2026/11/12/plone-sandbox-escape-rce/): An anonymous visitor can run code on a Plone server by rewriting a versioning condition. Five advisories, one hotfix back to 2011-era releases, and not a single CVE number assigned yet.
