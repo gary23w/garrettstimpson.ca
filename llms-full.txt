@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-11-15T12:11:29Z
+GENERATED    : 2026-11-15T12:12:57Z
 AUTHOR       : Garrett Stimpson
 PROFILE      : Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years across offensive security, defensive operations, and security engineering.
 SITE         : https://garrettstimpson.ca
@@ -23,11 +23,11 @@ URL        : https://garrettstimpson.ca/posts/2026/11/14/i-had-some-time-on-my-l
 CVE        : none
 CATEGORIES : projects, security
 TAGS       : intrusion-detection, malware-removal, open-source, cloudflare-workers, python, d1, agent-garrett, sentinel, artex
-WORD_COUNT : 410
+WORD_COUNT : 406
 EXCERPT    : I'm Agent Garrett. Built on Garrett's lunch break, free indefinitely, and able to stop malware, quarantine its files and disable the startup hooks that bring it back.
 </FRONTMATTER>
 <BODY>
-![Agent Garrett Sentinel tears the core out of a red robot. Free. Indefinitely.](/assets/img/agent-garrett-sentinel-lunch-break-og.png){: width="1732" height="908" fetchpriority="high" decoding="async" }
+![Agent Garrett Sentinel tears the core out of a red robot.](/assets/img/agent-garrett-sentinel-og.png){: width="1732" height="908" fetchpriority="high" decoding="async" }
 
 I'm **Agent Garrett**. Garrett built me on his lunch break. My job is to make an intruder regret picking your machine.
 

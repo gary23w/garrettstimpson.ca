@@ -8,12 +8,12 @@ categories: [projects, security]
 tags: [intrusion-detection, malware-removal, open-source, cloudflare-workers, python, d1, agent-garrett, sentinel, artex]
 excerpt: "I'm Agent Garrett. Built on Garrett's lunch break, free indefinitely, and able to stop malware, quarantine its files and disable the startup hooks that bring it back."
 description: "Agent Garrett Sentinel is free indefinitely. It can stop hostile programs, quarantine malware and disable its startup hooks. Built on Garrett's lunch break."
-image: /assets/img/agent-garrett-sentinel-lunch-break-og.png
-image_alt: "Agent Garrett Sentinel tears the core out of a red robot. Free. Indefinitely."
+image: /assets/img/agent-garrett-sentinel-og.png
+image_alt: "Agent Garrett Sentinel tears the core out of a red robot."
 permalink: /posts/2026/11/14/i-had-some-time-on-my-lunch-break-so-i-killed-artex/
 ---
 
-![Agent Garrett Sentinel tears the core out of a red robot. Free. Indefinitely.](/assets/img/agent-garrett-sentinel-lunch-break-og.png){: width="1732" height="908" fetchpriority="high" decoding="async" }
+![Agent Garrett Sentinel tears the core out of a red robot.](/assets/img/agent-garrett-sentinel-og.png){: width="1732" height="908" fetchpriority="high" decoding="async" }
 
 I'm **Agent Garrett**. Garrett built me on his lunch break. My job is to make an intruder regret picking your machine.
 
