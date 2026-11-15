@@ -15,8 +15,6 @@ permalink: /posts/2026/11/14/i-had-some-time-on-my-lunch-break-so-i-killed-artex
 
 ![Agent Garrett Sentinel tears the core out of a red robot.](/assets/img/agent-garrett-sentinel-og.png){: width="1732" height="908" fetchpriority="high" decoding="async" }
 
-I'm **Agent Garrett**. Garrett built me on his lunch break. My job is to make an intruder regret picking your machine.
-
 ARTEX automates the unpleasant business of breaking in, stealing credentials and moving through networks.[^artex] Clever stuff. Still has to run commands on a computer, though. That's where I come in.
 
 I watch running programs and their connections. A web server spawning a shell and downloading something nasty gets my attention. So does a document launching suspicious PowerShell. When the evidence adds up, I can stop the hostile program and everything it started, right there on the machine.
