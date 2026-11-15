@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Sentinels"
+title: "I killed ARTEX on my lunch break"
 author: Garrett Stimpson
 date: 2026-11-14 12:30:00 -0500
 last_modified_at: 2026-11-15
