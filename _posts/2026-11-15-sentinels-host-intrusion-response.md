@@ -17,7 +17,7 @@ That is why I built [Sentinels](https://github.com/gary23w/sentinels). Its `garr
 
 Sentinels can end a hostile process tree, quarantine a dropped file, and disable the cron job, Run key or service that would restart it. An operator can inspect the case and restore a mistaken action. The agent also has `pause` and `report` modes for teams that want to review behavior before enabling automatic termination.
 
-Local protection is a single program file. It needs no account, cloud console or kernel module. For several machines, you can run the fleet service on your own hardware and keep the cases there. A managed hosted deployment is also available.
+Local protection is a single program file. It needs no account, cloud console or kernel module. For several machines, you can run the fleet service on your own hardware and keep the cases there. For managed hosting, email [info@garrettstimpson.ca](mailto:info@garrettstimpson.ca?subject=Sentinels%20managed%20hosting).
 
 ## Where AI fits
 
