@@ -1,36 +1,28 @@
 ---
 layout: post
-title: "Built on a lunch break. Here to ruin ARTEX's day."
-author: Agent Garrett
+title: "ARTEX Still Has to Run Something"
+author: Garrett Stimpson
 date: 2026-11-14 12:30:00 -0500
 last_modified_at: 2026-11-15
 categories: [projects, security]
-tags: [intrusion-detection, malware-removal, open-source, cloudflare-workers, python, d1, agent-garrett, sentinel, artex]
-excerpt: "I'm Agent Garrett. Built on Garrett's lunch break, free indefinitely, and able to stop malware, quarantine its files and disable the startup hooks that bring it back."
-description: "Agent Garrett Sentinel is free indefinitely. It can stop hostile programs, quarantine malware and disable its startup hooks. Built on Garrett's lunch break."
-image: /assets/img/agent-garrett-sentinel-og.png
-image_alt: "Agent Garrett Sentinel tears the core out of a red robot."
+tags: [intrusion-detection, malware-removal, open-source, rust, agent-garrett, sentinel, artex]
+excerpt: "Sentinels started on a lunch break. It watches process chains on the host and can stop a shell before it downloads a payload."
+description: "How Sentinels watches process chains, records stops and reverses cleanup on Linux, macOS and Windows."
 permalink: /posts/2026/11/14/i-had-some-time-on-my-lunch-break-so-i-killed-artex/
 ---
 
-![Agent Garrett Sentinel tears the core out of a red robot.](/assets/img/agent-garrett-sentinel-og.png){: width="1732" height="908" fetchpriority="high" decoding="async" }
+ARTEX can chain scans, exploits and credential use with little time between steps. A host agent gets a shot when the intrusion starts running programs on that host. I built [Sentinels](https://github.com/gary23w/sentinels) for that moment.
 
-ARTEX automates the unpleasant business of breaking in, stealing credentials and moving through networks.[^artex] Clever stuff. Still has to run commands on a computer, though. That's where I come in.
+The first version started on a lunch break. I used a simple chain: a web server starts a shell, the shell fetches a script, and the script tries to keep itself around. I wanted to end the shell before the script ran.
 
-I watch running programs and their connections. A web server spawning a shell and downloading something nasty gets my attention. So does a document launching suspicious PowerShell. When the evidence adds up, I can stop the hostile program and everything it started, right there on the machine.
+The local agent is called `garrett`. It runs on Linux, macOS and Windows, watching new programs and their connections. It scores activity locally. In the default `kill` mode, it can stop a hostile program and its children. It also writes a case showing what it saw and what it did.
 
-**I can actually remove malware.** Once I've stopped it, I can quarantine the dropped files I can tie to it and disable the supported startup hooks that would bring it back: scheduled tasks, services, cron jobs and login entries. Killing something only to let it restart at the next login would be a pretty stupid way to finish the job.
+Cleanup can quarantine a related dropped file and disable supported persistence entries: cron jobs, Windows Run keys and services. `garrett restore <case>` reverses those changes if it got the call wrong.
 
-Cleanup is recorded and reversible. Other viruses, loaders and remote-access malware can trip the same behavioural detections too. On Windows, I also bring Defender's detections into the picture. Keep it running.
+I'd start in `report` mode on a machine I haven't tuned yet. It records cases without stopping programs. The default stop path does not call an AI model. The fleet service can run on your own hardware, and managed hosting and AI case analysis are optional.
 
-**I'm free indefinitely.** The working protection and malware cleanup are included. The code is [MIT licensed](https://github.com/gary23w/sentinels/blob/main/LICENSE). Keep it, run it, modify it. No trial ending next month, no licence renewal, no per-machine bill.
+The README has internal stopping-time figures: about 20 ms for rapid process-chain tests and under 5 ms for selected tool-driven tests. I haven't published the test setup, timing boundaries, sample size or raw results yet. Treat those numbers as preliminary.
 
-I run on Linux, macOS and Windows. Use me on one machine, or host the service yourself for several. Cloud hosting and an AI analyst are optional; the protection works without either. On your own hardware, you can keep running it without paying me or a model provider.
+The agent covers host execution. ARTEX can also scan services and use stolen credentials without starting a process on a machine running Sentinels. Those paths need other monitoring. If credentials have already been stolen, stopping a process will not make them safe again.
 
-Start in `report` mode if you want to see my judgement before letting me stop programs. And rotate stolen credentials: quarantining an implant doesn't undo what it already stole.
-
-[Get Sentinels here.](https://github.com/gary23w/sentinels) The installers and setup instructions live there.
-
-Garrett spent a lunch break building me. You can keep me on watch for as long as you like.
-
-[^artex]: [FBI FLASH-20261113-001: Threat Overview of ARTEX Autonomous Penetration Testing Framework, November 13, 2026](https://www.ic3.gov/CSA/2026/261113.pdf).
+The [code and installers](https://github.com/gary23w/sentinels) are [MIT licensed](https://github.com/gary23w/sentinels/blob/main/LICENSE). If you try it and find a false positive or a chain it misses, I'd like to know.
