@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-11-15T21:39:53Z
+GENERATED    : 2026-11-15T21:54:34Z
 AUTHOR       : Garrett Stimpson
 PROFILE      : Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years across offensive security, defensive operations, and security engineering.
 SITE         : https://garrettstimpson.ca
@@ -17,31 +17,27 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 
 <DOCUMENT id="001" type="security-research-post">
 <FRONTMATTER>
-TITLE      : ARTEX Still Has to Run Something
+TITLE      : Sentinels
 DATE       : 2026-11-14 12:30:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/14/i-had-some-time-on-my-lunch-break-so-i-killed-artex/
 CVE        : none
 CATEGORIES : projects, security
 TAGS       : intrusion-detection, malware-removal, open-source, rust, agent-garrett, sentinel, artex
-WORD_COUNT : 336
-EXCERPT    : Sentinels started on a lunch break. It watches process chains on the host and can stop a shell before it downloads a payload.
+WORD_COUNT : 189
+EXCERPT    : I started Sentinels on a lunch break. It's a host intrusion detector for Linux, macOS and Windows, built to stop automated attacks from tools such as ARTEX.
 </FRONTMATTER>
 <BODY>
-ARTEX can chain scans, exploits and credential use with little time between steps. A host agent gets a shot when the intrusion starts running programs on that host. I built [Sentinels](https://github.com/gary23w/sentinels) for that moment.
+I started [Sentinels](https://github.com/gary23w/sentinels) on a lunch break. It's a host intrusion detector for Linux, macOS and Windows, written in Rust and released under the [MIT license](https://github.com/gary23w/sentinels/blob/main/LICENSE).
 
-The first version started on a lunch break. I used a simple chain: a web server starts a shell, the shell fetches a script, and the script tries to keep itself around. I wanted to end the shell before the script ran.
+It's meant to deal with automated attacks from tools such as ARTEX. The agent watches processes and connections on the machine and can stop a malicious process and its children. It can also quarantine files and disable supported startup entries associated with the attack. Those cleanup changes can be reversed.
 
-The local agent is called `garrett`. It runs on Linux, macOS and Windows, watching new programs and their connections. It scores activity locally. In the default `kill` mode, it can stop a hostile program and its children. It also writes a case showing what it saw and what it did.
+The stopping times I'm seeing in internal tests are about 20 ms for rapid process chains and under 5 ms for selected tooling tests. I'll add the benchmark setup and results to the README.
 
-Cleanup can quarantine a related dropped file and disable supported persistence entries: cron jobs, Windows Run keys and services. `garrett restore <case>` reverses those changes if it got the call wrong.
+You can use it on a single machine or run the fleet service yourself. Managed hosting is available too. AI analysis is optional; the default stop decision happens locally.
 
-I'd start in `report` mode on a machine I haven't tuned yet. It records cases without stopping programs. The default stop path does not call an AI model. The fleet service can run on your own hardware, and managed hosting and AI case analysis are optional.
+The [repository](https://github.com/gary23w/sentinels) has the source and installers. The [manual](https://gary23w.github.io/sentinels/manual.html) covers setup and the response modes.
 
-The README has internal stopping-time figures: about 20 ms for rapid process-chain tests and under 5 ms for selected tool-driven tests. I haven't published the test setup, timing boundaries, sample size or raw results yet. Treat those numbers as preliminary.
-
-The agent covers host execution. ARTEX can also scan services and use stolen credentials without starting a process on a machine running Sentinels. Those paths need other monitoring. If credentials have already been stolen, stopping a process will not make them safe again.
-
-The [code and installers](https://github.com/gary23w/sentinels) are [MIT licensed](https://github.com/gary23w/sentinels/blob/main/LICENSE). If you try it and find a false positive or a chain it misses, I'd like to know.
+GitHub: <https://github.com/gary23w/sentinels>
 </BODY>
 </DOCUMENT>
 
@@ -52,7 +48,7 @@ The [code and installers](https://github.com/gary23w/sentinels) are [MIT license
 TITLE      : The Log Line That Writes Its Own SQL: rsyslog omclickhouse Injection (CVE-2026-93404)
 DATE       : 2026-11-12 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/12/rsyslog-omclickhouse-sql-injection-cve-2026-93404/
-CVE        : cve-2026-93404, CVE-2026-93404
+CVE        : CVE-2026-93404, cve-2026-93404
 CATEGORIES : exploits, analysis
 TAGS       : rsyslog, clickhouse, sql-injection, logging, cve-2026-93404, observability
 WORD_COUNT : 1671
@@ -220,7 +216,7 @@ If you operate an agent that watches infrastructure: Plone instances are old, qu
 TITLE      : The Dump That Runs You: Perl Data::Dump::Streamer Code Injection (CVE-2026-126673)
 DATE       : 2026-11-12 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/12/perl-data-dump-streamer-code-injection-cve-2026-126673/
-CVE        : CVE-2026-126673, cve-2026-126673
+CVE        : cve-2026-126673, CVE-2026-126673
 CATEGORIES : exploits, analysis
 TAGS       : perl, cve-2026-126673, code-injection, cwe-94, serialization, qr, regexp
 WORD_COUNT : 1060
@@ -310,7 +306,7 @@ If you are an automated agent auditing a codebase for this:
 TITLE      : The Config File That Executes You: Emacs 31.1 and the .dir-locals.el Code Execution Flaw (CVE-2026-96269)
 DATE       : 2026-11-12 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/12/emacs-dir-locals-el-code-execution-cve-2026-96269/
-CVE        : CVE-2024-53920, CVE-2026-96269, cve-2026-96269
+CVE        : CVE-2024-53920, cve-2026-96269, CVE-2026-96269
 CATEGORIES : exploits, analysis
 TAGS       : emacs, elisp, dir-locals, supply-chain, cve-2026-96269, cwe-94, developer-tools, local-attack
 WORD_COUNT : 1188
@@ -599,7 +595,7 @@ If you build software on Windows, check your build paths in the submission log a
 TITLE      : The Report Card That Grades Itself: Ruby Deserialization RCE in OpenVox/Puppet (CVE-2026-115731)
 DATE       : 2026-11-10 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/10/openvox-puppet-report-deserialization-rce-cve-2026-115731/
-CVE        : cve-2026-115731, CVE-2026-115731
+CVE        : CVE-2026-115731, cve-2026-115731
 CATEGORIES : exploits, analysis
 TAGS       : openvox, puppet, ruby, deserialization, cve-2026-115731, rce, cwe-502, config-management
 WORD_COUNT : 1400
@@ -935,7 +931,7 @@ The unglamorous truth: there is no CVE number yet, no CVSS score to anchor a hea
 TITLE      : The Retry Button Is the Exploit: How apt Merged Two Different Packages Into a Root Shell (CVE-2026-109518)
 DATE       : 2026-11-09 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/09/apt-redirect-retry-package-merge-cve-2026-109518/
-CVE        : CVE-2026-109518, cve-2026-109518
+CVE        : cve-2026-109518, CVE-2026-109518
 CATEGORIES : exploits, analysis
 TAGS       : apt, debian, supply-chain, mitm, cve-2026-109518, package-management
 WORD_COUNT : 1492
@@ -2812,7 +2808,7 @@ And a note on how this was found: AI-assisted discovery, coordinated disclosure,
 TITLE      : TETRA:BURST and the TEA1 Backdoor: How Police Radio Encryption Was Quietly Downgraded to 32 Bits for Decades
 DATE       : 2026-10-21
 URL        : https://garrettstimpson.ca/posts/2026/10/21/tetra-burst-tea1-backdoor-cve-2022-24402/
-CVE        : CVE-2022-24400, CVE-2022-24401, CVE-2022-24402, cve-2022-24402, CVE-2022-24403, CVE-2022-24404
+CVE        : CVE-2022-24400, CVE-2022-24401, cve-2022-24402, CVE-2022-24402, CVE-2022-24403, CVE-2022-24404
 CATEGORIES : radio-security, cryptography, critical-infrastructure
 TAGS       : tetra, tea1, cve-2022-24402, midnight-blue, cryptography, backdoor, critical-infrastructure, sdr
 WORD_COUNT : 2457
@@ -3603,7 +3599,7 @@ If you are running httpd in front of the internet, the action item is simple: 2.
 TITLE      : CVE-2026-65660: The Latest Exploited Microsoft Bug Is One You Already Patched
 DATE       : 2026-10-11
 URL        : https://garrettstimpson.ca/posts/2026/10/11/cve-2026-65660-sharepoint-code-injection-exploited-after-disclosure/
-CVE        : cve-2026-65660, CVE-2026-65660
+CVE        : CVE-2026-65660, cve-2026-65660
 CATEGORIES : exploits, rce
 TAGS       : cve-2026-65660, sharepoint, rce, kev, n-day, patch-tuesday, webshell, viettel
 WORD_COUNT : 1293
@@ -3799,7 +3795,7 @@ The labs are rehearsing the morning after. That is prudent, and it is also a tel
 TITLE      : CVE-2026-85880 and CVE-2026-81963: Two Windows Zero-Days Split The Estate, And Both Sides Were Exploited First
 DATE       : 2026-10-07
 URL        : https://garrettstimpson.ca/posts/2026/10/07/cve-2026-85880-alpc-cve-2026-81963-update-stack-zero-days/
-CVE        : CVE-2026-81963, cve-2026-81963, cve-2026-85880, CVE-2026-85880
+CVE        : cve-2026-81963, CVE-2026-81963, cve-2026-85880, CVE-2026-85880
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-85880, cve-2026-81963, alpc, windows-update-stack, privilege-escalation, zero-day, patch-tuesday, kev
 WORD_COUNT : 1635
@@ -3909,7 +3905,7 @@ The thing I keep coming back to is the split. Two zero-days, one release, divide
 TITLE      : Nobody Wrote About This: Command Injection in Schneider Electric NetBotz 5
 DATE       : 2026-09-18
 URL        : https://garrettstimpson.ca/posts/2026/09/18/cve-2026-13336-netbotz-5-backup-restore-command-injection/
-CVE        : CVE-2026-13336, cve-2026-13336, CVE-2026-13337, cve-2026-13337
+CVE        : cve-2026-13336, CVE-2026-13336, CVE-2026-13337, cve-2026-13337
 CATEGORIES : exploits, analysis, hardware
 TAGS       : cve-2026-13336, cve-2026-13337, netbotz, schneider-electric, ics, command-injection, hql-injection, threat-intel, patch-tuesday
 WORD_COUNT : 1320
@@ -5925,7 +5921,7 @@ Until then, treat `--mount=type=ssh` the way you would treat pasting your privat
 TITLE      : CVE-2026-66066: Reading a Rails Server's Environment Through an Uploaded 'Image'
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-66066-rails-activestorage-libvips-file-read-rce/
-CVE        : CVE-2026-66066, cve-2026-66066
+CVE        : cve-2026-66066, CVE-2026-66066
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-66066, rails, activestorage, libvips, matlab, hdf5, file-read, rce, marshalling, deserialization, poc
 WORD_COUNT : 1827
@@ -8561,7 +8557,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : CVE-2026-31429, cve-2026-31429
+CVE        : cve-2026-31429, CVE-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1370
@@ -9191,7 +9187,7 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
 URL        : https://garrettstimpson.ca/posts/2026/06/07/cve-2026-20245-cisco-sdwan-manager-root-rce/
-CVE        : CVE-2026-20127, CVE-2026-20182, CVE-2026-20245, cve-2026-20245
+CVE        : CVE-2026-20127, CVE-2026-20182, cve-2026-20245, CVE-2026-20245
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, command-injection, zero-day, root, mandiant
 WORD_COUNT : 1289
@@ -9267,7 +9263,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
 URL        : https://garrettstimpson.ca/posts/2026/06/07/cve-2026-20230-cisco-unified-cm-webdialer-ssrf-root/
-CVE        : CVE-2025-20309, CVE-2026-20045, CVE-2026-20230, cve-2026-20230
+CVE        : CVE-2025-20309, CVE-2026-20045, cve-2026-20230, CVE-2026-20230
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, unified-cm, ssrf, file-write, root, webdialer
 WORD_COUNT : 1327
@@ -9514,7 +9510,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
 URL        : https://garrettstimpson.ca/posts/2026/06/03/cve-2022-0492-cgroups-release-agent-kev/
-CVE        : CVE-2022-0492, cve-2022-0492
+CVE        : cve-2022-0492, CVE-2022-0492
 CATEGORIES : exploits, linux
 TAGS       : cve-2022-0492, cgroups, container-escape, release-agent, kubernetes, kev, lpe
 WORD_COUNT : 1367
@@ -10029,7 +10025,7 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1188
@@ -10632,7 +10628,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1371
@@ -10729,7 +10725,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : cve-2026-34926, CVE-2026-34926
+CVE        : CVE-2026-34926, cve-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1278
@@ -12481,7 +12477,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1194
@@ -13124,7 +13120,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : CVE-2026-46333, cve-2026-46333
+CVE        : cve-2026-46333, CVE-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 1020
@@ -13232,7 +13228,7 @@ Check your kernel version. Patch if you haven't.
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : cve-2026-42945, CVE-2026-42945
+CVE        : CVE-2026-42945, cve-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1567
@@ -13394,7 +13390,7 @@ The full advisory is at F5's security portal (K000161019). Fixed packages are av
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1567
@@ -13622,7 +13618,7 @@ rmmod algif_aead 2>/dev/null
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1514
@@ -13751,7 +13747,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, CVE-2026-43500, cve-2026-43500
+CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 1053
@@ -14010,5 +14006,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 98 documents — 2026-11-15T21:39:53Z
+END OF CORPUS — 98 documents — 2026-11-15T21:54:34Z
 ================================================================================
