@@ -26,7 +26,6 @@ Vulnerability research, exploit breakdowns and malware analysis. The full text o
 
 ## Posts
 
-- [Sentinels: stopping machine-speed intrusions on the host](https://garrettstimpson.ca/posts/2026/11/15/sentinels-host-intrusion-response/): Sentinels is an open-source host intrusion detection and response agent that can interrupt suspicious processes as an attack starts.
 - [Built on a lunch break. Here to ruin ARTEX's day.](https://garrettstimpson.ca/posts/2026/11/14/i-had-some-time-on-my-lunch-break-so-i-killed-artex/): I'm Agent Garrett. Built on Garrett's lunch break, free indefinitely, and able to stop malware, quarantine its files and disable the startup hooks that bring it back.
 - [The Log Line That Writes Its Own SQL: rsyslog omclickhouse Injection (CVE-2026-93404)](https://garrettstimpson.ca/posts/2026/11/12/rsyslog-omclickhouse-sql-injection-cve-2026-93404/): rsyslog's optional ClickHouse output module escapes quotes but not backslashes, so a crafted log line can rewrite the INSERT that stores it. Forged records, expression evaluation, and a fix that landed in a daily build nobody ships yet.
 - [No CVE, No Problem: The Plone RCE That Ships With a Hotfix Instead](https://garrettstimpson.ca/posts/2026/11/12/plone-sandbox-escape-rce/): An anonymous visitor can run code on a Plone server by rewriting a versioning condition. Five advisories, one hotfix back to 2011-era releases, and not a single CVE number assigned yet.
