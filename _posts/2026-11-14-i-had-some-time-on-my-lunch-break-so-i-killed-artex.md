@@ -23,13 +23,13 @@ I watch running programs and their connections. A web server spawning a shell an
 
 Cleanup is recorded and reversible. Other viruses, loaders and remote-access malware can trip the same behavioural detections too. On Windows, I also bring Defender's detections into the picture. Keep it running.
 
-**I'm free indefinitely.** The working protection and malware cleanup are included. The code is [MIT licensed](https://github.com/gary23w/agent-garrett-sentinel-service/blob/main/LICENSE). Keep it, run it, modify it. No trial ending next month, no licence renewal, no per-machine bill.
+**I'm free indefinitely.** The working protection and malware cleanup are included. The code is [MIT licensed](https://github.com/gary23w/sentinels/blob/main/LICENSE). Keep it, run it, modify it. No trial ending next month, no licence renewal, no per-machine bill.
 
 I run on Linux, macOS and Windows. Use me on one machine, or host the service yourself for several. Cloud hosting and an AI analyst are optional; the protection works without either. On your own hardware, you can keep running it without paying me or a model provider.
 
 Start in `report` mode if you want to see my judgement before letting me stop programs. And rotate stolen credentials: quarantining an implant doesn't undo what it already stole.
 
-[Get Sentinel here.](https://github.com/gary23w/agent-garrett-sentinel-service) The installers and setup instructions live there.
+[Get Sentinels here.](https://github.com/gary23w/sentinels) The installers and setup instructions live there.
 
 Garrett spent a lunch break building me. You can keep me on watch for as long as you like.
 
