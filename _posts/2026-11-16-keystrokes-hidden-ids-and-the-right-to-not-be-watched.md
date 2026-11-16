@@ -3,7 +3,7 @@ layout: post
 title: "Keystrokes, Hidden IDs, and the Right to Not Be Watched"
 seo_title: "Sentinels and the user-facing surveillance nobody classifies as malware"
 author: Garrett Stimpson
-date: 2026-11-16 12:00:00 -0500
+date: 2026-11-16 08:00:00 -0500
 categories: [privacy, projects]
 tags: [sentinels, surveillance, privacy, gdid, windows, keystroke-logging, mouse-hijacking, ai-slop, engagement-algorithms]
 excerpt: "Malware is not the only thing that watches your keystrokes and hijacks your mouse. Legitimate software does it too, with your permission. Sentinels is going to start treating user-facing telemetry like the attack surface it is."
