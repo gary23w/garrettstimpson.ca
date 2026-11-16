@@ -236,6 +236,8 @@ html[data-color-mode="light"][data-color-styles~="style"]{scrollbar-color:var(--
 :root[data-color-mode="light"][data-color-styles~="experience"] body :is(a,button,input,select,textarea,summary):focus-visible,:root[data-color-mode="light"][data-color-styles~="experience"] .site-nav .nav-toggle:focus-visible{outline:2px solid var(--blue-accent)!important}
 :root[data-color-mode="light"][data-color-styles~="experience"] #main-content:focus{outline:none!important}
 :root[data-color-mode="light"][data-color-styles~="experience"] .site-nav a[aria-current="page"]{color:var(--green)!important;border-color:var(--border)!important;background:var(--green-glow)!important}
+:root[data-color-mode="light"][data-color-styles~="experience"] .home .hero.hero-motd{background:var(--bg-code)!important;box-shadow:none!important}
+:root[data-color-mode="light"][data-color-styles~="experience"] .motd-heading{border-bottom:1px solid var(--border)!important;color:var(--text-muted)!important}
 :root[data-color-mode="light"][data-color-styles~="experience"] :is(.hero-cta,.removal-ad .removal-ad-cta,.mcp-action.primary):is(:hover,:focus-visible){color:var(--bg)!important;background:var(--green-bright)!important;text-shadow:none!important}
 :root[data-color-mode="light"][data-color-styles~="experience"] .post-toc{background:transparent!important;border:0!important;box-shadow:none!important}
 :root[data-color-mode="light"][data-color-styles~="experience"] .site-feedback{border:1px solid var(--green-dim)!important;background:var(--bg-surface)!important;color:var(--text)!important;box-shadow:0 8px 28px #ffffff99!important}
