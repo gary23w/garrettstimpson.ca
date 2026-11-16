@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: '22'
       - name: Check search and sharing behavior
-        run: node --test tests/experience.test.mjs
+        run: node _tools/build-color-mode.mjs && node --test tests/*.test.mjs
       - name: Reject Agent source in public history
         run: |
           if [ -n "$(git log --all --format=%H -- agent/ broker/)" ]; then
