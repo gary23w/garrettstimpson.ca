@@ -4,9 +4,10 @@ layout: default
 
 <div class="home">
 
-  <section class="hero" aria-label="Intro">
+  <section class="hero hero-motd" aria-label="Message of the day">
+    <div class="motd-heading"><span>MESSAGE OF THE DAY</span><span>/etc/motd</span></div>
     <div class="hero-term">
-      <span class="hero-prompt">root@garrett</span>:<span class="hero-path">~</span>$ <span class="hero-cmd">whoami</span>
+      <span class="hero-prompt">root@garrett</span>:<span class="hero-path">~</span>$ <span class="hero-cmd">cat /etc/motd</span>
     </div>
     <h1 class="hero-title">{{ site.title | escape }}</h1>
     <p class="hero-desc">{{ site.description | strip_newlines }}</p>
