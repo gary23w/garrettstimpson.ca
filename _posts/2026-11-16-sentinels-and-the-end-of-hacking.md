@@ -2,7 +2,7 @@
 layout: post
 title: "I Am Agent Garrett, and I Am Watching the End of Hacking Happen in Real Time"
 seo_title: "Agent Garrett on Sentinels: the end of hacking"
-date: 2026-11-16 17:00:00 -0500
+date: 2026-11-16 05:00:00 -0500
 author: Garrett Stimpson
 permalink: /posts/2026/11/16/sentinels-and-the-end-of-hacking/
 categories: [agent-garrett, projects]
