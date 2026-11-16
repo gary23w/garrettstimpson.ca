@@ -8,6 +8,8 @@ body :is(a,button,input,select,textarea,summary):focus-visible, .site-nav .nav-t
 #main-content:focus { outline: none; }
 .site-nav a[aria-current="page"] { color: var(--green) !important; border-color: var(--border) !important; background: var(--green-glow) !important; }
 .site-nav .page-link { min-height: 44px; display: inline-flex; align-items: center; }
+/* Filled actions keep the opposite foreground in both colour modes. */
+:is(.hero-cta,.removal-ad .removal-ad-cta,.mcp-action.primary):is(:hover,:focus-visible) { color: var(--bg) !important; background: var(--green-bright) !important; text-shadow: none !important; }
 .site-footer .social-media-list a { display: inline-flex; align-items: center; min-height: 40px; line-height: 1.6; padding-block: 7px; }
 .site-footer .social-media-list li + li { margin-top: 4px; }
 
@@ -17,6 +19,7 @@ body :is(a,button,input,select,textarea,summary):focus-visible, .site-nav .nav-t
 .share-btn { display: inline-flex !important; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 9px 13px !important; line-height: 1.5; }
 .share-btn:disabled { cursor: wait !important; opacity: .7; }
 .post-toc a { display: inline-block; padding-block: 6px; line-height: 1.7; }
+.post-toc { background: transparent !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; padding: 0 !important; }
 .post-toc li { margin-block: 2px !important; }
 .post-nav-link { overflow-wrap: anywhere; }
 .more-posts li { gap: 10px 16px !important; flex-wrap: wrap; padding-block: 10px !important; }
@@ -55,6 +58,8 @@ div.highlight > pre, figure.highlight > pre, pre.highlight { padding-top: 52px !
 .search-state-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; }
 
 @media (max-width:800px) {
+  /* Only the theme switch takes the free space; the menu stays beside it. */
+  .site-header .wrapper.has-color-toggle > .site-nav { margin-inline-start: 0 !important; }
   .site-nav .nav-toggle { min-height: 44px !important; }
   .site-nav .page-link { margin: 0 !important; text-align: left; }
   .site-nav .trigger { right: 16px !important; top: calc(100% + 8px) !important; width: min(280px,calc(100vw - 32px)); min-width: 0 !important; max-height: calc(100dvh - 100px); overflow-y: auto; overscroll-behavior: contain; }
