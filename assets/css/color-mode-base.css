@@ -1,0 +1,36 @@
+/* The light palette is monochrome; the original green palette remains dark mode. */
+html:root[data-color-mode="light"][data-color-styles]{
+ color-scheme:light;--bg:#fff!important;--surface:#fafafa!important;--card:#fff!important;
+ --bg-surface:#fafafa!important;--bg-card:#fff!important;--bg-code:#f4f4f4!important;
+ --green:#111!important;--green-bright:#000!important;--green-dim:#454545!important;
+ --green-dark:#d0d0d0!important;--green-glow:rgba(0,0,0,.06)!important;
+ --heading:#111!important;--text:#252525!important;--muted:#555!important;
+ --text-muted:#555!important;--text-faint:#666!important;--blue:#111!important;
+ --blue-accent:#111!important;--red:#111!important;--red-alert:#111!important;
+ --border:rgba(0,0,0,.2)!important;--border-dim:rgba(0,0,0,.1)!important;
+ --scrollbar-track:#fff!important;--scrollbar-thumb:#999!important;--scrollbar-hover:#555!important;
+}
+html[data-color-mode="light"]{background:#fff;color-scheme:light}
+html[data-color-mode="dark"]{color-scheme:dark}
+html[data-color-mode="light"] .storm-reading-shade{background:linear-gradient(90deg,#ffffffd9,#ffffff7a 55%,#ffffffd9)!important}
+html[data-color-mode="light"] :is(.funnel-brand,.signin-brand) img{filter:brightness(0)!important}
+html[data-color-mode="light"] :is(.hero,.hero-term,.site-title,.page-link):hover{text-shadow:none!important}
+html[data-color-mode="light"] .nav-toggle svg path{stroke:currentColor!important}
+html[data-color-mode="light"] img[src^="/payments/powered-by-stripe"]{filter:brightness(0)!important}
+html[data-color-mode="light"] .payment-trust :is(.payment-trust__card,.payment-trust__wallet){background:#fff!important}
+:root .color-mode-toggle{box-sizing:border-box;display:inline-flex!important;flex:0 0 auto;align-items:center;justify-content:center;gap:7px;min-width:44px;min-height:44px;margin:0;padding:8px 11px;border:1px solid var(--border,#555);border-radius:4px;background:var(--bg,#fff);color:var(--text,#111);font:600 12px/1.2 var(--mono,var(--font-mono,monospace));white-space:nowrap;cursor:pointer;box-shadow:none;letter-spacing:0;text-transform:none}
+:root .color-mode-toggle svg{display:block;width:19px;height:19px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+:root .color-mode-toggle:hover{border-color:var(--green,#111);color:var(--heading,#111)}
+:root .color-mode-toggle:focus-visible{outline:2px solid var(--green,#111);outline-offset:4px}
+:root .color-mode-fallback{position:fixed;top:max(14px,env(safe-area-inset-top));right:max(14px,env(safe-area-inset-right));z-index:200}
+:root .has-color-toggle{column-gap:12px}
+:root .site-header .color-mode-toggle{margin-inline-start:auto;margin-inline-end:12px}
+:root .auth-header-inner .color-mode-toggle{margin-inline-start:auto}
+:root .workspace-bar .color-mode-toggle{margin-inline-start:auto}
+:root .chat-topbar .color-mode-toggle{margin-inline-start:8px}
+:root body>header.has-color-toggle .color-mode-toggle{margin-inline-start:auto}
+@media(max-width:700px){:root .color-mode-toggle{width:44px;padding:9px}:root .color-mode-label{display:none}}
+@media(max-width:480px){:root .funnel-header-inner.has-color-toggle{gap:8px}:root .funnel-header-inner.has-color-toggle .funnel-nav-blog{display:none!important}:root .site-header .color-mode-toggle{margin-inline-end:4px}}
+@media(max-width:360px){:root .funnel-header-inner.has-color-toggle .funnel-brand>span{display:none}}
+@media(max-width:640px){:root body>header.has-color-toggle .back{display:none}}
+@media(prefers-reduced-motion:reduce){:root .color-mode-toggle{transition:none}}

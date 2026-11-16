@@ -36,6 +36,7 @@ async function startStorm() {
   const theme = getComputedStyle(document.documentElement);
   const themeColor = (name, fallback) => new THREE.Color(theme.getPropertyValue(name).trim() || fallback);
   const uniforms = {
+    uLightMode: { value: document.documentElement.dataset.colorMode === 'light' ? 1 : 0 },
     uTime: { value: 12 },
     uFlash: { value: 0 },
     uStrike: { value: new THREE.Vector2(.65, .65) },
@@ -66,7 +67,7 @@ async function startStorm() {
   // A slow moving cloud bank; lightning illuminates the cloud volume, not the page.
   const sky = new THREE.Mesh(track(new THREE.PlaneGeometry(2, 2)), shaderMaterial(screenVertex, `
     varying vec2 vUv;
-    uniform float uTime, uFlash;
+    uniform float uTime, uFlash, uLightMode;
     uniform vec3 uRainColor, uLightningColor;
     uniform vec2 uStrike, uResolution;
     float hash(vec2 p) {
@@ -87,7 +88,7 @@ async function startStorm() {
       vec3 col = uRainColor * (.001 + .018 * cloud * bank);
       col += uLightningColor * .3 * uFlash * (cloud * .65 + .35) * halo;
       col *= 1. - .5 * length(vUv-.5);
-      gl_FragColor = vec4(col, 1.);
+      gl_FragColor = vec4(mix(col, vec3(1.), uLightMode), 1.);
     }`, { depthTest: false, depthWrite: false }));
   sky.frustumCulled = false;
   sky.renderOrder = -10;
@@ -246,7 +247,7 @@ async function startStorm() {
     for (const mesh of [...bolts.children]) { mesh.geometry.dispose(); bolts.remove(mesh); }
   }
   function strike() {
-    if (contextLost || motionPreference.matches) return;
+    if (contextLost || motionPreference.matches || uniforms.uLightMode.value) return;
     clearBolts();
     const side = Math.random() > .5 ? 1 : -1;
     const halfWidth = Math.tan(24*Math.PI/180)*41*camera.aspect;
@@ -277,13 +278,13 @@ async function startStorm() {
     const delta = Math.min(elapsed/1000,.1);
     previousFrame = stamp;
     time += delta;
-    if (!motionPreference.matches && time >= nextStrike) strike();
+    if (!uniforms.uLightMode.value && !motionPreference.matches && time >= nextStrike) strike();
     const age = time-lastStrike;
-    const lightningFade = age < 3.2 ? Math.exp(-age*1.55) : 0;
+    const lightningFade = !uniforms.uLightMode.value && age < 3.2 ? Math.exp(-age*1.55) : 0;
     flash = lightningFade*.2;
     boltMaterial.opacity = lightningFade*.35;
     glowMaterial.opacity = lightningFade*.1;
-    bolts.visible = age < 3.2;
+    bolts.visible = !uniforms.uLightMode.value && age < 3.2;
     draw();
     // Reduce resolution on a busy device while keeping text at native resolution.
     slowFrames = elapsed > 42 ? slowFrames+1 : Math.max(0,slowFrames-1);
@@ -307,6 +308,23 @@ async function startStorm() {
   }
   const abort = new AbortController();
   const on = (element,event,handler,options={}) => element.addEventListener(event,handler,{...options,signal:abort.signal});
+  function updateColorMode() {
+    const light = document.documentElement.dataset.colorMode === 'light';
+    const palette = getComputedStyle(document.documentElement);
+    uniforms.uLightMode.value = light ? 1 : 0;
+    uniforms.uRainColor.value.set(light ? '#000000' : palette.getPropertyValue('--green').trim() || '#00ef72');
+    uniforms.uLightningColor.value.set(palette.getPropertyValue('--green-bright').trim() || '#09f77b');
+    uniforms.uWhite.value.set(light ? '#000000' : palette.getPropertyValue('--heading').trim() || '#f3f7f1');
+    rain.material.blending = light ? THREE.NormalBlending : THREE.AdditiveBlending;
+    rain.material.needsUpdate = true;
+    streaks.visible = !light;
+    flash = 0; uniforms.uFlash.value = 0; clearBolts(); bolts.visible = false;
+    nextStrike = time + rand(4, 7);
+    renderer.setClearColor(light ? 0xffffff : 0x010605, 1);
+    root.dataset.colorMode = light ? 'light' : 'dark';
+    if (!contextLost) draw();
+  }
+  on(document,'garrett:color-mode',updateColorMode);
   on(window,'resize',resize,{passive:true});
   on(document,'visibilitychange',restart);
   on(motionPreference,'change',restart);
@@ -324,5 +342,6 @@ async function startStorm() {
   });
   on(window,'pageshow',()=>{ if(!disposed) restart(); });
   root.dataset.renderer='webgl';
+  updateColorMode();
   resize(); restart();
 }
