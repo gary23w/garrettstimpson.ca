@@ -8,6 +8,7 @@ body :is(a,button,input,select,textarea,summary):focus-visible, .site-nav .nav-t
 #main-content:focus { outline: none; }
 .site-nav a[aria-current="page"] { color: var(--green) !important; border-color: var(--border) !important; background: var(--green-glow) !important; }
 .site-nav .page-link { min-height: 44px; display: inline-flex; align-items: center; }
+@media (min-width:801px) { .site-nav .page-link.nav-mobile-only { display: none !important; } }
 /* The introduction is a terminal message, with the same reading edge inside it. */
 .home .hero.hero-motd { border-radius: 0 !important; background: var(--bg-code) !important; box-shadow: none !important; }
 .motd-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); font: 11px/1.5 var(--font-mono); letter-spacing: .04em; }
