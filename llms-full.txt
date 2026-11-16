@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-11-16T17:52:55Z
+GENERATED    : 2026-11-16T17:55:36Z
 AUTHOR       : Garrett Stimpson
 PROFILE      : Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years across offensive security, defensive operations, and security engineering.
 SITE         : https://garrettstimpson.ca
@@ -18,44 +18,65 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 <DOCUMENT id="001" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SIP2Shell Is Public Now: What the FreeSWITCH Exploit Tool Actually Changes (CVE-2026-116779)
-DATE       : 2026-11-16 08:00:00 -0500
+DATE       : 2026-11-16 16:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/16/sip2shell-public-exploit-freeswitch-response/
-CVE        : CVE-2026-116779, cve-2026-116779
+CVE        : CVE-2026-116779
 CATEGORIES : exploits, analysis
-TAGS       : freeswitch, voip, sip, cve-2026-116779, sip2shell, rce, kev, incident-response
-WORD_COUNT : 904
-EXCERPT    : A working exploit for the FreeSWITCH chat-proto RCE went public this week and is collecting attention fast. This is not a tutorial. This is what changed, what defenders should look for, and how to know whether your switch already answered the question.
+TAGS       : sip2shell, freeswitch, sip, voip, rce, zero-day, defense, agent-garrett
+WORD_COUNT : 1016
+EXCERPT    : A public exploit tool for CVE-2026-116779 turns a quiet FreeSWITCH SIP flaw into a script-kiddie-grade remote code execution bug. Here is what it means, how to tell if you are exposed, and what to do about it.
 </FRONTMATTER>
 <BODY>
-I wrote about CVE-2026-116779 six days ago, when it was a nasty bug with a CISA KEV entry and an active-exploitation flag. The mechanics are in that post and I am not going to re-teach them here, because the story has moved to a different stage. This week a packaged exploit named SIP2Shell landed on GitHub, got passed around Reddit under the tagline "one SIP message, game over," and was picked up by the PT vulnerability registry as an in-the-wild exploit for the bug. The question is no longer "is this exploitable." It is "what does a public, scripted, one-command exploit change," and the honest answer is: mostly the clock, and who the attackers are.
+A new public exploit tool called SIP2Shell is drawing a lot of attention this week, and for once the attention is deserved. It targets CVE-2026-116779, a flaw in FreeSWITCH, the open-source telephony platform that quietly routes calls for contact centers, PBX deployments, and VoIP providers all over the world. I have covered FreeSWITCH SIP message handling before, so this post is deliberately not a rehash of the mechanics. This is about what changes now that a packaged exploit exists, and what a defender should actually do in the next few days.
 
-## What SIP2Shell is, at the level defenders need
+## What the tool changes
 
-I am deliberately not walking through operation. What matters operationally is the shape of the thing:
+Before SIP2Shell, exploiting CVE-2026-116779 required understanding the SIP protocol well enough to hand-craft messages that slipped past FreeSWITCH's input handling. That is a real bar. It filters out the overwhelming majority of attackers, the ones who scan with off-the-shelf tooling and move on when nothing pops.
 
-- It is a small, scripted implementation of the chat-proto injection I described on the 10th: an inbound SIP MESSAGE whose To user selects the `api` chat protocol and hands the rest to the FreeSWITCH API dispatcher, which includes the `system` command.
-- It handles the encoding details so the payload survives SIP parsing: the literal `+` that separates protocol from target, percent-encoding for everything else.
-- The author ships a Docker lab with a known-vulnerable FreeSWITCH 1.10.12 and a patched 1.11.3 side by side, and the writeup is explicit that it is for your own lab or authorized targets. That framing is more responsible than most public PoCs bother with, and it does not matter one bit to the outcome, because a working reference implementation is a working reference implementation.
+A packaged tool removes the bar. The difference between a vulnerability and an incident is almost never the bug itself. It is whether the cheapest attacker in the room can use it. Once exploitation is a download and a target list, every exposed FreeSWITCH instance on the internet becomes a target of opportunity, not just a target of intent. The bug did not get worse. The population of people who can use it did.
 
-The practical delta between "CISA says exploited in the wild" and "the exploit is a GitHub repo with a README" is the skill floor. Before this week, using the bug meant understanding the SIP message format and the chat-proto trick well enough to build the request yourself. Now it means being able to run a script. The population of people who can attack your switch went from a few thousand researchers and competent telephony attackers to anyone who can read a README.
+That is the pattern with every public exploit release, and it is why "working exploit" and "critical CVE" are different severity levels in practice, even if they look identical in a feed.
 
-## The read-back detail that changes detection
+## Why telephony is the wrong thing to have exposed
 
-One nuance from the tool's writeup is worth pulling out because it affects how you hunt for victims, including yourself. The vulnerable path tries to return command output in a SIP MESSAGE back to the sender. On a switch where the sender is not a resolvable endpoint, that reply goes nowhere and the log says so. That means exploitation attempts against internet-exposed switches leave a thin trace: a 200 response, a chat reply that could not route, and nothing else, on a box that logs nothing about the `api` proto being selected at all. Unpatched FreeSWITCH does not write a log line for this. If you were not watching SIP traffic, the attempt and the compromise look identical to normal signaling noise.
+The uncomfortable truth about VoIP infrastructure is that it is usually internet-facing by design. SIP trunks have to accept traffic from the public phone network. That means the RCE is not hiding behind a VPN or an internal subnet, it is sitting on a port that has to be open to do its job.
 
-That is the part that should worry operators who have not patched yet. The bug shipped in the default posture, the exploit is scripted, and the vulnerable software does not tell you it was used.
+The second uncomfortable truth is what runs on these boxes. FreeSWITCH servers hold call recordings, voicemail, transcription, and SIP credentials for trunks and endpoints. Compromise one and you get audio, not just data. TDoS and toll fraud are the classic VoIP money makers, but a shell on the media server is a surveillance platform: who called whom, when, and the recording to go with it. For a hospital, a law firm, or a politician's office, that is worse than a data breach.
 
-## The checklist, updated for the tool's existence
+## How to know if you are in the blast radius
 
-1. **Patch to 1.11.3 or later, and verify the version with `freeswitch -version`, not with memory.** This was true last week and it is the only real fix. The patch adds a 403 and a log line for MESSAGE requests addressed to the `api` proto, so a patched box both blocks the attack and records the attempt.
-2. **Hunt your own logs and PCAPs for the signature.** Inbound SIP MESSAGE with a To user containing `api+` before the `@`. If you have packet capture or SIP traces from before the patch, that string is the whole hunt. A hit means someone tried the bug on you; a hit plus unexplained outbound traffic means they got in.
-3. **Do not lean on the mitigations that were never fixes.** `disable_system_api_commands=true` does not close the `api` proto. `auth-messages` does not survive the passwordless `default` directory user unless you also set `allow-empty-password=false`. `enable-chat=false` on every profile is the real emergency brake if you genuinely cannot patch today.
-4. **Assume credential rotation if you were exposed.** The API dispatcher reaches more than `system`: module loading, inline Lua through stock `mod_lua`, call origination. A switch that answered a hostile MESSAGE should be treated as compromised, rebuilt or forensically reviewed, with SIP credentials, directory users, and anything the `freeswitch` service user could read all rotated.
-5. **Get 5060 off the open internet if you can.** A phone switch is reachable by design, but most deployments do not actually need unauthenticated UDP 5060 from every address on Earth. An ACL on signaling is the control that would have made this entire bug irrelevant.
+Three questions, in order of importance:
 
-## The lesson I keep having to write
+1. **Is the SIP signaling port reachable from the internet?** If 5060 or 5061 is open to the world, assume interest, not just possibility. This is the single biggest factor in whether this bug will ever touch you.
+2. **What version are you running, and when did you last touch it?** FreeSWITCH deployments are notorious for install-and-forget lifecycles. A box that has been routing calls untouched for four years is exactly the profile this tool hunts for.
+3. **What is the box allowed to reach?** If the FreeSWITCH host can initiate outbound connections to arbitrary destinations, a successful exploit is a foothold, not a dead end.
 
-This is the third time this month I have written some version of "the window between a bug being known and it being trivially exploitable has collapsed to hours." NoisyTCP, 4EverAble2Shell, now SIP2Shell. The pattern is consistent: disclosure and weaponization are no longer separate events. The defense that assumes you have a month to patch is a defense plan for a world that no longer exists. Patch the switch, check the logs for `api+`, and treat your telephony stack like the internet-facing production service it is.
+## Detection: what a successful attempt looks like
+
+You are not looking for a smoking gun. You are looking for the shape of the attack in your logs and on the wire:
+
+- **Anomalous SIP traffic patterns.** Bursts of malformed or oversized SIP messages hitting the signaling port, especially INVITEs and REGISTERs that never complete a call leg. Scanners generate noise; a tool generates structured noise.
+- **Unexpected process behavior on the host.** The FreeSWITCH process spawning shells, interpreters, or download utilities it has no business spawning. If your FreeSWITCH server suddenly runs curl, wget, or a shell, that is the whole attack in one sentence.
+- **New or modified dialplan logic.** Post-exploitation in VoIP often shows up as changed extension routing, new outbound routes to premium numbers, or call forwarding rules nobody remembers creating.
+- **Outbound call anomalies.** Sudden international calling volume, calls to unusual destinations at unusual hours, or trunk usage that does not match the billing pattern.
+
+A sentinel watching the host catches the second bullet instantly, which is the entire reason host-level defense belongs on telephony servers and not just on workstations.
+
+## Mitigation, in the order you should do it
+
+1. **Patch.** Upgrade to a fixed FreeSWITCH release. This is the only step that removes the vulnerability; everything else reduces exposure.
+2. **Restrict signaling.** SIP from the internet should terminate at an SBC or a hardened proxy, not at FreeSWITCH itself. If FreeSWITCH is directly exposed, move it behind a session border controller this week, not next quarter.
+3. **Segment.** The media server should not share a network with anything it does not strictly need to reach. Outbound from a FreeSWITCH host should be allow-listed to the destinations it legitimately talks to.
+4. **Rotate.** If you find evidence of compromise, rotate SIP trunk credentials, endpoint secrets, and anything the box stores. Assume the recordings were the target, because after a shell, they are.
+5. **Watch the host.** Process lineage from the FreeSWITCH process tree, file changes in the FreeSWITCH install directory, and new scheduled tasks or services are where persistence will land.
+
+## The part nobody says out loud
+
+The VoIP world has a patching culture problem, and it is structural. These systems are stable for years, they are often maintained by telecom specialists rather than security teams, and downtime means phone calls do not connect, which is a visible, embarrassing failure in a way that a missing patch never is. The result is a fleet of internet-exposed, long-lived, high-value servers that get patched when something breaks, not on a schedule.
+
+SIP2Shell is what happens when that fleet meets a packaged exploit. The tool is the catalyst, but the fuel was already there. Every RCE in a telephony stack will keep landing until the default answer to "should the media server be on the public internet" stops being yes by accident.
+
+Patch, restrict, segment, rotate, watch. Five verbs, and the first one is due today.
 </BODY>
 </DOCUMENT>
 
@@ -128,7 +149,7 @@ The repo is [github.com/gary23w/sentinels](https://github.com/gary23w/sentinels)
 TITLE      : An 11-Year-Old Kernel Bug and a Root Daemon on a World-Writable Socket
 DATE       : 2026-11-16 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/16/noisytcp-and-the-check-point-socket-nobody-audited/
-CVE        : CVE-2026-123039, cve-2026-123039, cve-2026-99288, CVE-2026-99288
+CVE        : cve-2026-123039, CVE-2026-123039, cve-2026-99288, CVE-2026-99288
 CATEGORIES : exploits, analysis
 TAGS       : noisytcp, linux-kernel, cve-2026-99288, dos, check-point, cve-2026-123039, gaia-os, lpe, wiper, esxi
 WORD_COUNT : 1108
@@ -322,7 +343,7 @@ GitHub: <https://github.com/gary23w/sentinels>
 TITLE      : The Log Line That Writes Its Own SQL: rsyslog omclickhouse Injection (CVE-2026-93404)
 DATE       : 2026-11-12 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/12/rsyslog-omclickhouse-sql-injection-cve-2026-93404/
-CVE        : CVE-2026-93404, cve-2026-93404
+CVE        : cve-2026-93404, CVE-2026-93404
 CATEGORIES : exploits, analysis
 TAGS       : rsyslog, clickhouse, sql-injection, logging, cve-2026-93404, observability
 WORD_COUNT : 1671
@@ -580,7 +601,7 @@ If you are an automated agent auditing a codebase for this:
 TITLE      : The Config File That Executes You: Emacs 31.1 and the .dir-locals.el Code Execution Flaw (CVE-2026-96269)
 DATE       : 2026-11-12 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/12/emacs-dir-locals-el-code-execution-cve-2026-96269/
-CVE        : CVE-2024-53920, cve-2026-96269, CVE-2026-96269
+CVE        : CVE-2024-53920, CVE-2026-96269, cve-2026-96269
 CATEGORIES : exploits, analysis
 TAGS       : emacs, elisp, dir-locals, supply-chain, cve-2026-96269, cwe-94, developer-tools, local-attack
 WORD_COUNT : 1188
@@ -869,7 +890,7 @@ If you build software on Windows, check your build paths in the submission log a
 TITLE      : The Report Card That Grades Itself: Ruby Deserialization RCE in OpenVox/Puppet (CVE-2026-115731)
 DATE       : 2026-11-10 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/10/openvox-puppet-report-deserialization-rce-cve-2026-115731/
-CVE        : CVE-2026-115731, cve-2026-115731
+CVE        : cve-2026-115731, CVE-2026-115731
 CATEGORIES : exploits, analysis
 TAGS       : openvox, puppet, ruby, deserialization, cve-2026-115731, rce, cwe-502, config-management
 WORD_COUNT : 1400
@@ -1205,7 +1226,7 @@ The unglamorous truth: there is no CVE number yet, no CVSS score to anchor a hea
 TITLE      : The Retry Button Is the Exploit: How apt Merged Two Different Packages Into a Root Shell (CVE-2026-109518)
 DATE       : 2026-11-09 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/09/apt-redirect-retry-package-merge-cve-2026-109518/
-CVE        : cve-2026-109518, CVE-2026-109518
+CVE        : CVE-2026-109518, cve-2026-109518
 CATEGORIES : exploits, analysis
 TAGS       : apt, debian, supply-chain, mitm, cve-2026-109518, package-management
 WORD_COUNT : 1492
@@ -1285,7 +1306,7 @@ The retry button is there because networks are flaky. It took seven years and tw
 TITLE      : Label of Doom: How One Newline in an IRCv3 Tag Hands Over the Whole IRC Network (CVE-2026-114713)
 DATE       : 2026-11-08 06:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/08/unrealircd-label-tag-newline-injection-cve-2026-114713/
-CVE        : cve-2026-114713, CVE-2026-114713
+CVE        : CVE-2026-114713, cve-2026-114713
 CATEGORIES : exploits, analysis
 TAGS       : unrealircd, irc, ircv3, cve-2026-114713, protocol-injection, command-injection, rce, network-infrastructure, ai-audit
 WORD_COUNT : 2042
@@ -2233,7 +2254,7 @@ The machines we built to keep the bots out are the same machines an attacker can
 TITLE      : The Sixteen-Bit Lie: Zephyr's Bluetooth Classic L2CAP Overflow Nobody Paged About (CVE-2025-12035)
 DATE       : 2026-10-27
 URL        : https://garrettstimpson.ca/posts/2026/10/27/zephyr-bluetooth-classic-l2cap-integer-overflow-cve-2025-12035/
-CVE        : cve-2025-12035, CVE-2025-12035
+CVE        : CVE-2025-12035, cve-2025-12035
 CATEGORIES : exploits, embedded, vuln-research
 TAGS       : zephyr, bluetooth, l2cap, cve, integer-overflow, embedded, firmware
 WORD_COUNT : 1482
@@ -2876,7 +2897,7 @@ The uncomfortable summary: the most widely deployed code paths are not the ones 
 TITLE      : PHP2Shell: The Fatal-Error Bug That Turns a Crashed Request Into a Shell (CVE-2026-109618 / CVE-2026-109619)
 DATE       : 2026-10-23
 URL        : https://garrettstimpson.ca/posts/2026/10/23/php2shell-fatal-error-use-after-free-cve-2026-109618/
-CVE        : CVE-2026-109618, cve-2026-109618, cve-2026-109619, CVE-2026-109619
+CVE        : cve-2026-109618, CVE-2026-109618, CVE-2026-109619, cve-2026-109619
 CATEGORIES : exploits, web, vuln-research
 TAGS       : php, php2shell, cve-2026-109618, cve-2026-109619, use-after-free, rce, memory-safety, patching
 WORD_COUNT : 2195
@@ -3082,7 +3103,7 @@ And a note on how this was found: AI-assisted discovery, coordinated disclosure,
 TITLE      : TETRA:BURST and the TEA1 Backdoor: How Police Radio Encryption Was Quietly Downgraded to 32 Bits for Decades
 DATE       : 2026-10-21
 URL        : https://garrettstimpson.ca/posts/2026/10/21/tetra-burst-tea1-backdoor-cve-2022-24402/
-CVE        : CVE-2022-24400, CVE-2022-24401, CVE-2022-24402, cve-2022-24402, CVE-2022-24403, CVE-2022-24404
+CVE        : CVE-2022-24400, CVE-2022-24401, cve-2022-24402, CVE-2022-24402, CVE-2022-24403, CVE-2022-24404
 CATEGORIES : radio-security, cryptography, critical-infrastructure
 TAGS       : tetra, tea1, cve-2022-24402, midnight-blue, cryptography, backdoor, critical-infrastructure, sdr
 WORD_COUNT : 2457
@@ -4069,7 +4090,7 @@ The labs are rehearsing the morning after. That is prudent, and it is also a tel
 TITLE      : CVE-2026-85880 and CVE-2026-81963: Two Windows Zero-Days Split The Estate, And Both Sides Were Exploited First
 DATE       : 2026-10-07
 URL        : https://garrettstimpson.ca/posts/2026/10/07/cve-2026-85880-alpc-cve-2026-81963-update-stack-zero-days/
-CVE        : CVE-2026-81963, cve-2026-81963, cve-2026-85880, CVE-2026-85880
+CVE        : cve-2026-81963, CVE-2026-81963, CVE-2026-85880, cve-2026-85880
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-85880, cve-2026-81963, alpc, windows-update-stack, privilege-escalation, zero-day, patch-tuesday, kev
 WORD_COUNT : 1635
@@ -4562,7 +4583,7 @@ Root on the node was always game over for the node. The change is that the node 
 TITLE      : PaperCut's Pre-Auth RCE Hit Hundreds. Patching Is Not Recovery
 DATE       : 2026-09-13
 URL        : https://garrettstimpson.ca/posts/2026/09/13/papercut-preauth-rce-81578-82078/
-CVE        : cve-2026-81578, CVE-2026-81578, cve-2026-82078, CVE-2026-82078
+CVE        : cve-2026-81578, CVE-2026-81578, CVE-2026-82078, cve-2026-82078
 CATEGORIES : exploits, web, rce
 TAGS       : papercut, papercut-ng, papercut-mf, cve-2026-81578, cve-2026-82078, pre-auth-rce, java, database-driver, active-exploitation, greynoise, incident-response
 WORD_COUNT : 2985
@@ -6195,7 +6216,7 @@ Until then, treat `--mount=type=ssh` the way you would treat pasting your privat
 TITLE      : CVE-2026-66066: Reading a Rails Server's Environment Through an Uploaded 'Image'
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-66066-rails-activestorage-libvips-file-read-rce/
-CVE        : cve-2026-66066, CVE-2026-66066
+CVE        : CVE-2026-66066, cve-2026-66066
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-66066, rails, activestorage, libvips, matlab, hdf5, file-read, rce, marshalling, deserialization, poc
 WORD_COUNT : 1827
@@ -8737,7 +8758,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
 URL        : https://garrettstimpson.ca/posts/2026/07/01/cve-2026-55200-libssh2-transport-read-oob-write/
-CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, CVE-2026-55200, cve-2026-55200
+CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, cve-2026-55200, CVE-2026-55200
 CATEGORIES : exploits, supply-chain
 TAGS       : cve-2026-55200, libssh2, ssh, integer-overflow, rce, curl, supply-chain
 WORD_COUNT : 1392
@@ -8831,7 +8852,7 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : cve-2026-31429, CVE-2026-31429
+CVE        : CVE-2026-31429, cve-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1370
@@ -8952,7 +8973,7 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : cve-2026-23111, CVE-2026-23111
+CVE        : CVE-2026-23111, cve-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 754
@@ -9240,7 +9261,7 @@ Here's the detail that keeps me up: virtually every shipping laptop has JTAG or 
 TITLE      : CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag
 DATE       : 2026-06-16
 URL        : https://garrettstimpson.ca/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/
-CVE        : CVE-2026-20182, cve-2026-20245, CVE-2026-20245, cve-2026-20262, CVE-2026-20262
+CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, CVE-2026-20262, cve-2026-20262
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, cve-2026-20262, cve-2026-20245, path-traversal, root, vmanage, zero-day
 WORD_COUNT : 1620
@@ -9537,7 +9558,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
 URL        : https://garrettstimpson.ca/posts/2026/06/07/cve-2026-20230-cisco-unified-cm-webdialer-ssrf-root/
-CVE        : CVE-2025-20309, CVE-2026-20045, CVE-2026-20230, cve-2026-20230
+CVE        : CVE-2025-20309, CVE-2026-20045, cve-2026-20230, CVE-2026-20230
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, unified-cm, ssrf, file-write, root, webdialer
 WORD_COUNT : 1327
@@ -9611,7 +9632,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : CVE-2026-45247, cve-2026-45247
+CVE        : cve-2026-45247, CVE-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1390
@@ -9702,7 +9723,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
 URL        : https://garrettstimpson.ca/posts/2026/06/04/cve-2025-48595-android-framework-integer-overflow-lpe/
-CVE        : cve-2025-48595, CVE-2025-48595
+CVE        : CVE-2025-48595, cve-2025-48595
 CATEGORIES : exploits, mobile
 TAGS       : android, cve-2025-48595, privilege-escalation, integer-overflow, spyware, cisa-kev
 WORD_COUNT : 1284
@@ -10392,7 +10413,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : cve-2026-35616, CVE-2026-35616
+CVE        : CVE-2026-35616, cve-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
 WORD_COUNT : 1271
@@ -10661,7 +10682,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-0257-panos-globalprotect-cookie-forgery/
-CVE        : CVE-2026-0257, cve-2026-0257
+CVE        : cve-2026-0257, CVE-2026-0257
 CATEGORIES : exploits, network-security
 TAGS       : cve-2026-0257, palo-alto, pan-os, globalprotect, authentication-bypass, vpn
 WORD_COUNT : 1371
@@ -10902,7 +10923,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1371
@@ -11074,7 +11095,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : cve-2026-46300, CVE-2026-46300
+CVE        : CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1432
@@ -11856,7 +11877,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/
-CVE        : CVE-2026-43284, CVE-2026-43500, cve-2026-46300, CVE-2026-46300
+CVE        : CVE-2026-43284, CVE-2026-43500, CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux
 TAGS       : CVE-2026-46300, linux-kernel, LPE, page-cache, ESP-in-TCP, XFRM, PoC
 WORD_COUNT : 1682
@@ -13394,7 +13415,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : cve-2026-46333, CVE-2026-46333
+CVE        : CVE-2026-46333, cve-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 1020
@@ -13502,7 +13523,7 @@ Check your kernel version. Patch if you haven't.
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : cve-2026-42945, CVE-2026-42945
+CVE        : CVE-2026-42945, cve-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1567
@@ -14021,7 +14042,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, CVE-2026-43284, cve-2026-43284, cve-2026-43500, CVE-2026-43500
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 1053
@@ -14280,5 +14301,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 103 documents — 2026-11-16T17:52:55Z
+END OF CORPUS — 103 documents — 2026-11-16T17:55:36Z
 ================================================================================
