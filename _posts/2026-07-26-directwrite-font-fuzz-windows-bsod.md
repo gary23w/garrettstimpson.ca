@@ -3,7 +3,7 @@ layout: post
 title: "Windows 11 DirectWrite Font Fuzzing — System Service Exception via Kernel Font Driver"
 seo_title: "Windows 11 DirectWrite Font Fuzzing via Kernel Font Driver"
 date: 2026-07-26
-categories: [windows, kernel, vulnerability-research, exploit-development]
+categories: [windows, windows-kernel, vulnerability-research, exploit-development]
 tags: [DirectWrite, font-parsing, BSOD, fontdrvhost, KERNELBASE, TrueType, OpenType, fuzzing, integer-overflow, EoP, RCE, Windows-11]
 excerpt: "I fuzzed the Windows 11 font stack with 2,000 structurally-corrupted TrueType files. The system bluescreened through fontdrvhost.exe — an integer overflow in KERNELBASE.dll crossing into kernel space. Here is the pipeline, the crash chain, and what this attack surface means at scale."
 last_modified_at: 2026-10-31

@@ -4,7 +4,7 @@ layout: none
 User-agent: *
 Allow: /
 
-# Block AI training crawlers that ignore llms.txt
+# Block AI model-training crawlers
 User-agent: GPTBot
 Disallow: /
 
@@ -19,5 +19,21 @@ Disallow: /
 
 User-agent: ClaudeBot
 Disallow: /
+
+# Allow AI search and user-requested fetchers (citations in AI answers)
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
 
 Sitemap: {{ site.url }}/sitemap.xml

@@ -70,7 +70,7 @@ One bridge option is [mcp-remote](https://github.com/punkpeye/mcp-remote), which
       "command": "C:/Program Files/nodejs/node.exe",
       "args": [
         "C:/Tools/mcp-remote/node_modules/mcp-remote/dist/proxy.js",
-        "https://garrettstimpson-agent.fdvlol.workers.dev/mcp",
+        "https://api.garrettstimpson.ca/mcp",
         "--transport",
         "http-only",
         "--header-file",

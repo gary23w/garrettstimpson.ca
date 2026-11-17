@@ -24,8 +24,8 @@ Use these prompts in Agent Garrett chat, or ask your MCP client to call the name
 
 ## Connect and discover
 
-- Current chat: [Agent Garrett](https://garrettstimpson-agent.fdvlol.workers.dev/).
-- Current remote MCP endpoint: [Agent Garrett MCP](https://garrettstimpson-agent.fdvlol.workers.dev/mcp).
+- Current chat: [Agent Garrett](https://agent.garrettstimpson.ca/).
+- Current remote MCP endpoint: [Agent Garrett MCP](https://api.garrettstimpson.ca/mcp).
 - A separate deployment has its own hostname, bearer credential, cloud state and policies. Replace the endpoint when using your own instance.
 - Browser login and MCP authentication are separate. Configure your MCP client with the owner's bearer credential using a private credential store or private header file. Never paste it into a prompt or commit it to this repository.
 - MCP uses JSON-RPC over authenticated HTTP. The endpoint is not a browser testing page. A direct client needs the Authorization bearer header and the negotiated protocol headers. An MCP client or the NL-Veil bridge handles the handshake and transport; [mcp.md](mcp.md) contains the direct client setup.

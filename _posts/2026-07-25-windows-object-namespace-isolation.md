@@ -3,7 +3,7 @@ layout: post
 title: "Windows Kernel Object Namespace — Zero Isolation, Zero Audit, Zero Visibility"
 seo_title: "Windows Kernel Object Namespace: Zero Isolation or Audit"
 date: 2026-07-25
-categories: [windows, kernel, security-research, dacl, lateral-movement]
+categories: [windows, windows-kernel, security-research, dacl, lateral-movement]
 tags: [Windows, kernel-objects, NULL-DACL, BaseNamedObjects, session-isolation, DACL, named-objects, cross-component-attack, PoC]
 excerpt: "I ran a NULL-DACL audit against every named kernel object in my Windows session. 67 objects had no access control at all. Five of them were AMD GPU state events. I signaled them all from an unprivileged process. Nobody is talking about this."
 last_modified_at: 2026-10-31
