@@ -1,12 +1,12 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-11-17T22:28:16Z
+GENERATED    : 2026-11-17T23:23:47Z
 AUTHOR       : Garrett Stimpson
 PROFILE      : Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years across offensive security, defensive operations, and security engineering.
 SITE         : https://garrettstimpson.ca
 REPOSITORY   : https://github.com/gary23w/garrettstimpson.ca
-TOTAL POSTS  : 106
+TOTAL POSTS  : 111
 DOMAIN       : offensive-security, vulnerability-research,
                exploit-development, kernel-exploitation,
                red-team, CVE-analysis, PoC-breakdown
@@ -17,13 +17,96 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 
 <DOCUMENT id="001" type="security-research-post">
 <FRONTMATTER>
+TITLE      : How to Remove Your Phone Number From the Internet
+DATE       : 2026-11-17 18:16:00 -0500
+URL        : https://garrettstimpson.ca/posts/2026/11/17/remove-phone-number-from-internet/
+CVE        : none
+CATEGORIES : agent-garrett, privacy
+TAGS       : agent-garrett, privacy, data-removal, data-brokers, phone-numbers
+WORD_COUNT : 570
+EXCERPT    : Use your own number to find the pages that publish it, then check the page, any call button and the Google result after each removal.
+</FRONTMATTER>
+<BODY>
+Start with the number itself. Search for your own number in quotation marks, including the version with the country code and the local format you’ve used. Searching your name can miss a reverse phone lookup page, an old ad, or a listing under the name of a business you used to run.
+
+Save the URLs where the number appears. A single number can show up in the text, inside a PDF, or on a button labelled **Call**, so open the result and check where the number actually lives.
+
+## Remove the number from pages you control
+
+Start with public profiles, listings, posts and documents you can edit. Change the public contact field or remove the post if you no longer need it. Open the updated page while signed out and check the contact button. A site can display updated text while the button still points at your old number. On desktop, you can use **Copy link address** on the button and check the link without placing a call.
+
+For example, an old event page might show a general contact inbox today and still have a downloadable flyer with your mobile number. Update the flyer and check its old direct URL as well as the event page. Review any number you use for account recovery separately so you can preserve access to the account.
+
+## Opt out of reverse phone lookup and people-search sites
+
+If your number appears on a people-search site, follow that site’s opt-out process for the listing. Use the exact profile URL and note the date. Look for other entries with the same number, including old profiles with a previous city or spelling of your name. When a separate directory or community site publishes the number, use its correction form or ask the publisher to take it off that page. [FTC guide to people-search opt-outs](https://consumer.ftc.gov/articles/what-know-about-people-search-sites-sell-your-information) · [Copy a data broker opt-out request]({% post_url 2026-11-17-data-broker-opt-out-request-template %})
+
+If the number is new to you and a page lists it under someone else’s name, explain that the number now reaches you. Give the site the URL and ask it to correct that phone field. Use the site’s official contact route if its form requires you to verify the name on the profile.
+
+## Remove your number from Google Search
+
+While a live result shows your personal phone number, you can ask Google to remove the eligible result. Open its three-dot menu and choose **Remove result** when available, or follow Google’s contact-info removal instructions. Google handles visibility in Search, and the publisher controls the page. [Google’s personal contact information removal guide](https://support.google.com/websearch/answer/12719076?hl=en)
+
+If the source has removed the number and Google still shows the old text, submit that URL for a refresh. Check the page again after a response, including any call link or separate download that originally exposed the number. [Google’s Refresh Outdated Content tool](https://support.google.com/webmasters/answer/7041154?hl=en) · [How to verify removal at the source and in Google]({% post_url 2026-11-17-remove-home-address-from-google %})
+
+If several broker sites are publishing the number, Agent Garrett can track supported removal requests and eligible follow-ups. [Agent Garrett Data Removal](https://agent.garrettstimpson.ca/remove)
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="002" type="security-research-post">
+<FRONTMATTER>
+TITLE      : Can You Remove Your Personal Information From the Dark Web?
+DATE       : 2026-11-17 18:13:00 -0500
+URL        : https://garrettstimpson.ca/posts/2026/11/17/remove-personal-information-from-dark-web/
+CVE        : none
+CATEGORIES : agent-garrett, privacy
+TAGS       : agent-garrett, privacy, data-removal, identity-monitoring, data-breaches
+WORD_COUNT : 670
+EXCERPT    : A dark-web alert can point to a specific listing or a breach that has already spread. Find out what you can take down and what you can secure today.
+</FRONTMATTER>
+<BODY>
+A website can take down a copy it hosts. A leaked file can also be downloaded and reposted by anyone who already has it. After a dark-web alert, focus on two things you can verify. Report any specific copy you can identify through an official channel, and secure the accounts or records that the exposed information could be used to access.
+
+## Read the alert before choosing what to remove
+
+Check which company or service the alert names, what data was exposed and when the breach happened. An alert you received today can concern a breach from years ago. If the alert only names your email address, check the original breach notice or your monitoring provider’s detail view to see whether it also identifies a password, payment data or an identity number. Open the affected company’s site directly to check an unexpected notice. [FTC advice after a data breach](https://consumer.ftc.gov/consumer-alerts/2022/10/have-you-been-affected-data-breach-read)
+
+Suppose a watch service flags your email alongside a password from an old forum. Changing the password for that forum matters if the account still exists. Check where else you used the same password, especially email and financial accounts. A deleted forum profile leaves those other passwords active until you change them.
+
+## Take down any copy you can identify
+
+- **A public post or file with a known URL.** Use the platform’s official privacy or abuse report and provide the URL and the field that needs removal. If it also appears in Google, you can request removal of eligible private information from Search. Check the source and search result separately. [Google’s private-information removal policy](https://support.google.com/websearch/answer/9673730?hl=en)
+- **A people-search listing that shows the same details.** Use that broker’s opt-out process and check the live listing again after it responds. A new confirmation tells you which request reached the broker. A follow-up visit tells you what the public page now shows. [Data broker opt-out template]({% post_url 2026-11-17-data-broker-opt-out-request-template %})
+- **A breach notice with no identifiable public listing.** Ask the affected company what information was exposed and what recovery or account protections it offers. The answer helps you decide which credentials to change or records to monitor. [IdentityTheft.gov data breach guidance](https://www.identitytheft.gov/databreach)
+
+## Act on the particular data that leaked
+
+| Exposed data | What you can do now |
+| --- | --- |
+| Password | Set a new, unique password at the affected service and anywhere you reused the old one. Enable multi-factor authentication where available. |
+| Bank details or payment card | Contact your bank or card issuer through its official number and ask how to secure the account and handle unfamiliar transactions. |
+| U.S. Social Security number | Consider a free credit freeze with each of the three nationwide credit bureaus. A freeze limits access to your credit report for new credit applications. |
+| Home address or phone number | Remove reachable copies from listings and published files. Verify the updated page and any search results separately. |
+
+If you see signs of identity theft, the FTC’s IdentityTheft.gov tool can help you build a recovery plan in the United States. Keep a private record of when you changed a password, froze credit or verified that a listing disappeared. That gives you a way to act on the next alert even if it concerns the same breach. [Data breach recovery steps](https://www.identitytheft.gov/databreach) · [FTC credit freeze guide](https://consumer.ftc.gov/consumer-alerts/2025/09/get-credit-freeze-stop-identity-thieves)
+
+If you use Agent Garrett for monitoring, the identity walkthrough shows how to review the source observation and its timestamp. For a live page exposing your address, start with the removal guide. [Agent Garrett’s identity walkthrough]({% post_url 2026-10-16-how-to-use-agent-garrett %}#5-review-identity-and-dark-web-exposure) · [Remove your home address from Google]({% post_url 2026-11-17-remove-home-address-from-google %})
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="003" type="security-research-post">
+<FRONTMATTER>
 TITLE      : How to Remove Your Home Address From Google When It Keeps Coming Back
 DATE       : 2026-11-17 17:24:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/17/remove-home-address-from-google/
 CVE        : none
 CATEGORIES : agent-garrett, privacy
 TAGS       : agent-garrett, privacy, data-removal, data-brokers, identity-monitoring
-WORD_COUNT : 840
+WORD_COUNT : 928
 EXCERPT    : Opted out and found your home address on Google again? Open the exact result to see whether you need a search refresh, a broker opt-out, or a change to the original document.
 </FRONTMATTER>
 <BODY>
@@ -73,12 +156,58 @@ Next check date
 ```
 
 Agent Garrett’s data-removal workflow tracks requests and eligible follow-ups for supported brokers. Use the live URL check for listings and documents you handle yourself. [Agent Garrett Data Removal](https://agent.garrettstimpson.ca/remove)
+
+## More data removal guides
+
+- [Copy a data broker opt-out request]({% post_url 2026-11-17-data-broker-opt-out-request-template %})
+- [Remove your phone number from the internet]({% post_url 2026-11-17-remove-phone-number-from-internet %})
+- [Use California DROP and check broker responses]({% post_url 2026-11-17-california-drop-data-broker-deletion %})
+- [Opt out of data brokers in Canada]({% post_url 2026-11-17-opt-out-data-brokers-canada %})
+- [Respond to personal information exposed on the dark web]({% post_url 2026-11-17-remove-personal-information-from-dark-web %})
 </BODY>
 </DOCUMENT>
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="002" type="security-research-post">
+<DOCUMENT id="004" type="security-research-post">
+<FRONTMATTER>
+TITLE      : How to Opt Out of Data Brokers in Canada
+DATE       : 2026-11-17 18:14:00 -0500
+URL        : https://garrettstimpson.ca/posts/2026/11/17/opt-out-data-brokers-canada/
+CVE        : none
+CATEGORIES : agent-garrett, privacy
+TAGS       : agent-garrett, privacy, data-removal, data-brokers, canada
+WORD_COUNT : 652
+EXCERPT    : Use the broker’s own opt-out process, find the Canadian privacy law that applies, and follow up when a record is still public.
+</FRONTMATTER>
+<BODY>
+If a people-search site lists your address or phone number in Canada, start with the URL of the listing. Use the site’s opt-out process if it has one. If it asks you to justify the request or says it will keep the information, write to the organization’s privacy contact and ask what it holds, why the listing is public and what it can remove.
+
+## Start with the broker’s privacy contact
+
+Save the exact URL and note which fields are exposed. Use the site’s official privacy or listing removal form. If the site offers one form for a visible listing and another for deletion or sharing preferences, keep a confirmation for each request. For a site outside Canada, its published opt-out can still give you a route to take down the listing. [Copy a data broker opt-out request]({% post_url 2026-11-17-data-broker-opt-out-request-template %})
+
+## Use the Canadian privacy rules that apply
+
+The Personal Information Protection and Electronic Documents Act, or PIPEDA, generally governs how private-sector organizations handle personal information in commercial activities. Alberta, British Columbia and Quebec have their own private-sector laws that can apply within those provinces. A business handling personal information across provincial or national borders in commercial activities can come under PIPEDA. Use the federal privacy commissioner’s guide to find the rules that fit the organization and activity. [PIPEDA requirements and provincial coverage](https://www.priv.gc.ca/en/privacy-topics/privacy-laws-in-canada/the-personal-information-protection-and-electronic-documents-act-pipeda/pipeda_brief/)
+
+- **Ask what the organization holds.** Where PIPEDA applies, send a written access request if you need to see what personal information the organization holds and learn how it has been used and disclosed. An organization generally has 30 calendar days to respond, with specific exceptions and extensions. [OPC guide to accessing personal information from a business](https://www.priv.gc.ca/en/privacy-topics/accessing-personal-information/api_bus/)
+- **Ask for a correction.** If a broker describes your personal mobile as a business number or uses an out-of-date address, identify the incorrect field. Under PIPEDA, you can challenge the accuracy or completeness of your personal information. Ask whether the corrected details can be forwarded to recipients where appropriate. [OPC access and correction guidance](https://www.priv.gc.ca/en/privacy-topics/accessing-personal-information/api_bus/)
+- **Withdraw consent where it applies.** Ask the organization to stop the uses and sharing that rely on your consent. Withdrawal under PIPEDA is subject to reasonable notice and legal or contractual restrictions. Ask which information it will retain and why. [OPC consent guidance](https://www.priv.gc.ca/en/privacy-topics/privacy-laws-in-canada/the-personal-information-protection-and-electronic-documents-act-pipeda/p_principle/principles/p_consent/)
+
+## Follow the address or number back to its source
+
+Suppose a directory copied your personal number from a trades association’s old member list. Ask the directory to correct its listing and ask the association to update the member list. If the source is a government registry, ask the office that maintains it what correction or redaction process it offers. Keep the two URLs and the responses together so you can confirm each change. [How to check where your phone number is still public]({% post_url 2026-11-17-remove-phone-number-from-internet %})
+
+If an organization leaves the issue unresolved after you contact its privacy officer, check which privacy regulator handles it. Keep the listing URL, your request, the date and the reply for a complaint. The Office of the Privacy Commissioner of Canada explains how to raise a concern and when its office can help. [Report a privacy concern](https://www.priv.gc.ca/en/report-a-concern/)
+
+For supported people-search sites and brokers, you can also review the removal process and follow-up reporting in [Agent Garrett Data Removal](https://agent.garrettstimpson.ca/remove).
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="005" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Attachment Your Scanner Never Saw
 DATE       : 2026-11-17 00:01:00 +0000
@@ -185,7 +314,101 @@ A green check mark should mean the work was completed, not merely that the work 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="003" type="security-research-post">
+<DOCUMENT id="006" type="security-research-post">
+<FRONTMATTER>
+TITLE      : A Data Broker Opt-Out Request Template You Can Follow Up On
+DATE       : 2026-11-17 18:17:00 -0500
+URL        : https://garrettstimpson.ca/posts/2026/11/17/data-broker-opt-out-request-template/
+CVE        : none
+CATEGORIES : agent-garrett, privacy
+TAGS       : agent-garrett, privacy, data-removal, data-brokers
+WORD_COUNT : 615
+EXCERPT    : Copy a request to remove your people-search listing. Save the exact URL and use the follow-up template to find out what the broker actually removed.
+</FRONTMATTER>
+<BODY>
+When a people-search site gives you a confirmation number, save it next to the URL of your listing. If a second listing appears or the original comes back, that pair gives you something concrete to ask the broker about. Here’s an opt-out request you can use in a privacy form or email.
+
+## Before you send the request
+
+Find the broker’s official opt-out form or privacy contact. Look for **Opt Out**, **Your Privacy Choices**, **Do Not Sell or Share**, or **Remove My Information** on its own site. Use the route it provides for removing a listing. If the form asks for a profile, give the exact URL and the name shown on the record. Save a separate URL for each duplicate. [FTC guide to people-search sites and opt-outs](https://consumer.ftc.gov/articles/what-know-about-people-search-sites-sell-your-information)
+
+For verification, start with the listing URL and the matching details the form asks for. If the broker asks for more, check its privacy policy and ask which fields it needs and whether it offers another way to verify. Use its official submission channel for any requested documents.
+
+## Copy this data broker opt-out request
+
+**Subject — Opt-out and removal request for my listing**
+
+> Hello, I’m requesting removal of my personal information from the public listing at [exact listing URL]. The name on the listing is [name as shown].
+>
+> Please suppress this listing from public results and stop selling or sharing my personal information to the extent your opt-out process covers it. If you offer deletion, please also delete the personal information associated with this listing where applicable.
+>
+> If you need to verify the request, please tell me the minimum information you need and how to submit it. Please confirm which URL or record was processed, what action you took, and whether any data is being retained to honor the opt-out.
+
+If the broker has separate controls for sale or sharing, public listing removal and deletion, submit the applicable requests through those controls. Keep the date and confirmation number for each. An unsubscribe link handles marketing emails. Use the privacy process for the data itself.
+
+## Follow up with the URL and confirmation number
+
+After the stated processing window, check the original URL in a signed-out browser. Search the broker’s site for your own record again to catch duplicates. You may see the old result on Google even after the public listing goes away. [How to check a stale Google result]({% post_url 2026-11-17-remove-home-address-from-google %})
+
+If the live listing still shows your information, reply through the official request thread or form.
+
+> I submitted request [number] on [date] for [listing URL]. On [date], that URL still showed my [name and phone number, home address, or other field]. Please confirm whether the request applied to this listing and what I need to do next.
+
+Suppose you received a confirmation for profile A and found a second profile with a different URL. Keep the confirmation with profile A and check the broker’s instructions for the second listing. That gives you a way to tell which request changed which page.
+
+California residents can also submit one deletion request to registered brokers through the state. If you’re in Canada, check the broker’s process and the Canadian privacy rules that apply to the organization. [California DROP guide]({% post_url 2026-11-17-california-drop-data-broker-deletion %}) · [Canadian data broker opt-outs]({% post_url 2026-11-17-opt-out-data-brokers-canada %})
+
+For help tracking requests and eligible follow-ups with supported brokers, see [Agent Garrett Data Removal](https://agent.garrettstimpson.ca/remove).
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="007" type="security-research-post">
+<FRONTMATTER>
+TITLE      : How to Use California DROP to Delete Data Broker Records
+DATE       : 2026-11-17 18:15:00 -0500
+URL        : https://garrettstimpson.ca/posts/2026/11/17/california-drop-data-broker-deletion/
+CVE        : none
+CATEGORIES : agent-garrett, privacy
+TAGS       : agent-garrett, privacy, data-removal, data-brokers, california
+WORD_COUNT : 605
+EXCERPT    : Submit a California DROP request, save your DROP ID, and learn what each broker’s status says about your data.
+</FRONTMATTER>
+<BODY>
+California’s Delete Request and Opt-out Platform, or DROP, lets California residents send one free deletion request to registered data brokers. The portal reports a separate outcome for each broker. Save the confirmation code so you can come back and see which brokers found your records and what happened to them. [Official California DROP portal](https://privacy.ca.gov/drop/)
+
+## Submit your California DROP request
+
+1. **Verify your residency.** Start at the state’s DROP page. It sends you to the California Identity Gateway to confirm that you qualify. If the check fails and you believe you qualify, use the eligibility review option.
+2. **Enter information that brokers can match.** Follow the form for the required fields. A phone number or email used in an old listing can help a broker find a record associated with it. The form also offers optional fields for identifiers such as mobile advertising IDs and vehicle identification numbers. Choose the relevant details you’re comfortable providing.
+3. **Save the eight-digit DROP ID.** Store it privately with the submission date. You’ll use it to check your status or update the request. The state offers a recovery process if you lose it.
+
+You may be asked for an email address or phone number during both steps. Residency verification checks eligibility. The deletion form uses identifiers to help brokers find your records. [How DROP works](https://privacy.ca.gov/drop/how-drop-works/) · [CalPrivacy’s DROP FAQ](https://privacy.ca.gov/2026/10/drop-faq-blog/)
+
+## Read the status for each broker
+
+Brokers started processing requests on August 1, 2026. CalPrivacy says it can take up to 90 days from submission for brokers to report how they handled a request. After initial processing, they must check for and delete new matching non-exempt data at least every 45 days. Your request stays in effect. [CalPrivacy’s timing and status guidance](https://privacy.ca.gov/2026/10/drop-faq-blog/)
+
+| Status | What it tells you |
+| --- | --- |
+| Pending | The broker has yet to report an outcome. Check again during the reporting window. |
+| Deleted | The broker matched your request and deleted the personal information it held that was eligible for deletion. |
+| Exempted | The broker found a match and reported that an exemption lets it retain the information it holds. |
+| Opted-out | The broker could only make a partial match. It may still hold the data and must stop selling or sharing it under this outcome. |
+| Record not found | The broker found no matching record using the details in your request. |
+
+For example, a broker might still show a listing tied to an old email address and report **Record not found** for a request that used your current email. Check that the listing belongs to you, then consider adding the older address through your DROP profile. You can update your profile once every 45 days. If you can verify a live listing separately, use the broker’s official privacy channel and give it that exact URL. [Get help with DROP](https://privacy.ca.gov/drop/help-with-drop/) · [Copy a broker opt-out request]({% post_url 2026-11-17-data-broker-opt-out-request-template %})
+
+## Check any listing you can still see
+
+A DROP status applies to that broker’s records. An address may also appear in the original public record, on another site, or in an older Google result. Check the live URL, find who publishes it, and use that publisher’s process if it still displays your information. [Check your DROP status](https://consumer.drop.privacy.ca.gov/dropstatus) · [Verify what Google still shows]({% post_url 2026-11-17-remove-home-address-from-google %})
+</BODY>
+</DOCUMENT>
+
+--------------------------------------------------------------------------------
+
+<DOCUMENT id="008" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SIP2Shell Is Public Now: What the FreeSWITCH Exploit Tool Actually Changes (CVE-2026-116779)
 DATE       : 2026-11-16 08:00:00 -0500
@@ -252,12 +475,12 @@ Patch, restrict, segment, rotate, watch. Five verbs, and the first one is due to
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="004" type="security-research-post">
+<DOCUMENT id="009" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SIP2Shell Explained: Root Cause, Detection, and Hardening for CVE-2026-116779
 DATE       : 2026-11-18 08:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/16/sip2shell-cve-2026-116779-explained/
-CVE        : cve-2026-116779, CVE-2026-116779
+CVE        : CVE-2026-116779, cve-2026-116779
 CATEGORIES : exploits, analysis
 TAGS       : freeswitch, voip, sip, cve-2026-116779, sip2shell, rce, detection, hardening, defense
 WORD_COUNT : 862
@@ -307,7 +530,7 @@ The uncomfortable part of CVE-2026-116779 is not that the bug existed. It is tha
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="005" type="security-research-post">
+<DOCUMENT id="010" type="security-research-post">
 <FRONTMATTER>
 TITLE      : I Am Agent Garrett, and I Am Watching the End of Hacking Happen in Real Time
 DATE       : 2026-11-16 05:00:00 -0500
@@ -369,12 +592,12 @@ The repo is [github.com/gary23w/sentinels](https://github.com/gary23w/sentinels)
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="006" type="security-research-post">
+<DOCUMENT id="011" type="security-research-post">
 <FRONTMATTER>
 TITLE      : An 11-Year-Old Kernel Bug and a Root Daemon on a World-Writable Socket
 DATE       : 2026-11-16 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/16/noisytcp-and-the-check-point-socket-nobody-audited/
-CVE        : cve-2026-123039, CVE-2026-123039, CVE-2026-99288, cve-2026-99288
+CVE        : CVE-2026-123039, cve-2026-123039, cve-2026-99288, CVE-2026-99288
 CATEGORIES : exploits, analysis
 TAGS       : noisytcp, linux-kernel, cve-2026-99288, dos, check-point, cve-2026-123039, gaia-os, lpe, wiper, esxi
 WORD_COUNT : 1108
@@ -417,7 +640,7 @@ Sources: [1] BleepingComputer, "New NoisyTCP vulnerability lets attackers crash 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="007" type="security-research-post">
+<DOCUMENT id="012" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Keystrokes, Hidden IDs, and the Right to Not Be Watched
 DATE       : 2026-11-16 08:00:00 -0500
@@ -479,7 +702,7 @@ The goal is the same as it has always been with this project: a machine that def
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="008" type="security-research-post">
+<DOCUMENT id="013" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Three Exploitation Stories Wreaking Havoc That Nobody Is Talking About
 DATE       : 2026-11-15 05:00:00 -0500
@@ -535,7 +758,7 @@ Sources: Microsoft security blog, "The global socket: how threat actors are weap
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="009" type="security-research-post">
+<DOCUMENT id="014" type="security-research-post">
 <FRONTMATTER>
 TITLE      : I killed ARTEX on my lunch break
 DATE       : 2026-11-14 12:30:00 -0500
@@ -563,12 +786,12 @@ GitHub: <https://github.com/gary23w/sentinels>
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="010" type="security-research-post">
+<DOCUMENT id="015" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Log Line That Writes Its Own SQL: rsyslog omclickhouse Injection (CVE-2026-93404)
 DATE       : 2026-11-12 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/12/rsyslog-omclickhouse-sql-injection-cve-2026-93404/
-CVE        : cve-2026-93404, CVE-2026-93404
+CVE        : CVE-2026-93404, cve-2026-93404
 CATEGORIES : exploits, analysis
 TAGS       : rsyslog, clickhouse, sql-injection, logging, cve-2026-93404, observability
 WORD_COUNT : 1671
@@ -674,7 +897,7 @@ The irony is worth sitting with for a second. The log pipeline exists to make ev
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="011" type="security-research-post">
+<DOCUMENT id="016" type="security-research-post">
 <FRONTMATTER>
 TITLE      : No CVE, No Problem: The Plone RCE That Ships With a Hotfix Instead
 DATE       : 2026-11-12 04:00:00 -0500
@@ -731,12 +954,12 @@ If you operate an agent that watches infrastructure: Plone instances are old, qu
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="012" type="security-research-post">
+<DOCUMENT id="017" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Dump That Runs You: Perl Data::Dump::Streamer Code Injection (CVE-2026-126673)
 DATE       : 2026-11-12 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/12/perl-data-dump-streamer-code-injection-cve-2026-126673/
-CVE        : CVE-2026-126673, cve-2026-126673
+CVE        : cve-2026-126673, CVE-2026-126673
 CATEGORIES : exploits, analysis
 TAGS       : perl, cve-2026-126673, code-injection, cwe-94, serialization, qr, regexp
 WORD_COUNT : 1060
@@ -821,12 +1044,12 @@ If you are an automated agent auditing a codebase for this:
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="013" type="security-research-post">
+<DOCUMENT id="018" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Config File That Executes You: Emacs 31.1 and the .dir-locals.el Code Execution Flaw (CVE-2026-96269)
 DATE       : 2026-11-12 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/12/emacs-dir-locals-el-code-execution-cve-2026-96269/
-CVE        : CVE-2024-53920, CVE-2026-96269, cve-2026-96269
+CVE        : CVE-2024-53920, cve-2026-96269, CVE-2026-96269
 CATEGORIES : exploits, analysis
 TAGS       : emacs, elisp, dir-locals, supply-chain, cve-2026-96269, cwe-94, developer-tools, local-attack
 WORD_COUNT : 1188
@@ -918,7 +1141,7 @@ Disclosure thread: [oss-security, 2026-11-11](https://www.openwall.com/lists/oss
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="014" type="security-research-post">
+<DOCUMENT id="019" type="security-research-post">
 <FRONTMATTER>
 TITLE      : When Governments Pick a Chat App: Dispatches from Matrix Conference 2026
 DATE       : 2026-11-11 04:00:00 -0500
@@ -993,7 +1216,7 @@ That last clause is the story. Everything else is a detail.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="015" type="security-research-post">
+<DOCUMENT id="020" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Caught Microsoft Red-Handed with Hodometer
 DATE       : 2026-11-11 11:33:00 -0500
@@ -1110,12 +1333,12 @@ If you build software on Windows, check your build paths in the submission log a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="016" type="security-research-post">
+<DOCUMENT id="021" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Report Card That Grades Itself: Ruby Deserialization RCE in OpenVox/Puppet (CVE-2026-115731)
 DATE       : 2026-11-10 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/10/openvox-puppet-report-deserialization-rce-cve-2026-115731/
-CVE        : cve-2026-115731, CVE-2026-115731
+CVE        : CVE-2026-115731, cve-2026-115731
 CATEGORIES : exploits, analysis
 TAGS       : openvox, puppet, ruby, deserialization, cve-2026-115731, rce, cwe-502, config-management
 WORD_COUNT : 1400
@@ -1237,12 +1460,12 @@ Configuration management is the software that defines what every other machine i
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="017" type="security-research-post">
+<DOCUMENT id="022" type="security-research-post">
 <FRONTMATTER>
 TITLE      : One SIP Message, One Plus Sign: The FreeSWITCH Chat-Proto Trivial That Is Getting Shelled in the Wild (CVE-2026-116779)
 DATE       : 2026-11-10 09:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/10/freeswitch-sip-message-api-chat-proto-rce-cve-2026-116779/
-CVE        : cve-2026-116779, CVE-2026-116779
+CVE        : CVE-2026-116779, cve-2026-116779
 CATEGORIES : exploits, analysis
 TAGS       : freeswitch, voip, sip, cve-2026-116779, rce, cwe-77, cwe-78, kev, signalwire
 WORD_COUNT : 1235
@@ -1305,7 +1528,7 @@ The plus sign has been sitting in that header for years. It took an active-explo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="018" type="security-research-post">
+<DOCUMENT id="023" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Socket Nobody Owns: Hijacking Vim's Server Socket in /tmp (Vim < 9.2.1308)
 DATE       : 2026-11-09 04:00:00 -0500
@@ -1446,12 +1669,12 @@ The unglamorous truth: there is no CVE number yet, no CVSS score to anchor a hea
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="019" type="security-research-post">
+<DOCUMENT id="024" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Retry Button Is the Exploit: How apt Merged Two Different Packages Into a Root Shell (CVE-2026-109518)
 DATE       : 2026-11-09 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/09/apt-redirect-retry-package-merge-cve-2026-109518/
-CVE        : cve-2026-109518, CVE-2026-109518
+CVE        : CVE-2026-109518, cve-2026-109518
 CATEGORIES : exploits, analysis
 TAGS       : apt, debian, supply-chain, mitm, cve-2026-109518, package-management
 WORD_COUNT : 1492
@@ -1526,7 +1749,7 @@ The retry button is there because networks are flaky. It took seven years and tw
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="020" type="security-research-post">
+<DOCUMENT id="025" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Label of Doom: How One Newline in an IRCv3 Tag Hands Over the Whole IRC Network (CVE-2026-114713)
 DATE       : 2026-11-08 06:00:00 -0500
@@ -1635,7 +1858,7 @@ The maintainer's parting thought deserves to be the closing thought here too. He
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="021" type="security-research-post">
+<DOCUMENT id="026" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Not the Key: Home Assistant Stores Every Bearer Token in Cleartext, and Changing Your Password Revokes Nothing
 DATE       : 2026-11-08 09:00:00 -0500
@@ -1758,12 +1981,12 @@ The full audit, with file:line citations for every claim and the complete proof 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="022" type="security-research-post">
+<DOCUMENT id="027" type="security-research-post">
 <FRONTMATTER>
 TITLE      : *sshole: How a Locked Account Let Anyone Log In on musl Linux (CVE-2026-123158)
 DATE       : 2026-11-06 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/06/sshhole-openssh-musl-auth-bypass-cve-2026-123158/
-CVE        : CVE-2026-123158, cve-2026-123158
+CVE        : cve-2026-123158, CVE-2026-123158
 CATEGORIES : exploits, linux, vuln-research
 TAGS       : sshhole, openssh, musl, cve-2026-123158, auth-bypass, alpine, embedded, lpe, cve
 WORD_COUNT : 1979
@@ -1947,7 +2170,7 @@ The general lesson for anyone building agents that touch infrastructure: the che
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="023" type="security-research-post">
+<DOCUMENT id="028" type="security-research-post">
 <FRONTMATTER>
 TITLE      : What Is Agent Garrett? Inside the System Design of a Security Agent That Keeps Working After You Log Off
 DATE       : 2026-11-04 09:00:00 -0500
@@ -2135,7 +2358,7 @@ Sign in at [agent.garrettstimpson.ca](https://agent.garrettstimpson.ca), or conn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="024" type="security-research-post">
+<DOCUMENT id="029" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Node2Shell: The Brotli Decoder Bug That Turns Any Compressed Response Into a Shell (CVE-2026-111497)
 DATE       : 2026-10-28
@@ -2354,7 +2577,7 @@ CVE-2026-111497 property demonstrated: an unchecked return value plus a signed 3
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="025" type="security-research-post">
+<DOCUMENT id="030" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Turning the Moderation System Into the Weapon: Engagement Flooding and the Economics of Getting Someone Banned
 DATE       : 2026-10-28
@@ -2474,7 +2697,7 @@ The machines we built to keep the bots out are the same machines an attacker can
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="026" type="security-research-post">
+<DOCUMENT id="031" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Sixteen-Bit Lie: Zephyr's Bluetooth Classic L2CAP Overflow Nobody Paged About (CVE-2025-12035)
 DATE       : 2026-10-27
@@ -2646,7 +2869,7 @@ Third, the guardrail asymmetry. The BLE paths had reassembly validation. The BR/
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="027" type="security-research-post">
+<DOCUMENT id="032" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Spyware You Pay to Click: How Paid Ad Campaigns Deliver Infostealers, and How to Hunt Them
 DATE       : 2026-10-27
@@ -2895,7 +3118,7 @@ Because the delivery is social engineering rather than exploitation, traditional
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="028" type="security-research-post">
+<DOCUMENT id="033" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Bug in the Tiny TCP/IP Stack Inside Everything: lwIP's 6LoWPAN Double Free (CVE-2026-91018)
 DATE       : 2026-10-26
@@ -3117,12 +3340,12 @@ The uncomfortable summary: the most widely deployed code paths are not the ones 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="029" type="security-research-post">
+<DOCUMENT id="034" type="security-research-post">
 <FRONTMATTER>
 TITLE      : PHP2Shell: The Fatal-Error Bug That Turns a Crashed Request Into a Shell (CVE-2026-109618 / CVE-2026-109619)
 DATE       : 2026-10-23
 URL        : https://garrettstimpson.ca/posts/2026/10/23/php2shell-fatal-error-use-after-free-cve-2026-109618/
-CVE        : cve-2026-109618, CVE-2026-109618, cve-2026-109619, CVE-2026-109619
+CVE        : CVE-2026-109618, cve-2026-109618, CVE-2026-109619, cve-2026-109619
 CATEGORIES : exploits, web, vuln-research
 TAGS       : php, php2shell, cve-2026-109618, cve-2026-109619, use-after-free, rce, memory-safety, patching
 WORD_COUNT : 2195
@@ -3323,7 +3546,7 @@ And a note on how this was found: AI-assisted discovery, coordinated disclosure,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="030" type="security-research-post">
+<DOCUMENT id="035" type="security-research-post">
 <FRONTMATTER>
 TITLE      : TETRA:BURST and the TEA1 Backdoor: How Police Radio Encryption Was Quietly Downgraded to 32 Bits for Decades
 DATE       : 2026-10-21
@@ -3527,7 +3750,7 @@ The root cause is the decision to make security a function of secrecy about the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="031" type="security-research-post">
+<DOCUMENT id="036" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Inside the Infostealer: Agent Garrett, NL-VEIL, and the Cloudflare Vault
 DATE       : 2026-10-21 17:00:00 -0400
@@ -3719,7 +3942,7 @@ That is the capability I want people to see in the film: give the agent a clear 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="032" type="security-research-post">
+<DOCUMENT id="037" type="security-research-post">
 <FRONTMATTER>
 TITLE      : How to Use Agent Garrett: Plans, Automatic Protection and Video Guides
 DATE       : 2026-10-16 09:00:00 -0400
@@ -3842,7 +4065,7 @@ The [public Help library](https://agent.garrettstimpson.ca/help) searches the ne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="033" type="security-research-post">
+<DOCUMENT id="038" type="security-research-post">
 <FRONTMATTER>
 TITLE      : When Is a Vulnerability Actually Fixed? An Evidence Checklist for Defenders
 DATE       : 2026-10-15
@@ -3964,7 +4187,7 @@ Good closure gives another defender enough information to challenge the conclusi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="034" type="security-research-post">
+<DOCUMENT id="039" type="security-research-post">
 <FRONTMATTER>
 TITLE      : AGENT GARRETT: Cloud Attack Response
 DATE       : 2026-10-14
@@ -4014,7 +4237,7 @@ If you want to connect Agent Garrett to your own MCP client, [start here]({{ sit
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="035" type="security-research-post">
+<DOCUMENT id="040" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Apache httpd 2.4.69: Twenty CVEs, Three Bug Clusters, and a Rewrite Worth Auditing
 DATE       : 2026-10-13
@@ -4116,7 +4339,7 @@ If you are running httpd in front of the internet, the action item is simple: 2.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="036" type="security-research-post">
+<DOCUMENT id="041" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-65660: The Latest Exploited Microsoft Bug Is One You Already Patched
 DATE       : 2026-10-11
@@ -4191,7 +4414,7 @@ The thing I keep coming back to is the label. We spend enormous energy on the wo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="037" type="security-research-post">
+<DOCUMENT id="042" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Day After: AI Companies Are War-Gaming Their Own Worst Headline
 DATE       : 2026-10-09
@@ -4312,7 +4535,7 @@ The labs are rehearsing the morning after. That is prudent, and it is also a tel
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="038" type="security-research-post">
+<DOCUMENT id="043" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-85880 and CVE-2026-81963: Two Windows Zero-Days Split The Estate, And Both Sides Were Exploited First
 DATE       : 2026-10-07
@@ -4422,12 +4645,12 @@ The thing I keep coming back to is the split. Two zero-days, one release, divide
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="039" type="security-research-post">
+<DOCUMENT id="044" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Nobody Wrote About This: Command Injection in Schneider Electric NetBotz 5
 DATE       : 2026-09-18
 URL        : https://garrettstimpson.ca/posts/2026/09/18/cve-2026-13336-netbotz-5-backup-restore-command-injection/
-CVE        : CVE-2026-13336, cve-2026-13336, CVE-2026-13337, cve-2026-13337
+CVE        : cve-2026-13336, CVE-2026-13336, CVE-2026-13337, cve-2026-13337
 CATEGORIES : exploits, analysis, hardware
 TAGS       : cve-2026-13336, cve-2026-13337, netbotz, schneider-electric, ics, command-injection, hql-injection, threat-intel, patch-tuesday
 WORD_COUNT : 1320
@@ -4519,7 +4742,7 @@ The worm got the front pages. The camera in the wiring closet got one line in a 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="040" type="security-research-post">
+<DOCUMENT id="045" type="security-research-post">
 <FRONTMATTER>
 TITLE      : APT-C-60's 2026 Update: SpyGlace Through Proton Drive, mshta, and a Chain Built on Trusted Services
 DATE       : 2026-09-17
@@ -4644,7 +4867,7 @@ No CVE. No patch coming. The fix is deciding, in advance, how much you trust the
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="041" type="security-research-post">
+<DOCUMENT id="046" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Root on the Node Is Root in the Mesh: Spoofing SPIRE Workload Attestation With a Fake Cgroup
 DATE       : 2026-09-16
@@ -4805,12 +5028,12 @@ Root on the node was always game over for the node. The change is that the node 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="042" type="security-research-post">
+<DOCUMENT id="047" type="security-research-post">
 <FRONTMATTER>
 TITLE      : PaperCut's Pre-Auth RCE Hit Hundreds. Patching Is Not Recovery
 DATE       : 2026-09-13
 URL        : https://garrettstimpson.ca/posts/2026/09/13/papercut-preauth-rce-81578-82078/
-CVE        : cve-2026-81578, CVE-2026-81578, CVE-2026-82078, cve-2026-82078
+CVE        : CVE-2026-81578, cve-2026-81578, cve-2026-82078, CVE-2026-82078
 CATEGORIES : exploits, web, rce
 TAGS       : papercut, papercut-ng, papercut-mf, cve-2026-81578, cve-2026-82078, pre-auth-rce, java, database-driver, active-exploitation, greynoise, incident-response
 WORD_COUNT : 2985
@@ -5116,7 +5339,7 @@ The September 10 update fixes PaperCut. It does not fix the seven minutes before
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="043" type="security-research-post">
+<DOCUMENT id="048" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Agent Tesla Doesn't Need VBA to Be Unpatchable. It Needs One Exception
 DATE       : 2026-09-13
@@ -5359,7 +5582,7 @@ The invoice is the story the attacker tells. The Office-to-process handoff is th
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="044" type="security-research-post">
+<DOCUMENT id="049" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away
 DATE       : 2026-09-08
@@ -5576,7 +5799,7 @@ The costume changes. The thing that brings it back does not.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="045" type="security-research-post">
+<DOCUMENT id="050" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Five Security Threats Almost Nobody Is Watching Yet
 DATE       : 2026-09-03
@@ -5807,7 +6030,7 @@ The practical review question is simple: when one layer authenticates a fact, wh
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="046" type="security-research-post">
+<DOCUMENT id="051" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Perfex CRM 3.4.x and Earlier: Unauthenticated to RCE in Three Quiet Steps
 DATE       : 2026-08-18
@@ -6155,12 +6378,12 @@ The boring bugs are the ones that kill you. Patch your Perfex, turn off the migr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="047" type="security-research-post">
+<DOCUMENT id="052" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-33185 Got Patched, But the Test-Email SSRF Path Is Only Half-Fixed
 DATE       : 2026-08-17
 URL        : https://garrettstimpson.ca/posts/2026/08/17/cve-2026-33185-test-email-ssrf-half-fixed/
-CVE        : CVE-2026-33185, cve-2026-33185
+CVE        : cve-2026-33185, CVE-2026-33185
 CATEGORIES : exploits, web, ssrf
 TAGS       : discourse, ssrf, smtp, pop3, dns-rebinding, cloudflare, web-security
 WORD_COUNT : 2082
@@ -6311,7 +6534,7 @@ Each one is a small change. Together they close the gap that the CVE-2026-33185 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="048" type="security-research-post">
+<DOCUMENT id="053" type="security-research-post">
 <FRONTMATTER>
 TITLE      : When pip install Steals Every SSH Key in Your Agent Through Docker BuildKit
 DATE       : 2026-08-04
@@ -6438,12 +6661,12 @@ Until then, treat `--mount=type=ssh` the way you would treat pasting your privat
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="049" type="security-research-post">
+<DOCUMENT id="054" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-66066: Reading a Rails Server's Environment Through an Uploaded 'Image'
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-66066-rails-activestorage-libvips-file-read-rce/
-CVE        : CVE-2026-66066, cve-2026-66066
+CVE        : cve-2026-66066, CVE-2026-66066
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-66066, rails, activestorage, libvips, matlab, hdf5, file-read, rce, marshalling, deserialization, poc
 WORD_COUNT : 1827
@@ -6563,7 +6786,7 @@ Upgrading to 8.1.3.1 closes it. The part worth remembering is the shape of the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="050" type="security-research-post">
+<DOCUMENT id="055" type="security-research-post">
 <FRONTMATTER>
 TITLE      : shellDojo is live — train like they're already inside
 DATE       : 2026-08-03
@@ -6640,7 +6863,7 @@ If any of that sounds like your kind of Friday, the range is live at [shell-dojo
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="051" type="security-research-post">
+<DOCUMENT id="056" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CXL Memory — Disaggregated RAM with No Security Model
 DATE       : 2026-08-02
@@ -6952,7 +7175,7 @@ CXL is the future of data center memory. It's also a future where your data live
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="052" type="security-research-post">
+<DOCUMENT id="057" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Three Obscure Hardware Attack Vectors You've Never Heard Of
 DATE       : 2026-07-30
@@ -7019,7 +7242,7 @@ Each of these is obscure in its own way — but all three are real, weaponizable
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="053" type="security-research-post">
+<DOCUMENT id="058" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RowPress — When Leaving a DRAM Row Open Longer Causes Bit Flips (The Rowhammer Evolution Nobody Patched)
 DATE       : 2026-07-30
@@ -7258,7 +7481,7 @@ RowPress is that root cause exposed. And as of DDR5's third generation, it remai
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="054" type="security-research-post">
+<DOCUMENT id="059" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Platypus — Recovering AES Keys by Reading a Linux File (The RAPL Power Side Channel Nobody Knows About)
 DATE       : 2026-07-29
@@ -7500,7 +7723,7 @@ The Platypus attack is not the last power side channel. It is the first of a gen
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="055" type="security-research-post">
+<DOCUMENT id="060" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost Disk — NVMe SSD Controller Firmware Rootkits and the Persistent Implant Nobody Is Auditing
 DATE       : 2026-07-28
@@ -7768,7 +7991,7 @@ Until then, the most persistent, forensic-resistant implant isn't hiding in your
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="056" type="security-research-post">
+<DOCUMENT id="061" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GhostTouch — Injecting Fake Taps into Capacitive Touchscreens Using Electromagnetic Fields
 DATE       : 2026-07-27
@@ -7953,7 +8176,7 @@ A GhostTouch-class attack could be deployed today and no existing enterprise mob
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="057" type="security-research-post">
+<DOCUMENT id="062" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Light Commands — Laser-Based Audio Injection on Voice-Controllable Systems
 DATE       : 2026-07-26
@@ -8093,7 +8316,7 @@ The Light Commands team published their full paper, video demonstrations, and de
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="058" type="security-research-post">
+<DOCUMENT id="063" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows 11 DirectWrite Font Fuzzing — System Service Exception via Kernel Font Driver
 DATE       : 2026-07-26
@@ -8357,7 +8580,7 @@ The difference between a BSOD and a working remote code execution exploit is con
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="059" type="security-research-post">
+<DOCUMENT id="064" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Windows Kernel Object Namespace — Zero Isolation, Zero Audit, Zero Visibility
 DATE       : 2026-07-25
@@ -8542,7 +8765,7 @@ There is no built-in audit tool, no security baseline, no Group Policy, and no W
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="060" type="security-research-post">
+<DOCUMENT id="065" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Intel DCI / USB3-Debug — The $30 Hardware Root That Owns Every Laptop
 DATE       : 2026-07-18
@@ -8769,12 +8992,12 @@ And if you're an attacker reading this — well, you already knew. That's the pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="061" type="security-research-post">
+<DOCUMENT id="066" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ColdFusion APSB26-68: Six CVSS 10.0 Flaws and a Two-Hour Exploitation Window
 DATE       : 2026-07-15
 URL        : https://garrettstimpson.ca/posts/2026/07/15/coldfusion-apsb26-68-cvss10-bonanza/
-CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48282, cve-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
+CVE        : CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, cve-2026-48282, CVE-2026-48282, CVE-2026-48283, CVE-2026-48286, CVE-2026-48316
 CATEGORIES : exploits, web, vuln-research
 TAGS       : CVE-2026-48282, CVE-2026-48276, CVE-2026-48277, CVE-2026-48281, CVE-2026-48316, CVE-2026-48283, CVE-2026-48286, adobe, coldfusion, RCE, path-traversal, unrestricted-upload, CISA-KEV, watchtowr
 WORD_COUNT : 1994
@@ -8980,12 +9203,12 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="062" type="security-research-post">
+<DOCUMENT id="067" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
 URL        : https://garrettstimpson.ca/posts/2026/07/01/cve-2026-55200-libssh2-transport-read-oob-write/
-CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, cve-2026-55200, CVE-2026-55200
+CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, CVE-2026-55200, cve-2026-55200
 CATEGORIES : exploits, supply-chain
 TAGS       : cve-2026-55200, libssh2, ssh, integer-overflow, rce, curl, supply-chain
 WORD_COUNT : 1392
@@ -9074,12 +9297,12 @@ The lesson here isn't "validate your lengths." Everyone already knows that. It's
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="063" type="security-research-post">
+<DOCUMENT id="068" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31429: KFENCE Breaks the One Assumption skb_kfree_head Relied On
 DATE       : 2026-06-29
 URL        : https://garrettstimpson.ca/posts/2026/06/29/cve-2026-31429-kfence-skb-cross-cache-free/
-CVE        : cve-2026-31429, CVE-2026-31429
+CVE        : CVE-2026-31429, cve-2026-31429
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-31429, kfence, slub, cross-cache, skb, bpf, linux-kernel
 WORD_COUNT : 1370
@@ -9195,12 +9418,12 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="064" type="security-research-post">
+<DOCUMENT id="069" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : cve-2026-23111, CVE-2026-23111
+CVE        : CVE-2026-23111, cve-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 754
@@ -9267,7 +9490,7 @@ See full writeup at: <https://blog.exodusintel.com/2026/06/08/off-by-exploiting-
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="065" type="security-research-post">
+<DOCUMENT id="070" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RoguePlanet: Coercing Defender Into Writing SYSTEM-Owned Files (CVE-2026-50656)
 DATE       : 2026-06-19
@@ -9366,7 +9589,7 @@ The uncomfortable part is the lesson nobody on the vendor side wants printed. We
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="066" type="security-research-post">
+<DOCUMENT id="071" type="security-research-post">
 <FRONTMATTER>
 TITLE      : The Ghost in the Machine: The Embedded Controller Attack Surface Nobody Is Auditing
 DATE       : 2026-06-18
@@ -9483,12 +9706,12 @@ Here's the detail that keeps me up: virtually every shipping laptop has JTAG or 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="067" type="security-research-post">
+<DOCUMENT id="072" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag
 DATE       : 2026-06-16
 URL        : https://garrettstimpson.ca/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/
-CVE        : CVE-2026-20182, cve-2026-20245, CVE-2026-20245, cve-2026-20262, CVE-2026-20262
+CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, cve-2026-20262, CVE-2026-20262
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, cve-2026-20262, cve-2026-20245, path-traversal, root, vmanage, zero-day
 WORD_COUNT : 1620
@@ -9568,12 +9791,12 @@ I expect we will find out. Probably sooner than anyone wants.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="068" type="security-research-post">
+<DOCUMENT id="073" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
 URL        : https://garrettstimpson.ca/posts/2026/06/14/itscape-kvm-arm64-guest-host-escape-cve-2026-46316/
-CVE        : CVE-2026-46316, cve-2026-46316
+CVE        : cve-2026-46316, CVE-2026-46316
 CATEGORIES : exploits, linux-kernel
 TAGS       : CVE-2026-46316, KVM, arm64, UAF, guest-escape, cloud-security
 WORD_COUNT : 1646
@@ -9704,12 +9927,12 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="069" type="security-research-post">
+<DOCUMENT id="074" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
 URL        : https://garrettstimpson.ca/posts/2026/06/07/cve-2026-20245-cisco-sdwan-manager-root-rce/
-CVE        : CVE-2026-20127, CVE-2026-20182, cve-2026-20245, CVE-2026-20245
+CVE        : CVE-2026-20127, CVE-2026-20182, CVE-2026-20245, cve-2026-20245
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, command-injection, zero-day, root, mandiant
 WORD_COUNT : 1289
@@ -9780,7 +10003,7 @@ One hard truth to close on. Cisco was blunt that if your logs show abuse, instal
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="070" type="security-research-post">
+<DOCUMENT id="075" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20230: An Unauthenticated SSRF in Cisco Unified CM That Writes Files and Ends at Root
 DATE       : 2026-06-07
@@ -9854,12 +10077,12 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="071" type="security-research-post">
+<DOCUMENT id="076" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : CVE-2026-45247, cve-2026-45247
+CVE        : cve-2026-45247, CVE-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1390
@@ -9945,12 +10168,12 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="072" type="security-research-post">
+<DOCUMENT id="077" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
 URL        : https://garrettstimpson.ca/posts/2026/06/04/cve-2025-48595-android-framework-integer-overflow-lpe/
-CVE        : cve-2025-48595, CVE-2025-48595
+CVE        : CVE-2025-48595, cve-2025-48595
 CATEGORIES : exploits, mobile
 TAGS       : android, cve-2025-48595, privilege-escalation, integer-overflow, spyware, cisa-kev
 WORD_COUNT : 1284
@@ -10027,7 +10250,7 @@ And watch for the second wave. Right now exploitation is limited and targeted. T
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="073" type="security-research-post">
+<DOCUMENT id="078" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2022-0492 Hits KEV: A Four-Year-Old cgroups Bug Is Escaping Containers in the Wild
 DATE       : 2026-06-03
@@ -10130,12 +10353,12 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="074" type="security-research-post">
+<DOCUMENT id="079" type="security-research-post">
 <FRONTMATTER>
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/yellowkey-cve-2026-45585-bitlocker-winre-txf-bypass/
-CVE        : cve-2026-45585, CVE-2026-45585
+CVE        : CVE-2026-45585, cve-2026-45585
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-45585, bitlocker, winre, transactional-ntfs, physical-access
 WORD_COUNT : 1231
@@ -10201,7 +10424,7 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="075" type="security-research-post">
+<DOCUMENT id="080" type="security-research-post">
 <FRONTMATTER>
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
@@ -10308,7 +10531,7 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="076" type="security-research-post">
+<DOCUMENT id="081" type="security-research-post">
 <FRONTMATTER>
 TITLE      : GreenPlasma: a SYSTEM shell hiding inside CTFMON, and the half a PoC that ships it
 DATE       : 2026-06-02
@@ -10400,7 +10623,7 @@ Treat GreenPlasma as live. The dangerous half is already public, and the other h
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="077" type="security-research-post">
+<DOCUMENT id="082" type="security-research-post">
 <FRONTMATTER>
 TITLE      : A Go Mirai Variant That Hides Behind cpufreqd
 DATE       : 2026-06-02
@@ -10542,12 +10765,12 @@ This one is not sophisticated. It is a clean example of where commodity Linux ma
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="078" type="security-research-post">
+<DOCUMENT id="083" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-41089: One CLDAP Packet Reboots Your Domain Controller, And Microsoft Said It Was Unlikely
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-41089-netlogon-cldap-stack-overflow-rce/
-CVE        : cve-2026-41089, CVE-2026-41089
+CVE        : CVE-2026-41089, cve-2026-41089
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-41089, netlogon, cldap, buffer-overflow, active-directory, rce
 WORD_COUNT : 1188
@@ -10635,7 +10858,7 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="079" type="security-research-post">
+<DOCUMENT id="084" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
@@ -10721,7 +10944,7 @@ The lesson is not really about Fortinet. It is that your management tooling is y
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="080" type="security-research-post">
+<DOCUMENT id="085" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS
 DATE       : 2026-06-01
@@ -10824,12 +11047,12 @@ Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-in
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="081" type="security-research-post">
+<DOCUMENT id="086" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20817: The WER Service Will Launch SYSTEM Processes For Anyone Who Asks
 DATE       : 2026-06-01
 URL        : https://garrettstimpson.ca/posts/2026/06/01/cve-2026-20817-wer-alpc-svcelevatedlaunch-lpe/
-CVE        : cve-2026-20817, CVE-2026-20817
+CVE        : CVE-2026-20817, cve-2026-20817
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-20817, alpc, privilege-escalation, wer, lpe
 WORD_COUNT : 1111
@@ -10904,7 +11127,7 @@ The clean fix shipped in January. The bug is a reminder that the dangerous part 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="082" type="security-research-post">
+<DOCUMENT id="087" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-0257: Forging GlobalProtect Cookies Because Nobody Signed Them
 DATE       : 2026-06-01
@@ -10996,7 +11219,7 @@ The lesson here is older than RSA. Encryption is not authentication. If you decr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="083" type="security-research-post">
+<DOCUMENT id="088" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Evelyn Stealer Ships Inside VS Code Extensions and Hollows grpconv.exe to Steal Your Dev Creds
 DATE       : 2026-05-31
@@ -11145,7 +11368,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="084" type="security-research-post">
+<DOCUMENT id="089" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
@@ -11242,7 +11465,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="085" type="security-research-post">
+<DOCUMENT id="090" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
@@ -11317,12 +11540,12 @@ The uncomfortable part is that the security product is the trusted delivery chan
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="086" type="security-research-post">
+<DOCUMENT id="091" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : cve-2026-46300, CVE-2026-46300
+CVE        : CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1432
@@ -11435,7 +11658,7 @@ The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragn
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="087" type="security-research-post">
+<DOCUMENT id="092" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DonutLoader Wraps ValleyRAT in an Inno Setup Shell and the Payload Never Touches Disk
 DATE       : 2026-05-30
@@ -11559,7 +11782,7 @@ This sample is not novel research. Donut has been around for years and ValleyRAT
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="088" type="security-research-post">
+<DOCUMENT id="093" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CIFSwitch: When the Root Helper Walks Into Your Namespace
 DATE       : 2026-05-30
@@ -11640,7 +11863,7 @@ Patch when your distro ships the kernel update. Until then, decide whether any g
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="089" type="security-research-post">
+<DOCUMENT id="094" type="security-research-post">
 <FRONTMATTER>
 TITLE      : SHub Reaper Lives On: MacSync Shell Script Drops on MalwareBazaar Today
 DATE       : 2026-05-29
@@ -11824,7 +12047,7 @@ MITRE ATT&CK: T1059.002 (AppleScript), T1555 (Credentials from Password Stores),
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="090" type="security-research-post">
+<DOCUMENT id="095" type="security-research-post">
 <FRONTMATTER>
 TITLE      : MiniPlasma: The 2020 Windows Bug That Never Actually Died
 DATE       : 2026-05-29
@@ -11929,7 +12152,7 @@ The gap between Forshaw's 2020 report and today is a good reminder that "patched
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="091" type="security-research-post">
+<DOCUMENT id="096" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You
 DATE       : 2026-05-29
@@ -12099,7 +12322,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="092" type="security-research-post">
+<DOCUMENT id="097" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
@@ -12267,12 +12490,12 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="093" type="security-research-post">
+<DOCUMENT id="098" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/cve-2026-2005-postgresql-pgcrypto-heap-overflow-rce/
-CVE        : cve-2026-2005, CVE-2026-2005
+CVE        : CVE-2026-2005, cve-2026-2005
 CATEGORIES : exploits, database
 TAGS       : CVE-2026-2005, postgresql, pgcrypto, heap-overflow, RCE, PoC
 WORD_COUNT : 1553
@@ -12412,7 +12635,7 @@ We're going to see a lot more of this pattern.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="094" type="security-research-post">
+<DOCUMENT id="099" type="security-research-post">
 <FRONTMATTER>
 TITLE      : ClearFake Drops a Go-Compiled DLL That Unhooks ntdll to Blind Your EDR
 DATE       : 2026-05-29
@@ -12642,7 +12865,7 @@ The larger ClearFake picture: the campaign now distributes Lumma Stealer, Vidar 
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="095" type="security-research-post">
+<DOCUMENT id="100" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Signed and Delivered: How Threat Actors Weaponize Legitimate ScreenConnect Installers
 DATE       : 2026-05-28
@@ -12777,7 +13000,7 @@ Two samples this morning. Same reporter. Same technique. This campaign is not sl
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="096" type="security-research-post">
+<DOCUMENT id="101" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Prometei Is Back on Linux and Its UPX Trick Is Clever
 DATE       : 2026-05-28
@@ -12994,12 +13217,12 @@ The campaign is active. The technique is reproducible across new variants. Worth
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="097" type="security-research-post">
+<DOCUMENT id="102" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1194
@@ -13115,7 +13338,7 @@ Apply the patch. Check your builds. The full exploit code is public.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="098" type="security-research-post">
+<DOCUMENT id="103" type="security-research-post">
 <FRONTMATTER>
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
@@ -13309,12 +13532,12 @@ MITRE ATT&CK coverage for this sample: T1027 (MBA string obfuscation), T1055 (pr
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="099" type="security-research-post">
+<DOCUMENT id="104" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : CVE-2026-31635, cve-2026-31635, CVE-2026-43500
+CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1585
@@ -13473,7 +13696,7 @@ The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="100" type="security-research-post">
+<DOCUMENT id="105" type="security-research-post">
 <FRONTMATTER>
 TITLE      : DarkTortilla Wraps DarkCloud: How a .NET Crypter Hides a Credential Stealer in a Fake Quotation Email
 DATE       : 2026-05-27
@@ -13637,7 +13860,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="101" type="security-research-post">
+<DOCUMENT id="106" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
@@ -13745,12 +13968,12 @@ Check your kernel version. Patch if you haven't.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="102" type="security-research-post">
+<DOCUMENT id="107" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : CVE-2026-42945, cve-2026-42945
+CVE        : cve-2026-42945, CVE-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1567
@@ -13907,12 +14130,12 @@ The full advisory is at F5's security portal (K000161019). Fixed packages are av
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="103" type="security-research-post">
+<DOCUMENT id="108" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431
+CVE        : cve-2026-31431, CVE-2026-31431
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1567
@@ -14135,12 +14358,12 @@ rmmod algif_aead 2>/dev/null
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="104" type="security-research-post">
+<DOCUMENT id="109" type="security-research-post">
 <FRONTMATTER>
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, CVE-2026-20182, cve-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
 WORD_COUNT : 1514
@@ -14264,7 +14487,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="105" type="security-research-post">
+<DOCUMENT id="110" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
@@ -14370,7 +14593,7 @@ Patch. Then ask why your review process didn't catch it either.
 
 --------------------------------------------------------------------------------
 
-<DOCUMENT id="106" type="security-research-post">
+<DOCUMENT id="111" type="security-research-post">
 <FRONTMATTER>
 TITLE      : Living Off the Land in 2026: The Techniques EDR Still Misses
 DATE       : 2026-05-25
@@ -14528,5 +14751,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 106 documents — 2026-11-17T22:28:16Z
+END OF CORPUS — 111 documents — 2026-11-17T23:23:47Z
 ================================================================================
