@@ -73,6 +73,8 @@ Request counts and removal counts are different. A prepared request, a submissio
 
 [Watch the short removal guide](https://agent.garrettstimpson.ca/help#help-video-02-data-removal).
 
+If your address shows up again after a broker opt-out, check the live listing and the search result separately. [How to remove your home address from Google]({% post_url 2026-11-17-remove-home-address-from-google %}).
+
 ## 4. Investigate a suspicious message or scam
 
 1. Open **Message checks** and choose the starting point that fits: a suspicious message, something you clicked or shared, or a payment you already made.
