@@ -57,3 +57,11 @@ Next check date
 ```
 
 Agent Garrett’s data-removal workflow tracks requests and eligible follow-ups for supported brokers. Use the live URL check for listings and documents you handle yourself. [Agent Garrett Data Removal](https://agent.garrettstimpson.ca/remove)
+
+## More data removal guides
+
+- [Copy a data broker opt-out request]({% post_url 2026-11-17-data-broker-opt-out-request-template %})
+- [Remove your phone number from the internet]({% post_url 2026-11-17-remove-phone-number-from-internet %})
+- [Use California DROP and check broker responses]({% post_url 2026-11-17-california-drop-data-broker-deletion %})
+- [Opt out of data brokers in Canada]({% post_url 2026-11-17-opt-out-data-brokers-canada %})
+- [Respond to personal information exposed on the dark web]({% post_url 2026-11-17-remove-personal-information-from-dark-web %})
