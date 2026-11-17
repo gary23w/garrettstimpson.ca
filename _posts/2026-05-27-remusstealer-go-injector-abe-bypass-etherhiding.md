@@ -180,6 +180,11 @@ Six samples in MalwareBazaar now share the same certificate thumbprint `eae49c47
 
 MITRE ATT&CK coverage for this sample: T1027 (MBA string obfuscation), T1055 (process injection into Chrome), T1553.002 (rogue code signing certificate), T1497.001 (CPUID anti-VM), T1555.003 (credentials from web browsers), T1134.001 (SYSTEM token impersonation, tried before injection), T1071 (EtherHiding via Ethereum JSON-RPC as application layer protocol).
 
+## Related on this site
+
+- [VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection](/posts/2026/06/02/voidstealer-debugger-abe-bypass/)
+- [CVE-2026-35616: When the Patch Server Ships the Malware](/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/)
+
 ## Sources
 
 - [Remus: Unmasking The 64-bit Variant of the Infamous Lumma Stealer (Gen Threat Labs)](https://www.gendigital.com/blog/insights/research/remus-64bit-variant-of-lumma-stealer)

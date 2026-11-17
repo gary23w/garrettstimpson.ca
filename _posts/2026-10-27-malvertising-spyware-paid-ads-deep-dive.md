@@ -229,6 +229,12 @@ Because the delivery is social engineering rather than exploitation, traditional
 
 **Prevention, briefly:** block `powershell -enc` and `mshta http` from Run-dialog parentage entirely via policy; treat promoted search results as untrusted by default (the vendor's real site is one organic result below); and if you operate a brand, monitor ad platforms for ads impersonating your domain, because your users are the target.
 
+## Related on this site
+
+- [Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You](/posts/2026/05/29/lumma-stealer-clickfix-windows-terminal/)
+- [Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS](/posts/2026/06/01/infiniti-stealer-clickfix-nuitka-macos/)
+- [Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away](/posts/2026/09/08/most-malware-same-machine-persistence/)
+
 ## Sources
 
 - [Elastic Security Labs, OXLOADER and CastleStealer malvertising disclosure](https://www.elastic.co/security-labs)

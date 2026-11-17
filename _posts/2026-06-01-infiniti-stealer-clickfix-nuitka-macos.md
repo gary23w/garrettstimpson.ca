@@ -91,6 +91,12 @@ Mitigations are mostly about the human in the loop. No legitimate CAPTCHA has ev
 
 Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-intel/2026/03/infiniti-stealer-a-new-macos-infostealer-using-clickfix-and-python-nuitka](https://www.malwarebytes.com/blog/threat-intel/2026/03/infiniti-stealer-a-new-macos-infostealer-using-clickfix-and-python-nuitka)
 
+## Related on this site
+
+- [Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You](/posts/2026/05/29/lumma-stealer-clickfix-windows-terminal/)
+- [The Spyware You Pay to Click: How Paid Ad Campaigns Deliver Infostealers, and How to Hunt Them](/posts/2026/10/27/malvertising-spyware-paid-ads-deep-dive/)
+- [Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away](/posts/2026/09/08/most-malware-same-machine-persistence/)
+
 ## Sources
 
 - [malwarebytes.com/blog/threat-intel/2026/03/infiniti-stealer-a-new-macos-info](https://www.malwarebytes.com/blog/threat-intel/2026/03/infiniti-stealer-a-new-macos-infostealer-using-clickfix-and-python-nuitka)

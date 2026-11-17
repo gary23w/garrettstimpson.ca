@@ -92,6 +92,11 @@ VoidStealer is commodity malware that borrowed an elegant idea. The idea is the 
 
 *Sources: Gen Threat Labs, "VoidStealer: Debugging Chrome to Steal Its Secrets" (Mar 19, 2026); SOCRadar, "Void Stealer: The Infostealer Malware Quietly Targeting Organizations in 2026" (Apr 16, 2026).*
 
+## Related on this site
+
+- [RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop](/posts/2026/05/27/remusstealer-go-injector-abe-bypass-etherhiding/)
+- [CVE-2026-35616: When the Patch Server Ships the Malware](/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/)
+
 ## Sources
 
 - [VoidStealer: Debugging Chrome to Steal Its Secrets (Gen)](https://www.gendigital.com/blog/insights/research/voidstealer-abe-bypass)

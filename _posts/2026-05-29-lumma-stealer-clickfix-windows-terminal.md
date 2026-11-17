@@ -159,6 +159,12 @@ Event ID 7 (Image Load): Flag any DLL loaded into a browser process from `%TEMP%
 
 The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickFix now accounts for 47% of initial access events tracked by Microsoft Defender Experts. It beat out traditional phishing at 35%. The lure text will keep changing. The execution vehicle will keep rotating. The behavioral indicators on the process creation and injection side are more durable than any signature against the social engineering layer, so that is where detection engineering effort is best spent right now.
 
+## Related on this site
+
+- [Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS](/posts/2026/06/01/infiniti-stealer-clickfix-nuitka-macos/)
+- [The Spyware You Pay to Click: How Paid Ad Campaigns Deliver Infostealers, and How to Hunt Them](/posts/2026/10/27/malvertising-spyware-paid-ads-deep-dive/)
+- [Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away](/posts/2026/09/08/most-malware-same-machine-persistence/)
+
 ## Sources
 
 - [bazaar.abuse.ch/browse/yara/LummaStealerDetection](https://bazaar.abuse.ch/browse/yara/Lumma_Stealer_Detection/)

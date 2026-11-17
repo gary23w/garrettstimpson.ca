@@ -92,6 +92,13 @@ Patch. Then ask why your review process didn't catch it either.
 
 *Based on the [Wiz blog](https://www.wiz.io/blog/dirty-frag-linux-kernel-local-privilege-escalation-via-esp-and-rxrpc), [Sysdig detection guide](https://www.sysdig.com/blog/dirty-frag-cve-2026-43284-and-cve-2026-43500-detecting-unpatched-local-privilege-escalation-via-linux-kernel-esp-and-rxrpc), and [Microsoft Security Blog](https://www.microsoft.com/en-us/security/blog/2026/05/08/active-attack-dirty-frag-linux-vulnerability-expands-post-compromise-risk/).*
 
+## Related on this site
+
+- [CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro](/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/)
+- [DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root](/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/)
+- [Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch](/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/)
+- [Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up](/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/)
+
 ## Sources
 
 - [Wiz blog](https://www.wiz.io/blog/dirty-frag-linux-kernel-local-privilege-escalation-via-esp-and-rxrpc)
