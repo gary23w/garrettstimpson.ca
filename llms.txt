@@ -26,6 +26,7 @@ Vulnerability research, exploit breakdowns and malware analysis. The full text o
 
 ## Posts
 
+- [How to Remove Your Home Address From Google When It Keeps Coming Back](https://garrettstimpson.ca/posts/2026/11/17/remove-home-address-from-google/): Opted out and found your home address on Google again? Open the exact result to see whether you need a search refresh, a broker opt-out, or a change to the original document.
 - [The Attachment Your Scanner Never Saw](https://garrettstimpson.ca/posts/2026/11/17/mail-parser-the-attachment-your-scanner-never-saw/): A malformed attachment could stop mail-parser from extracting the files that followed it. The dangerous part is what a security pipeline might conclude from that incomplete folder.
 - [SIP2Shell Is Public Now: What the FreeSWITCH Exploit Tool Actually Changes (CVE-2026-116779)](https://garrettstimpson.ca/posts/2026/11/16/sip2shell-public-exploit-freeswitch-response/): A public exploit tool for CVE-2026-116779 turns a quiet FreeSWITCH SIP flaw into a script-kiddie-grade remote code execution bug. Here is what it means, how to tell if you are exposed, and what to do about it.
 - [SIP2Shell Explained: Root Cause, Detection, and Hardening for CVE-2026-116779](https://garrettstimpson.ca/posts/2026/11/16/sip2shell-cve-2026-116779-explained/): The technical story behind SIP2Shell: how FreeSWITCH turns one inbound SIP MESSAGE into a root shell, how to catch it in your logs, and how to lock it down. A defensive companion to the advisory and the exploit-tool coverage.
