@@ -113,7 +113,10 @@ dialog.garrett-removal-popup::backdrop {
 
 .garrett-removal-popup a.garrett-removal-popup-start:hover {
   background: #292929;
-  color: #fff;
+}
+
+:root[data-color-mode] .garrett-removal-popup a.garrett-removal-popup-start {
+  color: #fff !important;
 }
 
 .garrett-removal-popup button {
