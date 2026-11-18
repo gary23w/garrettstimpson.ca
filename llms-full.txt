@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-11-17T23:23:47Z
+GENERATED    : 2026-11-18T09:42:18Z
 AUTHOR       : Garrett Stimpson
 PROFILE      : Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years across offensive security, defensive operations, and security engineering.
 SITE         : https://garrettstimpson.ca
@@ -413,10 +413,10 @@ A DROP status applies to that broker’s records. An address may also appear in 
 TITLE      : SIP2Shell Is Public Now: What the FreeSWITCH Exploit Tool Actually Changes (CVE-2026-116779)
 DATE       : 2026-11-16 08:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/16/sip2shell-public-exploit-freeswitch-response/
-CVE        : CVE-2026-116779
+CVE        : cve-2026-116779, CVE-2026-116779
 CATEGORIES : exploits, analysis
 TAGS       : sip2shell, freeswitch, sip, voip, rce, zero-day, defense, agent-garrett
-WORD_COUNT : 1016
+WORD_COUNT : 1055
 EXCERPT    : A public exploit tool for CVE-2026-116779 turns a quiet FreeSWITCH SIP flaw into a script-kiddie-grade remote code execution bug. Here is what it means, how to tell if you are exposed, and what to do about it.
 </FRONTMATTER>
 <BODY>
@@ -470,6 +470,10 @@ The VoIP world has a patching culture problem, and it is structural. These syste
 SIP2Shell is what happens when that fleet meets a packaged exploit. The tool is the catalyst, but the fuel was already there. Every RCE in a telephony stack will keep landing until the default answer to "should the media server be on the public internet" stops being yes by accident.
 
 Patch, restrict, segment, rotate, watch. Five verbs, and the first one is due today.
+
+## Related on this site
+
+- [One SIP Message, One Plus Sign: The FreeSWITCH Chat-Proto Trivial That Is Getting Shelled in the Wild (CVE-2026-116779)](/posts/2026/11/10/freeswitch-sip-message-api-chat-proto-rce-cve-2026-116779/)
 </BODY>
 </DOCUMENT>
 
@@ -480,7 +484,7 @@ Patch, restrict, segment, rotate, watch. Five verbs, and the first one is due to
 TITLE      : SIP2Shell Explained: Root Cause, Detection, and Hardening for CVE-2026-116779
 DATE       : 2026-11-18 08:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/16/sip2shell-cve-2026-116779-explained/
-CVE        : CVE-2026-116779, cve-2026-116779
+CVE        : cve-2026-116779, CVE-2026-116779
 CATEGORIES : exploits, analysis
 TAGS       : freeswitch, voip, sip, cve-2026-116779, sip2shell, rce, detection, hardening, defense
 WORD_COUNT : 862
@@ -597,7 +601,7 @@ The repo is [github.com/gary23w/sentinels](https://github.com/gary23w/sentinels)
 TITLE      : An 11-Year-Old Kernel Bug and a Root Daemon on a World-Writable Socket
 DATE       : 2026-11-16 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/16/noisytcp-and-the-check-point-socket-nobody-audited/
-CVE        : CVE-2026-123039, cve-2026-123039, cve-2026-99288, CVE-2026-99288
+CVE        : cve-2026-123039, CVE-2026-123039, cve-2026-99288, CVE-2026-99288
 CATEGORIES : exploits, analysis
 TAGS       : noisytcp, linux-kernel, cve-2026-99288, dos, check-point, cve-2026-123039, gaia-os, lpe, wiper, esxi
 WORD_COUNT : 1108
@@ -959,7 +963,7 @@ If you operate an agent that watches infrastructure: Plone instances are old, qu
 TITLE      : The Dump That Runs You: Perl Data::Dump::Streamer Code Injection (CVE-2026-126673)
 DATE       : 2026-11-12 04:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/12/perl-data-dump-streamer-code-injection-cve-2026-126673/
-CVE        : cve-2026-126673, CVE-2026-126673
+CVE        : CVE-2026-126673, cve-2026-126673
 CATEGORIES : exploits, analysis
 TAGS       : perl, cve-2026-126673, code-injection, cwe-94, serialization, qr, regexp
 WORD_COUNT : 1060
@@ -1465,10 +1469,10 @@ Configuration management is the software that defines what every other machine i
 TITLE      : One SIP Message, One Plus Sign: The FreeSWITCH Chat-Proto Trivial That Is Getting Shelled in the Wild (CVE-2026-116779)
 DATE       : 2026-11-10 09:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/10/freeswitch-sip-message-api-chat-proto-rce-cve-2026-116779/
-CVE        : CVE-2026-116779, cve-2026-116779
+CVE        : cve-2026-116779, CVE-2026-116779
 CATEGORIES : exploits, analysis
 TAGS       : freeswitch, voip, sip, cve-2026-116779, rce, cwe-77, cwe-78, kev, signalwire
-WORD_COUNT : 1235
+WORD_COUNT : 1262
 EXCERPT    : FreeSWITCH parses the To user of an inbound SIP MESSAGE as 'proto+target' and never checked the proto. api+system passes your text straight to the API CLI, and one of the stock API commands is a shell. CVSS 9.8, on CISA's KEV list with an active-exploitation flag, patched in 1.11.3.
 </FRONTMATTER>
 <BODY>
@@ -1523,6 +1527,10 @@ The plus sign has been sitting in that header for years. It took an active-explo
 ---
 
 *Analysis based on the SignalWire security advisory (GHSA-mg63-h38w-8p9p), the fix commit in sofia_presence.c, the NVD entry (CVSS 9.8), and CISA KEV addition of 2026-11-09 (active exploitation, federal due date 2026-11-12). The PoC walkthrough above is a lab-level reproduction outline, not weaponized exploit code.*
+
+## Related on this site
+
+- [SIP2Shell Is Public Now: What the FreeSWITCH Exploit Tool Actually Changes (CVE-2026-116779)](/posts/2026/11/16/sip2shell-public-exploit-freeswitch-response/)
 </BODY>
 </DOCUMENT>
 
@@ -1674,7 +1682,7 @@ The unglamorous truth: there is no CVE number yet, no CVSS score to anchor a hea
 TITLE      : The Retry Button Is the Exploit: How apt Merged Two Different Packages Into a Root Shell (CVE-2026-109518)
 DATE       : 2026-11-09 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/09/apt-redirect-retry-package-merge-cve-2026-109518/
-CVE        : CVE-2026-109518, cve-2026-109518
+CVE        : cve-2026-109518, CVE-2026-109518
 CATEGORIES : exploits, analysis
 TAGS       : apt, debian, supply-chain, mitm, cve-2026-109518, package-management
 WORD_COUNT : 1492
@@ -1986,7 +1994,7 @@ The full audit, with file:line citations for every claim and the complete proof 
 TITLE      : *sshole: How a Locked Account Let Anyone Log In on musl Linux (CVE-2026-123158)
 DATE       : 2026-11-06 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/06/sshhole-openssh-musl-auth-bypass-cve-2026-123158/
-CVE        : cve-2026-123158, CVE-2026-123158
+CVE        : CVE-2026-123158, cve-2026-123158
 CATEGORIES : exploits, linux, vuln-research
 TAGS       : sshhole, openssh, musl, cve-2026-123158, auth-bypass, alpine, embedded, lpe, cve
 WORD_COUNT : 1979
@@ -2363,7 +2371,7 @@ Sign in at [agent.garrettstimpson.ca](https://agent.garrettstimpson.ca), or conn
 TITLE      : Node2Shell: The Brotli Decoder Bug That Turns Any Compressed Response Into a Shell (CVE-2026-111497)
 DATE       : 2026-10-28
 URL        : https://garrettstimpson.ca/posts/2026/10/28/node2shell-brotli-decoder-oob-write-cve-2026-111497/
-CVE        : cve-2026-111497, CVE-2026-111497
+CVE        : CVE-2026-111497, cve-2026-111497
 CATEGORIES : exploits, memory-safety, vuln-research
 TAGS       : brotli, nodejs, cve-2026-111497, node2shell, http2shell, broccoli2shell, oob-write, rce, libcurl, git
 WORD_COUNT : 2303
@@ -2702,7 +2710,7 @@ The machines we built to keep the bots out are the same machines an attacker can
 TITLE      : The Sixteen-Bit Lie: Zephyr's Bluetooth Classic L2CAP Overflow Nobody Paged About (CVE-2025-12035)
 DATE       : 2026-10-27
 URL        : https://garrettstimpson.ca/posts/2026/10/27/zephyr-bluetooth-classic-l2cap-integer-overflow-cve-2025-12035/
-CVE        : cve-2025-12035, CVE-2025-12035
+CVE        : CVE-2025-12035, cve-2025-12035
 CATEGORIES : exploits, embedded, vuln-research
 TAGS       : zephyr, bluetooth, l2cap, cve, integer-overflow, embedded, firmware
 WORD_COUNT : 1482
@@ -2877,7 +2885,7 @@ URL        : https://garrettstimpson.ca/posts/2026/10/27/malvertising-spyware-pa
 CVE        : none
 CATEGORIES : malware, threat-intel, detection
 TAGS       : malvertising, spyware, infostealer, lumma, clickfix, google-ads, oxloader, hunting, detection
-WORD_COUNT : 2431
+WORD_COUNT : 2499
 EXCERPT    : A deep dive into ad-platform spyware: how a paid Google ad becomes a full infostealer infection, stage by stage, with a runnable PoC that models the entire chain and the telemetry rules that catch it. Based on real campaigns documented by Cloudflare, Elastic, Unit 42, and Netskope.
 </FRONTMATTER>
 <BODY>
@@ -3096,6 +3104,12 @@ Because the delivery is social engineering rather than exploitation, traditional
 **Hunt 4: retro-hunt the user base.** The most valuable move after any public malvertising disclosure is a retroactive scan. Elastic's disclosure published observables and YARA rules for OXLOADER and CastleStealer that you can use to search retroactively for prior infections (https://www.elastic.co/security-labs). If someone in your org searched for a popular utility last quarter and ran something odd afterward, you want to know now, before the stolen cookies are replayed.
 
 **Prevention, briefly:** block `powershell -enc` and `mshta http` from Run-dialog parentage entirely via policy; treat promoted search results as untrusted by default (the vendor's real site is one organic result below); and if you operate a brand, monitor ad platforms for ads impersonating your domain, because your users are the target.
+
+## Related on this site
+
+- [Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You](/posts/2026/05/29/lumma-stealer-clickfix-windows-terminal/)
+- [Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS](/posts/2026/06/01/infiniti-stealer-clickfix-nuitka-macos/)
+- [Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away](/posts/2026/09/08/most-malware-same-machine-persistence/)
 
 ## Sources
 
@@ -3345,7 +3359,7 @@ The uncomfortable summary: the most widely deployed code paths are not the ones 
 TITLE      : PHP2Shell: The Fatal-Error Bug That Turns a Crashed Request Into a Shell (CVE-2026-109618 / CVE-2026-109619)
 DATE       : 2026-10-23
 URL        : https://garrettstimpson.ca/posts/2026/10/23/php2shell-fatal-error-use-after-free-cve-2026-109618/
-CVE        : CVE-2026-109618, cve-2026-109618, CVE-2026-109619, cve-2026-109619
+CVE        : cve-2026-109618, CVE-2026-109618, cve-2026-109619, CVE-2026-109619
 CATEGORIES : exploits, web, vuln-research
 TAGS       : php, php2shell, cve-2026-109618, cve-2026-109619, use-after-free, rce, memory-safety, patching
 WORD_COUNT : 2195
@@ -3551,7 +3565,7 @@ And a note on how this was found: AI-assisted discovery, coordinated disclosure,
 TITLE      : TETRA:BURST and the TEA1 Backdoor: How Police Radio Encryption Was Quietly Downgraded to 32 Bits for Decades
 DATE       : 2026-10-21
 URL        : https://garrettstimpson.ca/posts/2026/10/21/tetra-burst-tea1-backdoor-cve-2022-24402/
-CVE        : CVE-2022-24400, CVE-2022-24401, cve-2022-24402, CVE-2022-24402, CVE-2022-24403, CVE-2022-24404
+CVE        : CVE-2022-24400, CVE-2022-24401, CVE-2022-24402, cve-2022-24402, CVE-2022-24403, CVE-2022-24404
 CATEGORIES : radio-security, cryptography, critical-infrastructure
 TAGS       : tetra, tea1, cve-2022-24402, midnight-blue, cryptography, backdoor, critical-infrastructure, sdr
 WORD_COUNT : 2457
@@ -4650,7 +4664,7 @@ The thing I keep coming back to is the split. Two zero-days, one release, divide
 TITLE      : Nobody Wrote About This: Command Injection in Schneider Electric NetBotz 5
 DATE       : 2026-09-18
 URL        : https://garrettstimpson.ca/posts/2026/09/18/cve-2026-13336-netbotz-5-backup-restore-command-injection/
-CVE        : cve-2026-13336, CVE-2026-13336, CVE-2026-13337, cve-2026-13337
+CVE        : CVE-2026-13336, cve-2026-13336, CVE-2026-13337, cve-2026-13337
 CATEGORIES : exploits, analysis, hardware
 TAGS       : cve-2026-13336, cve-2026-13337, netbotz, schneider-electric, ics, command-injection, hql-injection, threat-intel, patch-tuesday
 WORD_COUNT : 1320
@@ -5033,7 +5047,7 @@ Root on the node was always game over for the node. The change is that the node 
 TITLE      : PaperCut's Pre-Auth RCE Hit Hundreds. Patching Is Not Recovery
 DATE       : 2026-09-13
 URL        : https://garrettstimpson.ca/posts/2026/09/13/papercut-preauth-rce-81578-82078/
-CVE        : CVE-2026-81578, cve-2026-81578, cve-2026-82078, CVE-2026-82078
+CVE        : cve-2026-81578, CVE-2026-81578, CVE-2026-82078, cve-2026-82078
 CATEGORIES : exploits, web, rce
 TAGS       : papercut, papercut-ng, papercut-mf, cve-2026-81578, cve-2026-82078, pre-auth-rce, java, database-driver, active-exploitation, greynoise, incident-response
 WORD_COUNT : 2985
@@ -5590,7 +5604,7 @@ URL        : https://garrettstimpson.ca/posts/2026/09/08/most-malware-same-machi
 CVE        : none
 CATEGORIES : malware, analysis, defense
 TAGS       : persistence, windows-11, clickfix, scheduled-tasks, run-keys, browser-extensions, rmm, c2, byovd, detection-engineering
-WORD_COUNT : 3744
+WORD_COUNT : 3817
 EXCERPT    : Modern malware hides behind signed binaries, cloud traffic, browser runtimes, and legitimate support tools. The thing that gives it away is what brings it back.
 </FRONTMATTER>
 <BODY>
@@ -5777,6 +5791,12 @@ Hashes die first. Domains disappear next. Family names last a little longer. But
 I do not know if watching those handoffs gets us 98 percent. I know it gives defenders fewer places to watch and attackers fewer places to hide.
 
 The costume changes. The thing that brings it back does not.
+
+## Related on this site
+
+- [Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You](/posts/2026/05/29/lumma-stealer-clickfix-windows-terminal/)
+- [Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS](/posts/2026/06/01/infiniti-stealer-clickfix-nuitka-macos/)
+- [The Spyware You Pay to Click: How Paid Ad Campaigns Deliver Infostealers, and How to Hunt Them](/posts/2026/10/27/malvertising-spyware-paid-ads-deep-dive/)
 
 ## Sources
 
@@ -9208,7 +9228,7 @@ For defenders running ColdFusion, the playbook is straightforward but requires d
 TITLE      : CVE-2026-55200: The Same libssh2 Overflow Came Back to the Same Function
 DATE       : 2026-07-01
 URL        : https://garrettstimpson.ca/posts/2026/07/01/cve-2026-55200-libssh2-transport-read-oob-write/
-CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, CVE-2026-55200, cve-2026-55200
+CVE        : CVE-2019-3855, CVE-2025-15661, CVE-2026-55199, cve-2026-55200, CVE-2026-55200
 CATEGORIES : exploits, supply-chain
 TAGS       : cve-2026-55200, libssh2, ssh, integer-overflow, rce, curl, supply-chain
 WORD_COUNT : 1392
@@ -9423,7 +9443,7 @@ The thing that stays with me here isn't the corruption. It's that the safer the 
 TITLE      : CVE-2026-23111: One Flipped Exclamation Mark Gives You the Linux Kernel
 DATE       : 2026-06-22
 URL        : https://garrettstimpson.ca/posts/2026/06/22/cve-2026-23111-nftables-catchall-uaf-lpe/
-CVE        : CVE-2026-23111, cve-2026-23111
+CVE        : cve-2026-23111, CVE-2026-23111
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-23111, nftables, netfilter, use-after-free, lpe, rop, heap-exploitation
 WORD_COUNT : 754
@@ -9711,10 +9731,10 @@ Here's the detail that keeps me up: virtually every shipping laptop has JTAG or 
 TITLE      : CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag
 DATE       : 2026-06-16
 URL        : https://garrettstimpson.ca/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/
-CVE        : CVE-2026-20182, CVE-2026-20245, cve-2026-20245, cve-2026-20262, CVE-2026-20262
+CVE        : cve-2026-20182, CVE-2026-20182, cve-2026-20245, CVE-2026-20245, cve-2026-20262, CVE-2026-20262
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, cve-2026-20262, cve-2026-20245, path-traversal, root, vmanage, zero-day
-WORD_COUNT : 1620
+WORD_COUNT : 1686
 EXCERPT    : Two input-validation zero-days in two weeks, both handing attackers root on Cisco Catalyst SD-WAN Manager. Both exploited before disclosure. The bugs are bad. The timeline is worse.
 </FRONTMATTER>
 <BODY>
@@ -9779,6 +9799,11 @@ One input-validation zero-day in an enterprise management product is a bad week.
 
 I expect we will find out. Probably sooner than anyone wants.
 
+## Related on this site
+
+- [CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN](/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/)
+- [CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane](/posts/2026/06/07/cve-2026-20245-cisco-sdwan-manager-root-rce/)
+
 ## Sources
 
 - [NVD: CVE-2026-20262](https://nvd.nist.gov/vuln/detail/CVE-2026-20262)
@@ -9796,7 +9821,7 @@ I expect we will find out. Probably sooner than anyone wants.
 TITLE      : ITScape (CVE-2026-46316): The First In-Kernel KVM/arm64 Guest-to-Host Escape
 DATE       : 2026-06-14
 URL        : https://garrettstimpson.ca/posts/2026/06/14/itscape-kvm-arm64-guest-host-escape-cve-2026-46316/
-CVE        : cve-2026-46316, CVE-2026-46316
+CVE        : CVE-2026-46316, cve-2026-46316
 CATEGORIES : exploits, linux-kernel
 TAGS       : CVE-2026-46316, KVM, arm64, UAF, guest-escape, cloud-security
 WORD_COUNT : 1646
@@ -9932,10 +9957,10 @@ Kim's write-up and PoC are at [github.com/V4bel/ITScape](https://github.com/V4be
 TITLE      : CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane
 DATE       : 2026-06-07
 URL        : https://garrettstimpson.ca/posts/2026/06/07/cve-2026-20245-cisco-sdwan-manager-root-rce/
-CVE        : CVE-2026-20127, CVE-2026-20182, CVE-2026-20245, cve-2026-20245
+CVE        : CVE-2026-20127, cve-2026-20182, CVE-2026-20182, cve-2026-20245, CVE-2026-20245, cve-2026-20262, CVE-2026-20262
 CATEGORIES : exploits, network-infrastructure
 TAGS       : cisco, sd-wan, command-injection, zero-day, root, mandiant
-WORD_COUNT : 1289
+WORD_COUNT : 1355
 EXCERPT    : A netadmin-to-root command injection in Cisco Catalyst SD-WAN Manager, exploited in the wild with no patch, and it sits on the one box that can reprogram your whole edge.
 </FRONTMATTER>
 <BODY>
@@ -9990,6 +10015,11 @@ Third, close the front door. Since the only known way in requires netadmin, hard
 Fourth, restrict who can even talk to the management interface. SD-WAN Manager should never have its CLI or admin surface reachable from general user networks or the internet. Put it behind a management VLAN with an explicit allowlist, and treat any connection from outside that scope as hostile.
 
 One hard truth to close on. Cisco was blunt that if your logs show abuse, installing the future fix will not by itself clean the environment. Root on the management plane means the attacker may have pushed persistence to edge devices that survives a manager upgrade. If you find evidence of compromise, this is a TAC engagement and a full edge-config review, not a reboot-and-move-on. The patch fixes the door. It does not evict whoever already walked through it.
+
+## Related on this site
+
+- [CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN](/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/)
+- [CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag](/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/)
 
 ## Sources
 
@@ -10082,7 +10112,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : cve-2026-45247, CVE-2026-45247
+CVE        : CVE-2026-45247, cve-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1390
@@ -10173,7 +10203,7 @@ Six thousand stores is the number Sansec could see. Cloudflare and other CDNs hi
 TITLE      : CVE-2025-48595: The Android Framework Integer Overflow That Spyware Got To First
 DATE       : 2026-06-04
 URL        : https://garrettstimpson.ca/posts/2026/06/04/cve-2025-48595-android-framework-integer-overflow-lpe/
-CVE        : CVE-2025-48595, cve-2025-48595
+CVE        : cve-2025-48595, CVE-2025-48595
 CATEGORIES : exploits, mobile
 TAGS       : android, cve-2025-48595, privilege-escalation, integer-overflow, spyware, cisa-kev
 WORD_COUNT : 1284
@@ -10429,10 +10459,10 @@ The thing I keep coming back to is how long this sat there. A whole privileged c
 TITLE      : VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/voidstealer-debugger-abe-bypass/
-CVE        : none
+CVE        : CVE-2026-35616, cve-2026-35616
 CATEGORIES : malware, analysis
 TAGS       : VoidStealer, ABE-bypass, infostealer, hardware-breakpoint, debugger, chrome, mitre-attack, windows
-WORD_COUNT : 1851
+WORD_COUNT : 1903
 EXCERPT    : VoidStealer v2.0 is the first infostealer caught in the wild ripping Chrome's App-Bound Encryption key out of memory with a debugger and a hardware breakpoint, no process injection and no SYSTEM privileges required.
 </FRONTMATTER>
 <BODY>
@@ -10519,6 +10549,11 @@ For mitigations, EDR that monitors `SetThreadContext` and cross-process memory r
 VoidStealer is commodity malware that borrowed an elegant idea. The idea is the threat, not the family, because ElevationKatz is public and the next ten stealers will ship the same chain. Hunt the behavior, not the build.
 
 *Sources: Gen Threat Labs, "VoidStealer: Debugging Chrome to Steal Its Secrets" (Mar 19, 2026); SOCRadar, "Void Stealer: The Infostealer Malware Quietly Targeting Organizations in 2026" (Apr 16, 2026).*
+
+## Related on this site
+
+- [RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop](/posts/2026/05/27/remusstealer-go-injector-abe-bypass-etherhiding/)
+- [CVE-2026-35616: When the Patch Server Ships the Malware](/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/)
 
 ## Sources
 
@@ -10863,10 +10898,10 @@ The thing I keep coming back to is the severity call. A network-reachable, unaut
 TITLE      : CVE-2026-35616: When the Patch Server Ships the Malware
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/
-CVE        : cve-2026-35616, CVE-2026-35616
+CVE        : CVE-2026-35616, cve-2026-35616
 CATEGORIES : exploits, malware, analysis
 TAGS       : forticlient-ems, cve-2026-35616, ekz-infostealer, on-connect, app-bound-encryption, supply-chain
-WORD_COUNT : 1271
+WORD_COUNT : 1327
 EXCERPT    : An auth bypass in FortiClient EMS let attackers turn the endpoint management server into a delivery truck, pushing a credential stealer disguised as a Fortinet patch to every managed device at once.
 </FRONTMATTER>
 <BODY>
@@ -10934,6 +10969,11 @@ For hunting, do not trust file integrity checks. The action is in configuration 
 
 The lesson is not really about Fortinet. It is that your management tooling is your most valuable target, because it is trusted by everything it touches. When the thing that pushes your patches gets popped, it can push anything. Treat the consoles that control your fleet like the crown jewels they are, because the people breaking in already do.
 
+## Related on this site
+
+- [RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop](/posts/2026/05/27/remusstealer-go-injector-abe-bypass-etherhiding/)
+- [VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection](/posts/2026/06/02/voidstealer-debugger-abe-bypass/)
+
 ## Sources
 
 - [NVD: CVE-2026-35616](https://nvd.nist.gov/vuln/detail/CVE-2026-35616)
@@ -10952,7 +10992,7 @@ URL        : https://garrettstimpson.ca/posts/2026/06/01/infiniti-stealer-clickf
 CVE        : none
 CATEGORIES : malware, analysis
 TAGS       : infiniti-stealer, nukechain, clickfix, macos, stealer, nuitka, mitre-attack
-WORD_COUNT : 1586
+WORD_COUNT : 1661
 EXCERPT    : A macOS stealer that ships its Python payload as a native Mach-O binary, delivered through a fake Cloudflare CAPTCHA that asks you to paste a command into Terminal yourself.
 </FRONTMATTER>
 <BODY>
@@ -11038,6 +11078,12 @@ On the file side, the IOCs are concrete. The dropper drops a debug log at `/tmp/
 Mitigations are mostly about the human in the loop. No legitimate CAPTCHA has ever asked anyone to open Terminal and paste a command. Say that to your users until they are sick of hearing it. For fleets, restrict who can run `xattr` and `curl | bash` patterns where you can, keep XProtect and the OS current so the platform-level ClickFix mitigations from Tahoe stay in force, and treat any developer machine with loose `.env` hygiene as a credential-leak waiting to happen. The fix for the Terminal-paste vector exists at the OS level now. The fix for the people pasting commands is education, and that one never fully ships.
 
 Sample reference (do not download): [https://www.malwarebytes.com/blog/threat-intel/2026/03/infiniti-stealer-a-new-macos-infostealer-using-clickfix-and-python-nuitka](https://www.malwarebytes.com/blog/threat-intel/2026/03/infiniti-stealer-a-new-macos-infostealer-using-clickfix-and-python-nuitka)
+
+## Related on this site
+
+- [Lumma Stealer Is Back, and Now It's Using Windows Terminal Against You](/posts/2026/05/29/lumma-stealer-clickfix-windows-terminal/)
+- [The Spyware You Pay to Click: How Paid Ad Campaigns Deliver Infostealers, and How to Hunt Them](/posts/2026/10/27/malvertising-spyware-paid-ads-deep-dive/)
+- [Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away](/posts/2026/09/08/most-malware-same-machine-persistence/)
 
 ## Sources
 
@@ -11373,7 +11419,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : CVE-2026-43121, cve-2026-43121
+CVE        : cve-2026-43121, CVE-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1371
@@ -11545,10 +11591,10 @@ The uncomfortable part is that the security product is the trusted delivery chan
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : CVE-2026-46300, cve-2026-46300
+CVE        : CVE-2026-31431, cve-2026-31431, CVE-2026-31635, cve-2026-31635, cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
-WORD_COUNT : 1432
+WORD_COUNT : 1531
 EXCERPT    : The Dirty Frag fix didn't close the door. It pointed a flashlight at a 2013-era skb bug and made it reliable.
 </FRONTMATTER>
 <BODY>
@@ -11648,6 +11694,13 @@ That clears the immediate page-cache persistence. It does not clear whatever the
 For detection, file integrity tooling is the wrong tool. Watch behavior instead: `unshare(CLONE_NEWUSER | CLONE_NEWNET)` from processes that have no business doing it, `NETLINK_XFRM` traffic from workloads that aren't VPNs, AF_ALG crypto hammered in a tight loop, and `splice()` from a regular file into a TCP socket followed by an ULP change on that same socket. Falco, Tetragon, or any eBPF-based runtime sensor can catch that sequence. None of those signals is damning alone. Together they're a Fragnesia run.
 
 The pattern underneath all of this. Dirty Pipe, Copy Fail, Dirty Frag, now Fragnesia. The same performance-optimized corners of the kernel, the ones that play games with shared memory ownership and in-place processing, keep coughing up write primitives when an edge-case assumption breaks. A `Fixes:` tag pointing at 2013 is the kernel telling you this seam isn't mined out. Patch, blacklist the modules, and assume there's a Fragnesia 2 already in someone's editor.
+
+## Related on this site
+
+- [Dirty Frag: Deterministic Root in Every Major Linux Distro](/posts/2026/05/26/dirty-frag-linux-kernel-lpe/)
+- [CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro](/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/)
+- [DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root](/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/)
+- [Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch](/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/)
 
 ## Sources
 
@@ -12160,7 +12213,7 @@ URL        : https://garrettstimpson.ca/posts/2026/05/29/lumma-stealer-clickfix-
 CVE        : none
 CATEGORIES : malware, analysis
 TAGS       : lumma-stealer, clickfix, infostealer, windows-terminal, mitre-attack, castleloader
-WORD_COUNT : 1685
+WORD_COUNT : 1758
 EXCERPT    : Twelve months after a global law enforcement operation seized 2,300 of its C2 domains, Lumma Stealer is back at scale, now weaponizing Windows Terminal and ClickFix social engineering to bypass the exact defenses that caught it last time.
 </FRONTMATTER>
 <BODY>
@@ -12314,6 +12367,12 @@ Event ID 7 (Image Load): Flag any DLL loaded into a browser process from `%TEMP%
 
 The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickFix now accounts for 47% of initial access events tracked by Microsoft Defender Experts. It beat out traditional phishing at 35%. The lure text will keep changing. The execution vehicle will keep rotating. The behavioral indicators on the process creation and injection side are more durable than any signature against the social engineering layer, so that is where detection engineering effort is best spent right now.
 
+## Related on this site
+
+- [Infiniti Stealer: ClickFix Meets a Nuitka-Compiled Python Stealer on macOS](/posts/2026/06/01/infiniti-stealer-clickfix-nuitka-macos/)
+- [The Spyware You Pay to Click: How Paid Ad Campaigns Deliver Infostealers, and How to Hunt Them](/posts/2026/10/27/malvertising-spyware-paid-ads-deep-dive/)
+- [Most Malware Is the Same Machine. Persistence Is Where It Gives Itself Away](/posts/2026/09/08/most-malware-same-machine-persistence/)
+
 ## Sources
 
 - [bazaar.abuse.ch/browse/yara/LummaStealerDetection](https://bazaar.abuse.ch/browse/yara/Lumma_Stealer_Detection/)
@@ -12327,10 +12386,10 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/
-CVE        : CVE-2026-43284, CVE-2026-43500, CVE-2026-46300, cve-2026-46300
+CVE        : CVE-2026-31431, cve-2026-31431, CVE-2026-31635, cve-2026-31635, CVE-2026-43284, CVE-2026-43500, cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux
 TAGS       : CVE-2026-46300, linux-kernel, LPE, page-cache, ESP-in-TCP, XFRM, PoC
-WORD_COUNT : 1682
+WORD_COUNT : 1777
 EXCERPT    : Five days after Dirty Frag dropped, William Bowling published a working root exploit that the Dirty Frag patches don't fix.
 </FRONTMATTER>
 <BODY>
@@ -12479,6 +12538,13 @@ The two `Fixes:` tags on Bowling's patch, one from 2013 and one from last week, 
 
 Patch, blacklist the modules, watch your namespace usage. And check back.
 
+## Related on this site
+
+- [Dirty Frag: Deterministic Root in Every Major Linux Distro](/posts/2026/05/26/dirty-frag-linux-kernel-lpe/)
+- [CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro](/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/)
+- [DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root](/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/)
+- [Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up](/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/)
+
 ## Sources
 
 - [NVD: CVE-2026-46300](https://nvd.nist.gov/vuln/detail/CVE-2026-46300)
@@ -12495,7 +12561,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/cve-2026-2005-postgresql-pgcrypto-heap-overflow-rce/
-CVE        : CVE-2026-2005, cve-2026-2005
+CVE        : cve-2026-2005, CVE-2026-2005
 CATEGORIES : exploits, database
 TAGS       : CVE-2026-2005, postgresql, pgcrypto, heap-overflow, RCE, PoC
 WORD_COUNT : 1553
@@ -13343,10 +13409,10 @@ Apply the patch. Check your builds. The full exploit code is public.
 TITLE      : RemusStealer on MalwareBazaar Today: Go Injector, Blockchain C2, and the ABE Bypass Chrome Still Can't Stop
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/remusstealer-go-injector-abe-bypass-etherhiding/
-CVE        : none
+CVE        : CVE-2026-35616, cve-2026-35616
 CATEGORIES : malware, analysis
 TAGS       : RemusStealer, LummaStealer, process-injection, EtherHiding, ABE-bypass, golang, mitre-attack, infostealer
-WORD_COUNT : 2057
+WORD_COUNT : 2107
 EXCERPT    : RemusStealer, a signed Go-based infostealer descended from Lumma, landed on MalwareBazaar fresh this morning using blockchain-backed C2 resolution and a shellcode injection trick that strips Chrome's Application-Bound Encryption straight from browser memory.
 </FRONTMATTER>
 <BODY>
@@ -13521,6 +13587,11 @@ Six samples in MalwareBazaar now share the same certificate thumbprint `eae49c47
 
 MITRE ATT&CK coverage for this sample: T1027 (MBA string obfuscation), T1055 (process injection into Chrome), T1553.002 (rogue code signing certificate), T1497.001 (CPUID anti-VM), T1555.003 (credentials from web browsers), T1134.001 (SYSTEM token impersonation, tried before injection), T1071 (EtherHiding via Ethereum JSON-RPC as application layer protocol).
 
+## Related on this site
+
+- [VoidStealer's Debugger Trick: Stealing Chrome's App-Bound Key With a Hardware Breakpoint and Zero Injection](/posts/2026/06/02/voidstealer-debugger-abe-bypass/)
+- [CVE-2026-35616: When the Patch Server Ships the Malware](/posts/2026/06/02/cve-2026-35616-forticlient-ems-ekz-infostealer/)
+
 ## Sources
 
 - [Remus: Unmasking The 64-bit Variant of the Infamous Lumma Stealer (Gen Threat Labs)](https://www.gendigital.com/blog/insights/research/remus-64bit-variant-of-lumma-stealer)
@@ -13537,10 +13608,10 @@ MITRE ATT&CK coverage for this sample: T1027 (MBA string obfuscation), T1055 (pr
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : cve-2026-31635, CVE-2026-31635, CVE-2026-43500
+CVE        : CVE-2026-31431, cve-2026-31431, CVE-2026-31635, cve-2026-31635, CVE-2026-43500, cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
-WORD_COUNT : 1585
+WORD_COUNT : 1682
 EXCERPT    : A missing copy-on-write guard in Linux's RxGK subsystem lets any local user corrupt arbitrary page-cache pages and get root, no race condition required.
 </FRONTMATTER>
 <BODY>
@@ -13686,6 +13757,13 @@ While you are in the cluster doing this, enforce `allowPrivilegeEscalation: fals
 ---
 
 The thing that stands out about this whole "Dirty" family, Copy Fail, Dirty Frag, DirtyDecrypt, is that none of these bugs are exotic. They are missing checks in code paths that clearly should have checks. The page cache is a known shared resource. COW semantics are foundational. The fact that three separate kernel subsystems shipped decryption-path code without proper COW guards in the same six-month window suggests the audit coverage here was thin. I would not be surprised if there is a fourth one. Run your kernel config sweeps now, not after it ships.
+
+## Related on this site
+
+- [Dirty Frag: Deterministic Root in Every Major Linux Distro](/posts/2026/05/26/dirty-frag-linux-kernel-lpe/)
+- [CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro](/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/)
+- [Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch](/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/)
+- [Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up](/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/)
 
 ## Sources
 
@@ -13973,7 +14051,7 @@ Check your kernel version. Patch if you haven't.
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : cve-2026-42945, CVE-2026-42945
+CVE        : CVE-2026-42945, cve-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1567
@@ -14135,10 +14213,10 @@ The full advisory is at F5's security portal (K000161019). Fixed packages are av
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : cve-2026-31431, CVE-2026-31431
+CVE        : CVE-2026-31431, cve-2026-31431, CVE-2026-31635, cve-2026-31635, cve-2026-46300, CVE-2026-46300
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
-WORD_COUNT : 1567
+WORD_COUNT : 1664
 EXCERPT    : >
 </FRONTMATTER>
 <BODY>
@@ -14337,6 +14415,13 @@ rmmod algif_aead 2>/dev/null
 - [Patch commit a664bf3d603d](https://github.com/torvalds/linux/commit/a664bf3d603dc3bdcf9ae47cc21e0daec706d7a5)
 - [Public PoC](https://github.com/SeanRickerd/cve-2026-31431)
 
+## Related on this site
+
+- [Dirty Frag: Deterministic Root in Every Major Linux Distro](/posts/2026/05/26/dirty-frag-linux-kernel-lpe/)
+- [DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root](/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/)
+- [Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch](/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/)
+- [Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up](/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/)
+
 ## Sources
 
 - [SeanRickerd/cve-2026-31431](https://github.com/SeanRickerd/cve-2026-31431)
@@ -14363,10 +14448,10 @@ rmmod algif_aead 2>/dev/null
 TITLE      : CVE-2026-20182: How a Missing vHub Verification Path Handed Nation-State Actors Admin on Cisco SD-WAN
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-20182-cisco-sdwan-vhub-auth-bypass/
-CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182
+CVE        : CVE-2022-20775, CVE-2026-20122, CVE-2026-20127, CVE-2026-20128, CVE-2026-20133, cve-2026-20182, CVE-2026-20182, cve-2026-20245, CVE-2026-20245, cve-2026-20262, CVE-2026-20262
 CATEGORIES : exploits, network
 TAGS       : cve-2026-20182, cisco, sd-wan, auth-bypass, uat-8616, apt, netconf, dtls, cisa-kev
-WORD_COUNT : 1514
+WORD_COUNT : 1582
 EXCERPT    : A single missing if-block in vdaemon's CHALLENGE_ACK handler gives any unauthenticated attacker admin credentials on Cisco Catalyst SD-WAN, and UAT-8616 has been using a predecessor variant since at least 2023.
 </FRONTMATTER>
 <BODY>
@@ -14472,6 +14557,11 @@ On the SD-WAN Manager side, restrict who can reach UDP 12346 at the network boun
 
 The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a surface that was already known compromised. Nobody had audited vbond_proc_challenge_ack() for all device types, and vHub fell through the cracks. The patch adds that missing conditional. But six SD-WAN zero-days in one year means the audit work that should have happened years ago is being done by threat actors first.
 
+## Related on this site
+
+- [CVE-2026-20245: Cisco's Seventh SD-WAN Zero-Day of the Year Hands You Root From the Management Plane](/posts/2026/06/07/cve-2026-20245-cisco-sdwan-manager-root-rce/)
+- [CVE-2026-20262 Makes It Two: Cisco's SD-WAN Manager Keeps Handing Out Root, and the Timeline Is the Red Flag](/posts/2026/06/16/cisco-sd-wan-cve-2026-20262/)
+
 ## Sources
 
 - [NVD: CVE-2026-20182](https://nvd.nist.gov/vuln/detail/CVE-2026-20182)
@@ -14492,10 +14582,10 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500
+CVE        : CVE-2026-31431, cve-2026-31431, CVE-2026-31635, cve-2026-31635, cve-2026-43284, CVE-2026-43284, cve-2026-43500, CVE-2026-43500, cve-2026-46300, CVE-2026-46300
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
-WORD_COUNT : 1053
+WORD_COUNT : 1157
 EXCERPT    : Two in-place decryption optimizations introduced in 2017 and 2023 let an unprivileged local user corrupt arbitrary page cache entries and escalate to root. No race window. Standard syscalls only.
 </FRONTMATTER>
 <BODY>
@@ -14582,6 +14672,13 @@ Patch. Then ask why your review process didn't catch it either.
 ---
 
 *Based on the [Wiz blog](https://www.wiz.io/blog/dirty-frag-linux-kernel-local-privilege-escalation-via-esp-and-rxrpc), [Sysdig detection guide](https://www.sysdig.com/blog/dirty-frag-cve-2026-43284-and-cve-2026-43500-detecting-unpatched-local-privilege-escalation-via-linux-kernel-esp-and-rxrpc), and [Microsoft Security Blog](https://www.microsoft.com/en-us/security/blog/2026/05/08/active-attack-dirty-frag-linux-vulnerability-expands-post-compromise-risk/).*
+
+## Related on this site
+
+- [CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro](/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/)
+- [DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root](/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/)
+- [Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch](/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/)
+- [Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up](/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/)
 
 ## Sources
 
@@ -14751,5 +14848,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 111 documents — 2026-11-17T23:23:47Z
+END OF CORPUS — 111 documents — 2026-11-18T09:42:18Z
 ================================================================================
