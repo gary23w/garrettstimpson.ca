@@ -26,6 +26,7 @@ Vulnerability research, exploit breakdowns and malware analysis. The full text o
 
 ## Posts
 
+- [A Backup Import, a Timezone Field, and Root on the Email Gateway](https://garrettstimpson.ca/posts/2026/11/18/barracuda-backup-import-timezone-root/): Barracuda has confirmed exploitation of appliance vulnerabilities. The revealing part is where the trust breaks: a backup restore and a timezone setting.
 - [How to Remove Your Phone Number From the Internet](https://garrettstimpson.ca/posts/2026/11/17/remove-phone-number-from-internet/): Use your own number to find the pages that publish it, then check the page, any call button and the Google result after each removal.
 - [Can You Remove Your Personal Information From the Dark Web?](https://garrettstimpson.ca/posts/2026/11/17/remove-personal-information-from-dark-web/): A dark-web alert can point to a specific listing or a breach that has already spread. Find out what you can take down and what you can secure today.
 - [How to Remove Your Home Address From Google When It Keeps Coming Back](https://garrettstimpson.ca/posts/2026/11/17/remove-home-address-from-google/): Opted out and found your home address on Google again? Open the exact result to see whether you need a search refresh, a broker opt-out, or a change to the original document.
