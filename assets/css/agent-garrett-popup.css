@@ -68,11 +68,11 @@ dialog.garrett-removal-popup::backdrop {
   padding: clamp(1.25rem, 5vw, 1.75rem);
 }
 
-.garrett-removal-popup h2 {
-  margin: 0 0 .7rem;
-  color: #111;
-  font: 900 clamp(1.85rem, 7vw, 2.5rem)/1.04 Geist, system-ui, sans-serif;
-  letter-spacing: -.045em;
+:root[data-color-mode] .garrett-removal-popup h2 {
+  margin: 0 0 .7rem !important;
+  color: #111 !important;
+  font: 900 clamp(1.85rem, 7vw, 2.5rem)/1.04 Geist, system-ui, sans-serif !important;
+  letter-spacing: -.045em !important;
   text-wrap: balance;
 }
 
