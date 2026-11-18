@@ -26,6 +26,11 @@
   <meta name="theme-color" content="#ffffff">
   <link rel="stylesheet" href="{{ '/assets/css/color-mode.css' | relative_url }}?v={{ site.time | date: '%s' }}">
   <script id="color-mode-script" src="{{ '/assets/js/color-mode.js' | relative_url }}?v={{ site.time | date: '%s' }}"></script>
+  {% if page.layout == 'home' or page.layout == 'post' %}
+  <link rel="stylesheet" href="{{ '/assets/css/agent-garrett-popup.css' | relative_url }}?v={{ site.time | date: '%s' }}">
+  <script type="module" src="{{ '/assets/js/agent-garrett-popup.js' | relative_url }}?v={{ site.time | date: '%s' }}"
+          data-agent-garrett-popup-logo="{{ '/favicon-96x96.png' | relative_url }}?v=29e11fb2f141"></script>
+  {% endif %}
 </head>
 
 <body>
