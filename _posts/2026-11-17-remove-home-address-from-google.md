@@ -39,6 +39,8 @@ An odd detail can give you a lead. Suppose two listings use the same misspelling
 
 For a PDF, give the publisher the direct file URL and page number. Ask for a replacement with the address redacted from the underlying text and any scanned image. Check both the visible page and searchable text in the replacement. If the publisher uploads it at a new URL, check the old URL too. For an official public record, ask the office that maintains it what redaction or address-substitution options it offers. [Adobe’s guide to PDF redaction](https://helpx.adobe.com/acrobat/desktop/protect-documents/redact-pdfs/redacting-sanitizing.html)
 
+For a U.S. provider listing, compare the directory’s address with the one CMS publishes for your NPI. [How to correct an old home address in the NPI Registry]({% post_url 2026-11-19-remove-home-address-from-npi-registry %})
+
 **A short request you can adapt**
 
 > Please redact my home address from [URL], on [page or section]. Could you confirm when the public copy has been updated? If your office uses a specific form for this request, please send me the link.

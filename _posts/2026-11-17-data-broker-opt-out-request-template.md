@@ -17,7 +17,7 @@ When a people-search site gives you a confirmation number, save it next to the U
 
 Find the broker’s official opt-out form or privacy contact. Look for **Opt Out**, **Your Privacy Choices**, **Do Not Sell or Share**, or **Remove My Information** on its own site. Use the route it provides for removing a listing. If the form asks for a profile, give the exact URL and the name shown on the record. Save a separate URL for each duplicate. [FTC guide to people-search sites and opt-outs](https://consumer.ftc.gov/articles/what-know-about-people-search-sites-sell-your-information)
 
-For verification, start with the listing URL and the matching details the form asks for. If the broker asks for more, check its privacy policy and ask which fields it needs and whether it offers another way to verify. Use its official submission channel for any requested documents.
+For verification, start with the listing URL and the matching details the form asks for. If the broker asks for more, check its privacy policy and ask which fields it needs and whether it offers another way to verify. Use its official submission channel for any requested documents. [What to ask before uploading a photo ID]({% post_url 2026-11-19-data-broker-opt-out-id-verification %})
 
 ## Copy this data broker opt-out request
 

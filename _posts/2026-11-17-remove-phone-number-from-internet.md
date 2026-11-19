@@ -27,6 +27,8 @@ If your number appears on a people-search site, follow that site’s opt-out pro
 
 If the number is new to you and a page lists it under someone else’s name, explain that the number now reaches you. Give the site the URL and ask it to correct that phone field. Use the site’s official contact route if its form requires you to verify the name on the profile.
 
+If the caller keeps asking about a job you left, check the business directories that still have that role on file. [How to opt out of Apollo and ZoomInfo]({% post_url 2026-11-19-apollo-zoominfo-opt-out %})
+
 ## Remove your number from Google Search
 
 While a live result shows your personal phone number, you can ask Google to remove the eligible result. Open its three-dot menu and choose **Remove result** when available, or follow Google’s contact-info removal instructions. Google handles visibility in Search, and the publisher controls the page. [Google’s personal contact information removal guide](https://support.google.com/websearch/answer/12719076?hl=en)
