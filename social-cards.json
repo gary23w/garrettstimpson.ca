@@ -1,0 +1,15 @@
+---
+layout: null
+permalink: /assets/og/pages.json
+sitemap: false
+---
+{%- assign social_pages = site.pages | concat: site.posts -%}
+{%- assign social_separator = "" -%}
+[
+{%- for social_page in social_pages -%}
+  {%- if social_page.layout -%}
+    {{ social_separator }}{{ social_page.url | jsonify }}
+    {%- assign social_separator = "," -%}
+  {%- endif -%}
+{%- endfor -%}
+]

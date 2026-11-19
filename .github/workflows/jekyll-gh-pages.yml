@@ -35,6 +35,20 @@ jobs:
           source: ./
           destination: ./_site
 
+      - name: Set up the social card build
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: _tools/package-lock.json
+
+      - name: Generate social cards
+        run: |
+          # The Docker-based Jekyll action writes the build as root.
+          sudo chown -R "$(id -u):$(id -g)" _site
+          npm ci --prefix _tools
+          node _tools/build-social-cards.mjs _site
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa  # v3.0.1
 

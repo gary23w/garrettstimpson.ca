@@ -67,17 +67,42 @@
   {%- assign seo_desc = seo_desc_raw -%}
 {%- endif -%}
 
-{%- comment -%} Share image: page image, else the site card. {%- endcomment -%}
+{%- comment -%}
+  Explicit raster artwork stays in use. GitHub Pages generates a light PNG from
+  the rendered page metadata for the other pages after the Jekyll build.
+{%- endcomment -%}
 {%- assign seo_image = page.image | default: site.image -%}
 {%- if seo_image.path -%}{%- assign seo_image = seo_image.path -%}{%- endif -%}
-{%- assign seo_image_meta = site.data.og_images[seo_image] -%}
 {%- assign seo_image_url = seo_image | absolute_url -%}
-{%- assign seo_image_alt = page.image_alt | default: seo_image_meta.alt | default: seo_og_title -%}
+{%- assign seo_fallback_url = site.image | absolute_url -%}
+{%- assign seo_extension = seo_image | split: "?" | first | split: "#" | first | split: "." | last | downcase -%}
+{%- assign seo_share_formats = "png,jpg,jpeg,webp,gif" | split: "," -%}
+{%- assign seo_generate_image = true -%}
+{%- if seo_image_url != seo_fallback_url and seo_share_formats contains seo_extension -%}
+  {%- assign seo_generate_image = false -%}
+{%- endif -%}
+{%- if seo_generate_image -%}
+  {%- assign seo_image = site.image -%}
+  {%- assign seo_image_url = seo_fallback_url -%}
+{%- endif -%}
+{%- assign seo_image_meta = site.data.og_images[seo_image] -%}
+{%- assign seo_image_alt = seo_og_title -%}
+{%- unless seo_generate_image -%}
+  {%- assign seo_image_alt = page.image_alt | default: seo_image_meta.alt | default: seo_og_title -%}
+{%- endunless -%}
 
 {%- if seo_is_post -%}
   {%- include page-topics.html -%}
   {%- assign seo_published = page.date | date_to_xmlschema -%}
   {%- assign seo_modified = page.last_modified_at | default: page.date | date_to_xmlschema -%}
+{%- endif -%}
+{%- assign seo_card_section = "Security research" -%}
+{%- if seo_is_post -%}
+  {%- assign seo_card_section = page_topics.first.name | default: seo_card_section -%}
+{%- elsif page.layout == "topic" or page.url == "/topics/" -%}
+  {%- assign seo_card_section = "Research topics" -%}
+{%- elsif page.layout == "doc" or page.layout == "mcp" -%}
+  {%- assign seo_card_section = "Documentation" -%}
 {%- endif -%}
 <title>{{ seo_title | escape }}</title>
 <meta name="description" content="{{ seo_desc | escape }}">
@@ -89,7 +114,10 @@
 <meta property="og:title" content="{{ seo_og_title | escape }}">
 <meta property="og:description" content="{{ seo_desc | escape }}">
 <meta property="og:url" content="{{ seo_url }}">
-<meta property="og:image" content="{{ seo_image_url }}">
+<meta property="og:image" content="{{ seo_image_url }}"{% if seo_generate_image %} data-social-card="{{ seo_card_section | escape }}"{% endif %}>
+{%- if seo_generate_image %}
+<meta property="og:image:type" content="image/png">
+{%- endif %}
 {%- if seo_image_meta %}
 <meta property="og:image:width" content="{{ seo_image_meta.width }}">
 <meta property="og:image:height" content="{{ seo_image_meta.height }}">
