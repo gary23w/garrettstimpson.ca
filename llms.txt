@@ -26,6 +26,7 @@ Vulnerability research, exploit breakdowns and malware analysis. The full text o
 
 ## Posts
 
+- [The SSH Agent That Forgot to Ask](https://garrettstimpson.ca/posts/2026/11/19/russh-ssh-agent-forgot-to-ask/): A missing confirmation callback let a russh SSH agent use confirmation-constrained keys without asking. The fix matters, but so does the policy behind the callback.
 - [A Backup Import, a Timezone Field, and Root on the Email Gateway](https://garrettstimpson.ca/posts/2026/11/18/barracuda-backup-import-timezone-root/): Barracuda has confirmed exploitation of appliance vulnerabilities. The revealing part is where the trust breaks: a backup restore and a timezone setting.
 - [How to Remove Your Phone Number From the Internet](https://garrettstimpson.ca/posts/2026/11/17/remove-phone-number-from-internet/): Use your own number to find the pages that publish it, then check the page, any call button and the Google result after each removal.
 - [Can You Remove Your Personal Information From the Dark Web?](https://garrettstimpson.ca/posts/2026/11/17/remove-personal-information-from-dark-web/): A dark-web alert can point to a specific listing or a breach that has already spread. Find out what you can take down and what you can secure today.
