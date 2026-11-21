@@ -3,7 +3,7 @@ layout: page
 title: Policy
 permalink: /policy/
 description: "Research policy for garrettstimpson.ca: educational and defensive use, Agent Garrett service terms, privacy, attribution and vulnerability disclosure."
-last_modified_at: 2026-11-09
+last_modified_at: 2026-11-21
 ---
 
 ## Content & Purpose
@@ -46,11 +46,11 @@ Links to third-party resources (NVD, GitHub, vendor advisories, Exploit-DB) are 
 
 ## Vulnerability Disclosure
 
-To report a security issue with this site or its infrastructure, use GitHub's private advisory system:
+Report security issues affecting this site or its infrastructure through the moderators of [r/privacy_tips](https://www.reddit.com/r/privacy_tips/).
 
-**[Report a vulnerability](https://github.com/gary23w/garrettstimpson.ca/security/advisories/new)**
+**[Send a private report through Reddit modmail](https://www.reddit.com/message/compose/?to=%2Fr%2Fprivacy_tips)**
 
-Do not open a public issue. Acknowledgment within 48 hours.
+Start with the affected page or service and a short, redacted description. Ask the moderators for a secure way to share sensitive evidence. Acknowledgment within 48 hours.
 
 ## Changes
 
