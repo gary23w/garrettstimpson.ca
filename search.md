@@ -12,7 +12,7 @@ robots: noindex, follow
   <p id="search-hint" class="search-hint">Find a CVE, product, tag or keyword. Use a few words to narrow your search.</p>
   <div class="search-input-row"><input id="site-search" class="search-box" name="q" type="search" placeholder="Try a CVE, OpenSSH, or authentication…" autocomplete="off" maxlength="200" aria-describedby="search-hint"><button class="research-button" type="button" data-search-clear hidden>Clear</button></div>
 </form>
-<div class="search-toolbar"><p id="search-count" class="search-count" role="status" aria-live="polite" aria-atomic="true">Loading the research index…</p><a class="research-text-link" href="{{ '/topics/' | relative_url }}">Browse by topic →</a></div>
+<div class="search-toolbar"><p id="search-count" class="search-count" role="status" aria-live="polite" aria-atomic="true">Loading the research index…</p><a class="research-text-link" href="{{ '/topics/' | relative_url }}">Browse by topic</a></div>
 <h2 id="search-results-title" class="search-results-title">Latest research</h2>
 <div id="search-results" class="search-results" aria-busy="true" aria-labelledby="search-results-title"></div>
 <template id="search-ad-template">{%- include removal-ad.html -%}</template>

@@ -4,7 +4,7 @@ layout: default
 {%- include page-topics.html -%}
 <article class="post">
   <header class="post-header">
-    <a class="post-back" href="{{ '/' | relative_url }}">&larr; all research</a>
+    <a class="post-back" href="{{ '/' | relative_url }}">all research</a>
     <h1 class="post-title">{{ page.title | escape }}</h1>
     <div class="post-meta">
       <span class="post-author">By <a href="{{ '/about/' | absolute_url }}" rel="author">{{ page.author | default: site.author.name | escape }}</a></span>
@@ -18,7 +18,7 @@ layout: default
     {%- endif -%}
     {%- assign share_url = page.canonical_url | default: page.url | absolute_url -%}
     <div class="post-share" role="group" aria-label="Share this article">
-      <span class="share-label">share &rarr;</span>
+      <span class="share-label">share</span>
       <button class="share-btn" id="share-native" type="button" hidden>Share…</button>
       <a class="share-btn" href="https://twitter.com/intent/tweet?url={{ share_url | url_encode }}&text={{ page.title | url_encode }}" target="_blank" rel="noopener" aria-label="Share this article on X (opens in a new tab)">X</a>
       <a class="share-btn" href="https://news.ycombinator.com/submitlink?u={{ share_url | url_encode }}&t={{ page.title | url_encode }}" target="_blank" rel="noopener" aria-label="Share this article on Hacker News (opens in a new tab)">HN</a>
@@ -52,20 +52,20 @@ layout: default
       <h2 class="post-community-title" id="post-community-title">Join us on Discord.</h2>
       <p class="post-community-text">Stay included and up to date. The Agent Garrett team is there and can answer your questions.</p>
     </div>
-    <a class="post-community-cta" href="{{ site.discord_url | escape }}" target="_blank" rel="noopener">join the Discord &rarr;</a>
+    <a class="post-community-cta" href="{{ site.discord_url | escape }}" target="_blank" rel="noopener">join the Discord</a>
   </aside>
   {%- endif -%}
 
   <nav class="post-nav" aria-label="Post navigation">
     {%- if page.previous.url -%}
     <a class="post-nav-link post-nav-prev" href="{{ page.previous.url | relative_url }}">
-      <span class="pn-dir">&larr; previous</span>
+      <span class="pn-dir">previous</span>
       <span class="pn-title">{{ page.previous.title | escape | truncate: 48 }}</span>
     </a>
     {%- endif -%}
     {%- if page.next.url -%}
     <a class="post-nav-link post-nav-next" href="{{ page.next.url | relative_url }}">
-      <span class="pn-dir">next &rarr;</span>
+      <span class="pn-dir">next</span>
       <span class="pn-title">{{ page.next.title | escape | truncate: 48 }}</span>
     </a>
     {%- endif -%}

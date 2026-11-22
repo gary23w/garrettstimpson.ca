@@ -4,7 +4,7 @@ layout: default
 {%- include topic-posts.html slug=page.topic -%}
 <article class="post topic-page">
   <header class="post-header">
-    <a class="post-back" href="{{ '/topics/' | relative_url }}">&larr; all topics</a>
+    <a class="post-back" href="{{ '/topics/' | relative_url }}">all topics</a>
     <h1 class="post-title">{{ page.title | escape }}</h1>
     <p class="topic-intro">{{ topic_entry.description | escape }} {{ topic_posts.size }} posts, newest first.</p>
   </header>

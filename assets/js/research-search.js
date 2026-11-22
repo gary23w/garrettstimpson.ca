@@ -45,7 +45,7 @@ if (form) {
     const button = node('button', retry ? 'Try again' : 'Clear search', 'research-button');
     button.type = 'button';
     button.addEventListener('click', retry ? () => { input.focus(); load(); } : reset);
-    const topics = node('a', 'Browse topics →', 'research-text-link');
+    const topics = node('a', 'Browse topics', 'research-text-link');
     topics.href = form.dataset.topicsUrl;
     actions.append(button, topics);
     box.append(actions);
