@@ -3,8 +3,10 @@ layout: page
 title: Policy
 permalink: /policy/
 description: "Research policy for garrettstimpson.ca: educational and defensive use, Agent Garrett service terms, privacy, attribution and vulnerability disclosure."
-last_modified_at: 2026-11-21
+last_modified_at: 2026-11-22
 ---
+
+**Agent Garrett customers and affiliates:** the service is governed by the [Agent Garrett Terms of Service](https://agent.garrettstimpson.ca/terms), including its [affiliate rules](https://agent.garrettstimpson.ca/terms#affiliates), and the [Agent Garrett Privacy Policy](https://agent.garrettstimpson.ca/privacy).
 
 ## Content & Purpose
 
@@ -28,7 +30,7 @@ Agent Garrett can be connected to your existing, authorized workflows and can he
 
 Your needs and the defenses required depend on your systems, the sensitivity and value of your assets, your risk tolerance, and any legal, contractual, or regulatory obligations that apply to you. Agent Garrett alone may not provide the level of protection you need. You are responsible for determining whether additional safeguards, qualified security professionals, incident-response support, or other services are appropriate, and for reviewing and authorizing actions taken in your environment.
 
-**Your use of Agent Garrett is governed by its [Terms of Service](https://agent.garrettstimpson.ca/terms) and [Privacy Policy](https://agent.garrettstimpson.ca/privacy).** The Terms cover subscriptions, monthly renewal, cancellation, refunds, acceptable use and limits of liability. You remain responsible for using the service only with systems and data you are authorized to access, for configuring connected workflows and permissions appropriately, and for decisions made based on its findings or recommendations.
+**Your use of Agent Garrett is governed by its [Terms of Service](https://agent.garrettstimpson.ca/terms) and [Privacy Policy](https://agent.garrettstimpson.ca/privacy).** The Terms cover subscriptions, monthly renewal, cancellation, refunds, acceptable use, the [affiliate program](https://agent.garrettstimpson.ca/terms#affiliates) and limits of liability. Affiliates are independent and cannot make promises on behalf of Agent Garrett. You remain responsible for using the service only with systems and data you are authorized to access, for configuring connected workflows and permissions appropriately, and for decisions made based on its findings or recommendations.
 
 ## Privacy
 
