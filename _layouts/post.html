@@ -45,6 +45,17 @@ layout: default
   })();
   </script>
 
+  {%- if site.discord_url -%}
+  <aside class="post-community" aria-labelledby="post-community-title">
+    <div class="post-community-copy">
+      <span class="post-community-label">// AGENT GARRETT ON DISCORD</span>
+      <h2 class="post-community-title" id="post-community-title">Join us on Discord.</h2>
+      <p class="post-community-text">Stay included and up to date. The Agent Garrett team is there and can answer your questions.</p>
+    </div>
+    <a class="post-community-cta" href="{{ site.discord_url | escape }}" target="_blank" rel="noopener">join the Discord &rarr;</a>
+  </aside>
+  {%- endif -%}
+
   <nav class="post-nav" aria-label="Post navigation">
     {%- if page.previous.url -%}
     <a class="post-nav-link post-nav-prev" href="{{ page.previous.url | relative_url }}">

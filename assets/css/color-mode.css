@@ -172,6 +172,16 @@ html[data-color-mode="light"][data-color-styles~="style"]{scrollbar-color:var(--
 :root[data-color-mode="light"][data-color-styles~="style"] .hero-cta:hover{box-shadow:0 4px 26px rgba(0,0,0,0.5)!important}
 :root[data-color-mode="light"][data-color-styles~="style"] .hero-scan-link{color:var(--green)!important;border-bottom:0!important}
 :root[data-color-mode="light"][data-color-styles~="style"] .hero-community{color:var(--text-muted)!important}
+:root[data-color-mode="light"][data-color-styles~="style"] .site-nav .discord-link{color:var(--green)!important;border-color:var(--green-dim)!important}
+:root[data-color-mode="light"][data-color-styles~="style"] .site-nav .discord-link:hover{color:var(--bg)!important;background:var(--green)!important;border-color:var(--green)!important;text-shadow:none!important}
+:root[data-color-mode="light"][data-color-styles~="style"] .hero-discord{color:var(--green)!important;background:transparent!important;border:1px solid var(--green)!important}
+:root[data-color-mode="light"][data-color-styles~="style"] .hero-discord:hover{color:var(--bg)!important;background:var(--green)!important}
+:root[data-color-mode="light"][data-color-styles~="style"] .post-community{border:1px solid var(--border)!important;border-left:2px solid var(--green)!important;background:var(--bg-card)!important}
+:root[data-color-mode="light"][data-color-styles~="style"] .post-community-label{color:var(--green)!important}
+:root[data-color-mode="light"][data-color-styles~="style"] .post-community .post-community-title{border:0!important;color:var(--heading)!important;text-shadow:none!important}
+:root[data-color-mode="light"][data-color-styles~="style"] .post-community-text{color:var(--text)!important}
+:root[data-color-mode="light"][data-color-styles~="style"] .post-community-cta{border:1px solid var(--green)!important;background:var(--green)!important;color:var(--bg)!important;text-shadow:none!important;border-bottom:1px solid var(--green)!important}
+:root[data-color-mode="light"][data-color-styles~="style"] .post-community-cta:hover{background:var(--green-bright)!important;border-color:var(--green-bright)!important}
 :root[data-color-mode="light"][data-color-styles~="style"] .mcp-hero{background:linear-gradient(135deg, rgba(0,0,0,0.08), rgba(85,85,85,0.035))!important;border:1px solid var(--border)!important;border-left:4px solid var(--green)!important;box-shadow:0 0 26px rgba(0,0,0,0.06)!important}
 :root[data-color-mode="light"][data-color-styles~="style"] .mcp-page table th,:root[data-color-mode="light"][data-color-styles~="style"] .mcp-page table td{border:1px solid var(--border)!important}
 :root[data-color-mode="light"][data-color-styles~="style"] .mcp-page table th{background:#f0f0f0!important;color:var(--green)!important}

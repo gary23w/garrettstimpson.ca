@@ -63,6 +63,10 @@
           <a class="page-link agent-link" href="{{ site.agent_url }}" target="_blank" rel="noopener" title="Chat with Agent Garrett">Agent</a>
           {%- endif -%}
 
+          {%- if site.discord_url -%}
+          <a class="page-link discord-link" href="{{ site.discord_url | escape }}" target="_blank" rel="noopener" title="Join Agent Garrett on Discord">Discord</a>
+          {%- endif -%}
+
         </div>
       </nav>
     </div>
