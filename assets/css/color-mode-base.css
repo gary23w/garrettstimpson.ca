@@ -18,9 +18,9 @@ html[data-color-mode="light"] :is(.hero,.hero-term,.site-title,.page-link):hover
 html[data-color-mode="light"] .nav-toggle svg path{stroke:currentColor!important}
 html[data-color-mode="light"] img[src^="/payments/powered-by-stripe"]{filter:brightness(0)!important}
 html[data-color-mode="light"] .payment-trust :is(.payment-trust__card,.payment-trust__wallet){background:#fff!important}
-:root .color-mode-toggle{box-sizing:border-box;display:inline-flex!important;flex:0 0 auto;align-items:center;justify-content:center;gap:7px;min-width:44px;min-height:44px;margin:0;padding:8px 11px;border:1px solid var(--border,#555);border-radius:4px;background:var(--bg,#fff);color:var(--text,#111);font:600 12px/1.2 var(--mono,var(--font-mono,monospace));white-space:nowrap;cursor:pointer;box-shadow:none;letter-spacing:0;text-transform:none}
+:root .color-mode-toggle{box-sizing:border-box;display:inline-flex!important;flex:0 0 auto;align-items:center;justify-content:center;gap:7px;min-width:44px;min-height:44px;margin:0;padding:8px 11px;border:0;border-radius:4px;background:transparent;color:var(--text,#111);font:600 12px/1.2 var(--mono,var(--font-mono,monospace));white-space:nowrap;cursor:pointer;box-shadow:none;letter-spacing:0;text-transform:none}
 :root .color-mode-toggle svg{display:block;width:19px;height:19px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-:root .color-mode-toggle:hover{border-color:var(--green,#111);color:var(--heading,#111)}
+:root .color-mode-toggle:hover{color:var(--heading,#111)}
 :root .color-mode-toggle:focus-visible{outline:2px solid var(--green,#111);outline-offset:4px}
 :root .color-mode-fallback{position:fixed;top:max(14px,env(safe-area-inset-top));right:max(14px,env(safe-area-inset-right));z-index:200}
 :root .has-color-toggle{column-gap:12px}

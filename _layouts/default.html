@@ -118,6 +118,16 @@
             All research for educational &amp; defensive purposes.
           </p>
         </div>
+
+        <nav class="footer-col footer-tools" aria-label="Tools">
+          <span class="footer-tools-label">tools</span>
+          <ul class="footer-tools-list">
+            {%- if site.agent_url and site.agent_url != "" -%}<li><a href="{{ site.agent_url }}/">Agent Garrett</a></li>{%- endif -%}
+            <li><a href="https://veil.garrettstimpson.ca/">nl-veil</a> <a class="footer-tools-src" href="https://github.com/gary23w/nl-veil">source</a></li>
+            <li><a href="https://gary23w.github.io/neuron-db/">neuron-db</a> <a class="footer-tools-src" href="https://github.com/gary23w/neuron-db">source</a></li>
+            <li><a href="https://gary23w.github.io/sentinels/">Sentinels</a> <a class="footer-tools-src" href="https://github.com/gary23w/sentinels">source</a></li>
+          </ul>
+        </nav>
       </div>
     </div>
   </footer>

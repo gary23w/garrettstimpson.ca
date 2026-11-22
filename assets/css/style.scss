@@ -652,6 +652,35 @@ table tr:nth-child(even),
   border-bottom: none !important;
 }
 
+/* Footer tools: each tool's site, and its source where it is open */
+.footer-tools {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: baseline !important;
+  gap: 6px 14px !important;
+  margin-top: 14px !important;
+}
+.footer-tools-label { color: var(--text-faint) !important; font-size: 11px !important; }
+.footer-tools-list {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px 18px !important;
+  list-style: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.footer-tools-list li { margin: 0 !important; }
+.footer-tools-list a {
+  color: var(--text-muted) !important;
+  border-bottom: none !important;
+  font-size: 11px !important;
+}
+.footer-tools-list a.footer-tools-src { color: var(--text-faint) !important; }
+.footer-tools-list a:hover {
+  color: var(--green) !important;
+  text-shadow: 0 0 6px rgba(0,239,114, 0.4) !important;
+}
+
 /* Footer copyright */
 .footer-col-3 p {
   font-size: 11px !important;
