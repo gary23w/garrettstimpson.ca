@@ -26,6 +26,7 @@ Vulnerability research, exploit breakdowns and malware analysis. The full text o
 
 ## Posts
 
+- [Your Internet Provider Knows a Lot About You. Here Is How to Make Them Delete It.](https://garrettstimpson.ca/posts/2026/11/22/how-to-get-your-isp-to-delete-your-data/): Your internet and phone provider holds years of billing, location and usage records, often long after you cancel. Here is a step-by-step guide to requesting access and deletion from ISPs in Canada and the US, with the laws, deadlines and email addresses that make it work.
 - [The Survey Link That Ran Code: REDCap's Quiet Two Months](https://garrettstimpson.ca/posts/2026/11/21/redcap-survey-link-quiet-exploitation/): A public survey link was enough to reach code execution on REDCap servers. The patch shipped in September. Exploitation was seen in October. Most people heard about it in November, if at all.
 - [Deleting Yourself From Google, Social Media and Dating Apps: What Actually Works](https://garrettstimpson.ca/posts/2026/11/21/how-to-delete-your-data-social-media-dating-apps-google/): Deleting an account is the easy part. Here is how to get your data out of Google, social platforms, dating apps, marketplaces and web archives, and where the copies still hide.
 - [The SSH Agent That Forgot to Ask](https://garrettstimpson.ca/posts/2026/11/19/russh-ssh-agent-forgot-to-ask/): A missing confirmation callback let a russh SSH agent use confirmation-constrained keys without asking. The fix matters, but so does the policy behind the callback.
