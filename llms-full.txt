@@ -19,7 +19,7 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 <FRONTMATTER>
 TITLE      : The Microsoft Paint \"Zero-Click\" Bug: What CVE-2026-83844 Actually Is
 DATE       : 2026-11-24 06:00:00 -0500
-URL        : https://garrettstimpson.ca/posts/2026/11/24/microsoft-paint-zero-click-cve-2026-83844/
+URL        : https://garrettstimpson.ca/posts/2026/11/23/microsoft-paint-zero-click-cve-2026-83844/
 CVE        : cve-2026-83844, CVE-2026-83844
 CATEGORIES : security, vulnerabilities
 TAGS       : microsoft, windows, paint, cve-2026-83844, patch-management, microsoft-store
