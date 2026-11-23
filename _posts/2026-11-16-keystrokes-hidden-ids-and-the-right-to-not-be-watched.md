@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Keystrokes, Hidden IDs, and the Right to Not Be Watched"
-seo_title: "Sentinels and the user-facing surveillance nobody classifies as malware"
+seo_title: "Keystroke Logging and Hidden IDs: Surveillance Nobody Flags"
 author: Garrett Stimpson
 date: 2026-11-16 08:00:00 -0500
 categories: [privacy, projects]

@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Someone in the Next Lane Could Touch Your Trailer Brakes: The Elecbrakes Bluetooth Flaw"
-seo_title: "Elecbrakes EB2, VM1, ELBC2000 Bluetooth Brake Flaw (ICSA-26-323-02)"
+seo_title: "Elecbrakes Trailer Brake Bluetooth Flaw (ICSA-26-323-02)"
 author: Garrett Stimpson
 date: 2026-11-22 07:00:00 -0500
 categories: [security, vulnerabilities]
@@ -89,6 +89,12 @@ For the ELBC2000, CISA says the vendor "is determining how to address these vuln
 We have spent years worrying about hacked laptops and leaked passwords. Meanwhile, more and more physical safety gear has quietly gained an app and a radio: door locks, garage openers, e-bikes, medical devices, and now brake controllers. Each one is a small computer that somebody has to remember to update, usually with no reminder.
 
 This advisory is a good example of the system working slowly: researchers found it, the vendor fixed it, CISA published it. The weak link is the last step, getting the fix onto the device in your driveway. That step is on us, so pass this along to the person in your life with a caravan.
+
+## Keep reading
+
+- [The water utility software that shipped a map of its own customers](/posts/2026/11/23/dorsett-infoscan-water-scada-vulnerabilities/)
+- [The survey link that ran code: REDCap's quiet two months](/posts/2026/11/21/redcap-survey-link-quiet-exploitation/)
+- [Three exploitation stories nobody is talking about](/posts/2026/11/15/three-quiet-exploitation-stories-nobody-is-covering/)
 
 ## Sources
 

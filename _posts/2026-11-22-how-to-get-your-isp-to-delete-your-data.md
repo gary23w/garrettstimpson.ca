@@ -190,6 +190,13 @@ As of this writing, the bill has cleared the House of Commons and passed second 
 
 It is boring work. It is also one of the few privacy fixes where the law is actually on your side, and where a single well-written email can clear out years of records about where you lived, what you paid and where your phone went. That is worth an afternoon.
 
+## Keep reading
+
+- [How to delete your data from Google, social media and dating apps](/posts/2026/11/21/how-to-delete-your-data-social-media-dating-apps-google/)
+- [How to opt out of data brokers in Canada](/posts/2026/11/17/opt-out-data-brokers-canada/)
+- [A data broker opt-out request template you can follow up on](/posts/2026/11/17/data-broker-opt-out-request-template/)
+- [A data broker asked for your ID. What now?](/posts/2026/11/19/data-broker-opt-out-id-verification/)
+
 ## Sources
 
 - [PIPEDA full text, Justice Laws Website](https://laws-lois.justice.gc.ca/eng/acts/P-8.6/FullText.html) (s. 8 and Schedule 1)

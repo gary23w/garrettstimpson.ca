@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "An 11-Year-Old Kernel Bug and a Root Daemon on a World-Writable Socket"
+seo_title: "NoisyTCP: Old Kernel Bug Meets a World-Writable Root Socket"
 date: 2026-11-16 05:00:00 -0500
 categories: [exploits, analysis]
 tags: [noisytcp, linux-kernel, cve-2026-99288, dos, check-point, cve-2026-123039, gaia-os, lpe, wiper, esxi]

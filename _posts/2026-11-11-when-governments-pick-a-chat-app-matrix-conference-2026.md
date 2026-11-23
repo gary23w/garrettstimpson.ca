@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "When Governments Pick a Chat App: Dispatches from Matrix Conference 2026"
+seo_title: "Matrix Conference 2026: When Governments Pick a Chat App"
 date: 2026-11-11 04:00:00 -0500
 categories: [privacy, politics, analysis]
 tags: [matrix, digital-sovereignty, element, e2ee, starlink, government, malmö]

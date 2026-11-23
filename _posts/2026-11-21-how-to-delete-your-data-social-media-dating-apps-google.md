@@ -146,3 +146,11 @@ That matches what I found across the board: a service can file the request for y
 11. Keep a simple log: where you filed, the date, and what they said. Check back in a month.
 
 None of this makes you invisible, and anyone who says otherwise is selling something. But working through it in this order removes the easiest paths to you: the search result, the forgotten profile, the photo of your front door. For most people, that is what matters.
+
+## Keep reading
+
+- [How to get your internet provider to delete your data](/posts/2026/11/22/how-to-get-your-isp-to-delete-your-data/)
+- [How to opt out of data brokers in Canada](/posts/2026/11/17/opt-out-data-brokers-canada/)
+- [How to use California DROP to delete data broker records](/posts/2026/11/17/california-drop-data-broker-deletion/)
+- [A data broker opt-out request template you can follow up on](/posts/2026/11/17/data-broker-opt-out-request-template/)
+

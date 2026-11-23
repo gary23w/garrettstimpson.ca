@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "The Water Utility Software That Shipped a Map of Its Own Customers"
-seo_title: "Dorsett InfoScan Vulnerabilities (ICSA-26-321-01): What Water Utilities Need to Know"
+seo_title: "Dorsett InfoScan Flaws (ICSA-26-321-01): Water Utility Guide"
 author: Garrett Stimpson
 date: 2026-11-23 06:00:00 -0500
 categories: [security, vulnerabilities]
@@ -121,6 +121,12 @@ If you are not an operator but you live in a town that runs its own water system
 The industry keeps learning this one the hard way. Severity scores rate bugs one at a time, and attackers do not use them one at a time. An advisory with six "medium" findings in software that runs water infrastructure deserves more attention than it got.
 
 That is why I write these. The loud bugs get covered. The quiet ones get exploited.
+
+## Keep reading
+
+- [Someone in the next lane could touch your trailer brakes](/posts/2026/11/22/elecbrakes-trailer-brake-controller-bluetooth-flaw/)
+- [The survey link that ran code: REDCap's quiet two months](/posts/2026/11/21/redcap-survey-link-quiet-exploitation/)
+- [Three exploitation stories nobody is talking about](/posts/2026/11/15/three-quiet-exploitation-stories-nobody-is-covering/)
 
 ## Sources
 

@@ -1,6 +1,7 @@
 ---
 layout: post
 title: "No CVE, No Problem: The Plone RCE That Ships With a Hotfix Instead"
+seo_title: "Plone Sandbox Escape RCE: No CVE, Just a Hotfix"
 date: 2026-11-12 04:00:00 -0500
 categories: [exploits, analysis]
 tags: [plone, zope, rce, sandbox-escape, restrictedpython, cmfeditions, allow_module, python]
