@@ -1,7 +1,7 @@
 ================================================================================
 GARRETTSTIMPSON.CA — SECURITY RESEARCH CORPUS
 ================================================================================
-GENERATED    : 2026-11-24T13:09:01Z
+GENERATED    : 2026-11-24T13:13:50Z
 AUTHOR       : Garrett Stimpson
 PROFILE      : Garrett Stimpson has relentlessly advanced within cybersecurity for 10+ years across offensive security, defensive operations, and security engineering.
 SITE         : https://garrettstimpson.ca
@@ -20,14 +20,14 @@ FORMAT: Each <DOCUMENT> block contains a complete research post.
 TITLE      : The FFmpeg Memory Bug Hiding Behind a Video Filter Command
 DATE       : 2026-11-24 08:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/24/ffmpeg-deband-cve-2026-135736-zmq/
-CVE        : CVE-2026-135736, cve-2026-135736, cve-2026-83844
+CVE        : cve-2026-135736, CVE-2026-135736, cve-2026-83844
 CATEGORIES : security, vulnerabilities
 TAGS       : ffmpeg, cve-2026-135736, deband, zmq, zeromq, heap-corruption, video-security, memory-safety, media-pipelines
-WORD_COUNT : 1636
+WORD_COUNT : 1625
 EXCERPT    : A runtime command can make vulnerable FFmpeg versions process small chroma planes as if they were full-size luma planes, causing heap reads and writes outside their bounds. The overlooked angle is that some FFmpeg pipelines deliberately expose runtime filter commands over an unauthenticated ZMQ socket.
 </FRONTMATTER>
 <BODY>
-A video filter should not be able to turn a control message into heap corruption.
+A video filter should not be able to turn a control message into heap corruption.......
 
 That is what can happen in vulnerable FFmpeg builds when the `deband` filter receives a runtime command that enables an option called `coupling`. The command changes how the filter walks image planes after FFmpeg has already chosen a pixel format and configured their sizes.
 
@@ -91,7 +91,7 @@ tcp://*:5555
 
 The same source creates a ZMQ reply socket, receives a message, parses a target, command and argument, then passes them to `avfilter_graph_send_command()`. I found no authentication check in that command path.
 
-I also ran a benign listener test against an FFmpeg 9.0.2 build with ZMQ support. With the ZMQ filter present and no custom bind address supplied, the process listened on `0.0.0.0:5555`. That confirms the source-level default in a real process. I did not send a corrupting command or attempt code execution.
+I also ran a benign listener test against an FFmpeg 9.0.2 build with ZMQ support. With the ZMQ filter present and no custom bind address supplied, the process listened on `0.0.0.0:5555`. That confirms the source-level default in a real process.
 
 ### The boundary that headlines could miss
 
@@ -163,7 +163,7 @@ That is the lesson beyond FFmpeg: when software lets a remote control plane muta
 TITLE      : The Microsoft Paint \"Zero-Click\" Bug: What CVE-2026-83844 Actually Is
 DATE       : 2026-11-23 12:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/23/microsoft-paint-zero-click-cve-2026-83844/
-CVE        : cve-2026-83844, CVE-2026-83844
+CVE        : CVE-2026-83844, cve-2026-83844
 CATEGORIES : security, vulnerabilities
 TAGS       : microsoft, windows, paint, cve-2026-83844, patch-management, microsoft-store
 WORD_COUNT : 1253
@@ -292,7 +292,7 @@ Second, the bug itself was ordinary. The delivery was not. When a security fix f
 TITLE      : The Water Utility Software That Shipped a Map of Its Own Customers
 DATE       : 2026-11-23 06:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/23/dorsett-infoscan-water-scada-vulnerabilities/
-CVE        : CVE-2026-117659, cve-2026-117659, cve-2026-120157, CVE-2026-120157, cve-2026-120255, CVE-2026-120255, cve-2026-120260, CVE-2026-120260, cve-2026-120271, CVE-2026-120271, CVE-2026-120298, cve-2026-120298
+CVE        : cve-2026-117659, CVE-2026-117659, cve-2026-120157, CVE-2026-120157, cve-2026-120255, CVE-2026-120255, CVE-2026-120260, cve-2026-120260, CVE-2026-120271, cve-2026-120271, cve-2026-120298, CVE-2026-120298
 CATEGORIES : security, vulnerabilities
 TAGS       : dorsett-controls, infoscan, scada, water-utilities, wastewater, ics-advisory, icsa-26-321-01, critical-infrastructure, hard-coded-keys, electron, cve-2026-117659, cve-2026-120157, cve-2026-120255, cve-2026-120260, cve-2026-120271, cve-2026-120298
 WORD_COUNT : 1539
@@ -645,7 +645,7 @@ It is boring work. It is also one of the few privacy fixes where the law is actu
 TITLE      : Someone in the Next Lane Could Touch Your Trailer Brakes: The Elecbrakes Bluetooth Flaw
 DATE       : 2026-11-22 07:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/22/elecbrakes-trailer-brake-controller-bluetooth-flaw/
-CVE        : CVE-2026-124281, cve-2026-124281, cve-2026-125273, CVE-2026-125273, cve-2026-96805, CVE-2026-96805
+CVE        : CVE-2026-124281, cve-2026-124281, cve-2026-125273, CVE-2026-125273, CVE-2026-96805, cve-2026-96805
 CATEGORIES : security, vulnerabilities
 TAGS       : elecbrakes, ics-advisory, icsa-26-323-02, bluetooth, ble, towing, trailer-brakes, physical-security, cve-2026-96805, cve-2026-125273, cve-2026-124281
 WORD_COUNT : 1307
@@ -753,7 +753,7 @@ This advisory is a good example of the system working slowly: researchers found 
 TITLE      : The Survey Link That Ran Code: REDCap's Quiet Two Months
 DATE       : 2026-11-21 06:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/21/redcap-survey-link-quiet-exploitation/
-CVE        : CVE-2026-90817, cve-2026-90817
+CVE        : cve-2026-90817, CVE-2026-90817
 CATEGORIES : security, vulnerabilities
 TAGS       : redcap, cve-2026-90817, research-security, php, cryptomining, incident-response
 WORD_COUNT : 1777
@@ -2006,7 +2006,7 @@ The repo is [github.com/gary23w/sentinels](https://github.com/gary23w/sentinels)
 TITLE      : An 11-Year-Old Kernel Bug and a Root Daemon on a World-Writable Socket
 DATE       : 2026-11-16 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/16/noisytcp-and-the-check-point-socket-nobody-audited/
-CVE        : CVE-2026-123039, cve-2026-123039, cve-2026-99288, CVE-2026-99288
+CVE        : cve-2026-123039, CVE-2026-123039, CVE-2026-99288, cve-2026-99288
 CATEGORIES : exploits, analysis
 TAGS       : noisytcp, linux-kernel, cve-2026-99288, dos, check-point, cve-2026-123039, gaia-os, lpe, wiper, esxi
 WORD_COUNT : 1108
@@ -3087,7 +3087,7 @@ The unglamorous truth: there is no CVE number yet, no CVSS score to anchor a hea
 TITLE      : The Retry Button Is the Exploit: How apt Merged Two Different Packages Into a Root Shell (CVE-2026-109518)
 DATE       : 2026-11-09 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/09/apt-redirect-retry-package-merge-cve-2026-109518/
-CVE        : cve-2026-109518, CVE-2026-109518
+CVE        : CVE-2026-109518, cve-2026-109518
 CATEGORIES : exploits, analysis
 TAGS       : apt, debian, supply-chain, mitm, cve-2026-109518, package-management
 WORD_COUNT : 1492
@@ -3399,7 +3399,7 @@ The full audit, with file:line citations for every claim and the complete proof 
 TITLE      : *sshole: How a Locked Account Let Anyone Log In on musl Linux (CVE-2026-123158)
 DATE       : 2026-11-06 05:00:00 -0500
 URL        : https://garrettstimpson.ca/posts/2026/11/06/sshhole-openssh-musl-auth-bypass-cve-2026-123158/
-CVE        : CVE-2026-123158, cve-2026-123158
+CVE        : cve-2026-123158, CVE-2026-123158
 CATEGORIES : exploits, linux, vuln-research
 TAGS       : sshhole, openssh, musl, cve-2026-123158, auth-bypass, alpine, embedded, lpe, cve
 WORD_COUNT : 1979
@@ -4542,7 +4542,7 @@ Because the delivery is social engineering rather than exploitation, traditional
 TITLE      : The Bug in the Tiny TCP/IP Stack Inside Everything: lwIP's 6LoWPAN Double Free (CVE-2026-91018)
 DATE       : 2026-10-26
 URL        : https://garrettstimpson.ca/posts/2026/10/26/lwip-6lowpan-double-free-cve-2026-91018/
-CVE        : CVE-2026-91018, cve-2026-91018
+CVE        : cve-2026-91018, CVE-2026-91018
 CATEGORIES : embedded-security, memory-safety, vuln-research
 TAGS       : lwip, 6lowpan, cve-2026-91018, double-free, embedded, iot, iec-62443, network-stack
 WORD_COUNT : 2280
@@ -4970,7 +4970,7 @@ And a note on how this was found: AI-assisted discovery, coordinated disclosure,
 TITLE      : TETRA:BURST and the TEA1 Backdoor: How Police Radio Encryption Was Quietly Downgraded to 32 Bits for Decades
 DATE       : 2026-10-21
 URL        : https://garrettstimpson.ca/posts/2026/10/21/tetra-burst-tea1-backdoor-cve-2022-24402/
-CVE        : CVE-2022-24400, CVE-2022-24401, CVE-2022-24402, cve-2022-24402, CVE-2022-24403, CVE-2022-24404
+CVE        : CVE-2022-24400, CVE-2022-24401, cve-2022-24402, CVE-2022-24402, CVE-2022-24403, CVE-2022-24404
 CATEGORIES : radio-security, cryptography, critical-infrastructure
 TAGS       : tetra, tea1, cve-2022-24402, midnight-blue, cryptography, backdoor, critical-infrastructure, sdr
 WORD_COUNT : 2457
@@ -5763,7 +5763,7 @@ If you are running httpd in front of the internet, the action item is simple: 2.
 TITLE      : CVE-2026-65660: The Latest Exploited Microsoft Bug Is One You Already Patched
 DATE       : 2026-10-11
 URL        : https://garrettstimpson.ca/posts/2026/10/11/cve-2026-65660-sharepoint-code-injection-exploited-after-disclosure/
-CVE        : CVE-2026-65660, cve-2026-65660
+CVE        : cve-2026-65660, CVE-2026-65660
 CATEGORIES : exploits, rce
 TAGS       : cve-2026-65660, sharepoint, rce, kev, n-day, patch-tuesday, webshell, viettel
 WORD_COUNT : 1293
@@ -5959,7 +5959,7 @@ The labs are rehearsing the morning after. That is prudent, and it is also a tel
 TITLE      : CVE-2026-85880 and CVE-2026-81963: Two Windows Zero-Days Split The Estate, And Both Sides Were Exploited First
 DATE       : 2026-10-07
 URL        : https://garrettstimpson.ca/posts/2026/10/07/cve-2026-85880-alpc-cve-2026-81963-update-stack-zero-days/
-CVE        : CVE-2026-81963, cve-2026-81963, cve-2026-85880, CVE-2026-85880
+CVE        : cve-2026-81963, CVE-2026-81963, cve-2026-85880, CVE-2026-85880
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-85880, cve-2026-81963, alpc, windows-update-stack, privilege-escalation, zero-day, patch-tuesday, kev
 WORD_COUNT : 1635
@@ -6452,7 +6452,7 @@ Root on the node was always game over for the node. The change is that the node 
 TITLE      : PaperCut's Pre-Auth RCE Hit Hundreds. Patching Is Not Recovery
 DATE       : 2026-09-13
 URL        : https://garrettstimpson.ca/posts/2026/09/13/papercut-preauth-rce-81578-82078/
-CVE        : CVE-2026-81578, cve-2026-81578, CVE-2026-82078, cve-2026-82078
+CVE        : cve-2026-81578, CVE-2026-81578, CVE-2026-82078, cve-2026-82078
 CATEGORIES : exploits, web, rce
 TAGS       : papercut, papercut-ng, papercut-mf, cve-2026-81578, cve-2026-82078, pre-auth-rce, java, database-driver, active-exploitation, greynoise, incident-response
 WORD_COUNT : 2985
@@ -7808,7 +7808,7 @@ The boring bugs are the ones that kill you. Patch your Perfex, turn off the migr
 TITLE      : CVE-2026-33185 Got Patched, But the Test-Email SSRF Path Is Only Half-Fixed
 DATE       : 2026-08-17
 URL        : https://garrettstimpson.ca/posts/2026/08/17/cve-2026-33185-test-email-ssrf-half-fixed/
-CVE        : cve-2026-33185, CVE-2026-33185
+CVE        : CVE-2026-33185, cve-2026-33185
 CATEGORIES : exploits, web, ssrf
 TAGS       : discourse, ssrf, smtp, pop3, dns-rebinding, cloudflare, web-security
 WORD_COUNT : 2082
@@ -8091,7 +8091,7 @@ Until then, treat `--mount=type=ssh` the way you would treat pasting your privat
 TITLE      : CVE-2026-66066: Reading a Rails Server's Environment Through an Uploaded 'Image'
 DATE       : 2026-08-04
 URL        : https://garrettstimpson.ca/posts/2026/08/04/cve-2026-66066-rails-activestorage-libvips-file-read-rce/
-CVE        : cve-2026-66066, CVE-2026-66066
+CVE        : CVE-2026-66066, cve-2026-66066
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-66066, rails, activestorage, libvips, matlab, hdf5, file-read, rce, marshalling, deserialization, poc
 WORD_COUNT : 1827
@@ -11517,7 +11517,7 @@ These voice boxes sit quietly in the core of the network, trusted, rarely scanne
 TITLE      : CVE-2026-45247: A Magento Cache Plugin Hands You RCE Through One Cookie
 DATE       : 2026-06-06
 URL        : https://garrettstimpson.ca/posts/2026/06/06/cve-2026-45247-mirasvit-cache-warmer-php-object-injection/
-CVE        : cve-2026-45247, CVE-2026-45247
+CVE        : CVE-2026-45247, cve-2026-45247
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-45247, magento, php-object-injection, deserialization, RCE, CWE-502
 WORD_COUNT : 1390
@@ -11793,7 +11793,7 @@ The lesson I keep coming back to is that "root-only" and "container-only" CVEs d
 TITLE      : YellowKey (CVE-2026-45585): A USB Stick, WinRE, and Your BitLocker Key Just Walks Out The Door
 DATE       : 2026-06-02
 URL        : https://garrettstimpson.ca/posts/2026/06/02/yellowkey-cve-2026-45585-bitlocker-winre-txf-bypass/
-CVE        : cve-2026-45585, CVE-2026-45585
+CVE        : CVE-2026-45585, cve-2026-45585
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-45585, bitlocker, winre, transactional-ntfs, physical-access
 WORD_COUNT : 1231
@@ -12824,7 +12824,7 @@ Commodity stealer, clever delivery. The part that should stick with you is the a
 TITLE      : CVE-2026-43121: The io_uring ZCRX Race Nobody Should Hype, And Nobody Should Ignore
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-43121-io-uring-zcrx-freelist-race-lpe/
-CVE        : cve-2026-43121, CVE-2026-43121
+CVE        : CVE-2026-43121, cve-2026-43121
 CATEGORIES : exploits, linux-kernel
 TAGS       : io_uring, zcrx, race-condition, lpe, cve-2026-43121, heap-corruption
 WORD_COUNT : 1371
@@ -12921,7 +12921,7 @@ One last thing. The bug was found in code that exists purely to go faster. ZCRX,
 TITLE      : CVE-2026-34926: Turning Apex One Into Your Malware Distribution Channel
 DATE       : 2026-05-31
 URL        : https://garrettstimpson.ca/posts/2026/05/31/cve-2026-34926-apex-one-edr-distribution-channel/
-CVE        : CVE-2026-34926, cve-2026-34926
+CVE        : cve-2026-34926, CVE-2026-34926
 CATEGORIES : exploits, windows
 TAGS       : cve-2026-34926, trend-micro, apex-one, edr, directory-traversal, supply-chain, post-exploitation
 WORD_COUNT : 1278
@@ -12996,7 +12996,7 @@ The uncomfortable part is that the security product is the trusted delivery chan
 TITLE      : Fragnesia (CVE-2026-46300): The Bug the Dirty Frag Patch Woke Up
 DATE       : 2026-05-30
 URL        : https://garrettstimpson.ca/posts/2026/05/30/fragnesia-cve-2026-46300-skb-coalesce-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431, cve-2026-31635, CVE-2026-31635, cve-2026-46300, CVE-2026-46300
+CVE        : cve-2026-31431, CVE-2026-31431, cve-2026-31635, CVE-2026-31635, CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux-kernel
 TAGS       : cve-2026-46300, fragnesia, page-cache, xfrm, espintcp, lpe
 WORD_COUNT : 1531
@@ -13791,7 +13791,7 @@ The bigger picture: according to Microsoft's 2025 Digital Defense Report, ClickF
 TITLE      : Fragnesia (CVE-2026-46300): The Linux Kernel LPE That Crawled Out of the Dirty Frag Patch
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/fragnesia-cve-2026-46300-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431, cve-2026-31635, CVE-2026-31635, CVE-2026-43284, CVE-2026-43500, cve-2026-46300, CVE-2026-46300
+CVE        : cve-2026-31431, CVE-2026-31431, cve-2026-31635, CVE-2026-31635, CVE-2026-43284, CVE-2026-43500, CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux
 TAGS       : CVE-2026-46300, linux-kernel, LPE, page-cache, ESP-in-TCP, XFRM, PoC
 WORD_COUNT : 1777
@@ -13966,7 +13966,7 @@ Patch, blacklist the modules, watch your namespace usage. And check back.
 TITLE      : CVE-2026-2005: A 20-Year-Old PostgreSQL pgcrypto Bug Just Got a Public RCE PoC
 DATE       : 2026-05-29
 URL        : https://garrettstimpson.ca/posts/2026/05/29/cve-2026-2005-postgresql-pgcrypto-heap-overflow-rce/
-CVE        : CVE-2026-2005, cve-2026-2005
+CVE        : cve-2026-2005, CVE-2026-2005
 CATEGORIES : exploits, database
 TAGS       : CVE-2026-2005, postgresql, pgcrypto, heap-overflow, RCE, PoC
 WORD_COUNT : 1553
@@ -14693,7 +14693,7 @@ The campaign is active. The technique is reproducible across new variants. Worth
 TITLE      : CVE-2026-40369: One Syscall, Any Sandbox, Full SYSTEM
 DATE       : 2026-05-28
 URL        : https://garrettstimpson.ca/posts/2026/05/28/cve-2026-40369-windows-kernel-sandbox-escape/
-CVE        : CVE-2026-40369, cve-2026-40369
+CVE        : cve-2026-40369, CVE-2026-40369
 CATEGORIES : exploits, windows
 TAGS       : windows-kernel, lpe, sandbox-escape, ntquerysysteminformation, pwn2own, cve-2026-40369
 WORD_COUNT : 1194
@@ -15013,7 +15013,7 @@ MITRE ATT&CK coverage for this sample: T1027 (MBA string obfuscation), T1055 (pr
 TITLE      : DirtyDecrypt (CVE-2026-31635): How a Missing COW Guard in rxgk_decrypt_skb Hands You Root
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/dirtydecrypt-cve-2026-31635-rxgk-linux-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431, cve-2026-31635, CVE-2026-31635, CVE-2026-43500, cve-2026-46300, CVE-2026-46300
+CVE        : cve-2026-31431, CVE-2026-31431, cve-2026-31635, CVE-2026-31635, CVE-2026-43500, CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux
 TAGS       : cve-2026-31635, dirtydecrypt, linux-kernel, lpe, kubernetes, rxgk, page-cache, poc
 WORD_COUNT : 1682
@@ -15348,7 +15348,7 @@ Practically speaking, this family is not going anywhere. DarkTortilla has been d
 TITLE      : CVE-2026-46333: How One ptrace Window Leaks Your SSH Keys
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-46333-ssh-keysign-pwn/
-CVE        : CVE-2026-46333, cve-2026-46333
+CVE        : cve-2026-46333, CVE-2026-46333
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, ptrace, pidfd, linux-kernel, ssh, privilege-escalation
 WORD_COUNT : 1020
@@ -15456,7 +15456,7 @@ Check your kernel version. Patch if you haven't.
 TITLE      : CVE-2026-42945: NGINX Rift, an 18-Year Heap Overflow With a Working RCE Chain
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-42945-nginx-rift-heap-overflow-rce/
-CVE        : CVE-2026-42945, cve-2026-42945
+CVE        : cve-2026-42945, CVE-2026-42945
 CATEGORIES : exploits, web
 TAGS       : CVE-2026-42945, nginx, heap-overflow, RCE, heap-feng-shui, webserver, remote-exploit
 WORD_COUNT : 1567
@@ -15618,7 +15618,7 @@ The full advisory is at F5's security portal (K000161019). Fixed packages are av
 TITLE      : CVE-2026-31431: Copy Fail — 732 Bytes to Root on Every Major Linux Distro
 DATE       : 2026-05-27
 URL        : https://garrettstimpson.ca/posts/2026/05/27/cve-2026-31431-copy-fail-linux-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431, cve-2026-31635, CVE-2026-31635, cve-2026-46300, CVE-2026-46300
+CVE        : cve-2026-31431, CVE-2026-31431, cve-2026-31635, CVE-2026-31635, CVE-2026-46300, cve-2026-46300
 CATEGORIES : kernel, lpe, linux, cve
 TAGS       : CVE-2026-31431, linux, kernel, privilege-escalation, AF_ALG, page-cache, container-escape, cloud
 WORD_COUNT : 1664
@@ -15987,7 +15987,7 @@ The thing about CVE-2026-20182 is that Rapid7 found it by looking harder at a su
 TITLE      : Dirty Frag: Deterministic Root in Every Major Linux Distro
 DATE       : 2026-05-26
 URL        : https://garrettstimpson.ca/posts/2026/05/26/dirty-frag-linux-kernel-lpe/
-CVE        : CVE-2026-31431, cve-2026-31431, cve-2026-31635, CVE-2026-31635, CVE-2026-43284, cve-2026-43284, CVE-2026-43500, cve-2026-43500, cve-2026-46300, CVE-2026-46300
+CVE        : cve-2026-31431, CVE-2026-31431, cve-2026-31635, CVE-2026-31635, cve-2026-43284, CVE-2026-43284, CVE-2026-43500, cve-2026-43500, CVE-2026-46300, cve-2026-46300
 CATEGORIES : exploits, linux, lpe
 TAGS       : cve, dirty-frag, kernel, ipsec, rxrpc, privilege-escalation, page-cache
 WORD_COUNT : 1157
@@ -16253,5 +16253,5 @@ The defense answer isn't more signatures. It's behavioral baselining, parent-chi
 --------------------------------------------------------------------------------
 
 ================================================================================
-END OF CORPUS — 124 documents — 2026-11-24T13:09:01Z
+END OF CORPUS — 124 documents — 2026-11-24T13:13:50Z
 ================================================================================
