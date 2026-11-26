@@ -6,168 +6,109 @@ author: Garrett Stimpson
 date: 2026-11-26 11:30:00 -0500
 categories: [privacy, investigations]
 tags: [data-brokers, privacy, artificial-intelligence, ai, location-data, health-data, personal-data, opt-out]
-excerpt: "Data brokers can package a person's movements, health interests, finances, family ties, and vulnerabilities for astonishingly little money. AI makes those fragments easier to join, search, infer from, and act upon, which is why removal matters heading into 2027."
+excerpt: "Data brokers can package your movements, health interests, finances, family, and vulnerabilities for pennies a record. AI is about to make those fragments far more dangerous, which is why removal matters heading into 2027."
 description: "An evidence-backed investigation of how data brokers collect and sell intimate personal details, what one person's data is really worth, how AI changes privacy risk in 2027, and how to remove your information."
 permalink: /posts/2026/11/26/data-brokers-intimate-details-ai-2027/
 ---
 
 There is a version of you for sale that you have never met.
 
-It may know the address where you sleep, the phone number you stopped using, the people who share your home, the clinic you visited, the places you worship, the products you buy, and the subjects you search when nobody else is in the room. It may be wrong about some of this. That does not make it harmless. A buyer can still act on a false conclusion.
+It knows the address where you sleep. It knows the phone number you gave up in 2019, the people who live with you, the clinic you visited last spring, the building you walk into every Sunday morning. It knows what you buy at 1 a.m. and what you search for when nobody else is in the room. Some of it is wrong. That doesn't make it harmless, because a buyer who acts on a wrong conclusion can hurt you just as badly as one who acts on a right one.
 
-I started this investigation with a number I had heard before: one person's data is supposedly worth almost **$300,000**. It sounds believable because our digital lives feel priceless. But after tracing primary reports, enforcement records, and actual broker purchases, I could not substantiate it.
+I went into this investigation with a number stuck in my head, the same one you have probably seen: one person's data is supposedly worth almost **$300,000**. It sounds right. Our digital lives feel priceless. So I went looking for the source, and I couldn't find one. I traced enforcement records, broker purchases, and academic studies, and nowhere did that number hold up.
 
-The truth is stranger and, in my opinion, more disturbing. Individual records can be sold for pennies. The machinery that joins those pennies into a life can be immensely valuable. The harm to the person inside that life can be impossible to price.
+What I found instead is stranger, and honestly more disturbing. Individual records about real people sell for pennies. The machinery that stitches those pennies into a whole human being is worth a fortune. And the harm that falls on the person inside that profile is the one number nobody can put on a slide.
 
-## The $300,000 claim fails an evidence check
+## The $300,000 claim doesn't survive contact with evidence
 
-I found no accessible primary source showing that data brokers routinely pay, earn, or realize nearly $300,000 for one person's data. That does not prove the number has never appeared anywhere. It means the claim should not be repeated as fact without a source and a defensible method.
+I want to be careful here, because I'm not claiming the figure has never appeared anywhere. I'm saying I found no accessible primary source showing that brokers pay, earn, or realize anything close to $300,000 for one person's data. If someone repeats that number at you, ask them for the source and the math. Watch what happens.
 
-Four different things are often collapsed into one dramatic number:
+Part of the problem is that people smoosh four completely different things into one dramatic figure:
 
-1. **Transaction price:** what a buyer pays for a record, audience, or dataset.
-2. **Corporate revenue:** what a platform or broker earns across products and millions of people.
-3. **Economic value:** a modeled estimate of the benefit data creates for a company or consumer.
-4. **Potential harm:** fraud, stalking, discrimination, manipulation, physical danger, or lost autonomy suffered by a person.
+1. **Transaction price:** what a buyer actually pays for a record or dataset.
+2. **Corporate revenue:** what a platform earns across millions of people.
+3. **Economic value:** a modeled estimate of what data is worth to a company.
+4. **Harm:** what happens to you when it's misused.
 
-They are not interchangeable.
+Those are not the same thing. A company making billions off a hundred million users is not evidence that your file alone is worth $300,000 any more than a casino's revenue means your single bet was a good one.
 
-A [2023 Duke University study of data brokers selling information about U.S. military personnel](https://techpolicy.sanford.duke.edu/data-brokers-and-the-sale-of-data-on-us-military-personnel/) found identified or identifiable records advertised for roughly **US$0.12 to US$0.32 each**. Researchers could obtain sensitive information about active-duty service members, veterans, and their families, sometimes with minimal screening.
+Here's what an actual observed price looks like. A [2023 Duke University study](https://techpolicy.sanford.duke.edu/data-brokers-and-the-sale-of-data-on-us-military-personnel/) had researchers approach data brokers selling information about U.S. military personnel. Active-duty service members, veterans, their families. Identified or identifiable records were advertised for roughly **US$0.12 to US$0.32 each**, sometimes with barely any screening.
 
-That observed market price does not measure what a person's safety is worth. It measures how cheaply a copy of a record could be acquired in that particular study.
+Read that again. The home address of a serving soldier, connected to the fact that they serve, for about a quarter.
 
 <figure>
   <img src="/assets/img/posts/data-broker-observed-prices.svg" alt="Graph showing an observed price range of 12 to 32 US cents for one military-related broker record, with arithmetic illustrations of 12 to 32 dollars for 100 records and 1,200 to 3,200 dollars for 10,000 records." loading="lazy">
   <figcaption><strong>Figure 1.</strong> Duke researchers reported military-related records advertised at US$0.12 to US$0.32 each in 2023. The 100-record and 10,000-record figures are arithmetic illustrations at that unchanged unit range, not additional observed transactions. The bars do not share one linear scale. Download the <a href="/assets/data/data-broker-observed-prices.csv">underlying CSV data</a>.</figcaption>
 </figure>
 
-This is the paradox: **your record may be cheap because it is easy to copy, not because it is unimportant.**
+And that's the paradox at the center of this whole story: your record is cheap because it's easy to copy, not because it doesn't matter. A digital file costs nothing to duplicate, so supply is effectively infinite and the price collapses. The thing being priced isn't you. It's a copy of you. The damage that copy can do has no relationship to what it sold for.
 
-## What is actually in the market
+## What's actually being sold
 
-"Personal data" sounds bloodless. The enforcement record is not.
+"Personal data" is a bloodless phrase. The enforcement record is not.
 
-In its case against data broker [X-Mode Social and Outlogic](https://www.federalregister.gov/documents/2024/01/18/2024-00928/x-mode-social-inc-public-comment), the U.S. Federal Trade Commission alleged that location data could be used to identify visits to sensitive places, including medical and reproductive-health clinics, places of worship, domestic-abuse shelters, and addiction-recovery facilities. The FTC's 2024 order prohibited the companies from selling or sharing precise location data in important circumstances.
+When the FTC went after data broker [X-Mode Social and Outlogic](https://www.federalregister.gov/documents/2024/01/18/2024-00928/x-mode-social-inc-public-comment), the allegations included location data precise enough to identify visits to medical and reproductive-health clinics, places of worship, domestic-abuse shelters, and addiction-recovery facilities. Think about what that means in practice. Your phone quietly says you were at a pregnancy clinic for 40 minutes. A shelter. A meeting. The FTC's 2024 order barred the companies from selling or sharing precise location data in important circumstances.
 
-The FTC's case against [Gravy Analytics and Venntel](https://www.federalregister.gov/documents/2024/12/06/2024-28738/gravy-analytics-inc-analysis-of-proposed-consent-order-to-aid-public-comment) similarly concerned alleged collection, use, and sale of sensitive location information without adequate consent verification. The government's analysis says the alleged data tied people to sensitive locations and could expose consumers to discrimination, violence, emotional distress, and other harms.
+The case against [Gravy Analytics and Venntel](https://www.federalregister.gov/documents/2024/12/06/2024-28738/gravy-analytics-inc-analysis-of-proposed-consent-order-to-aid-public-comment) followed the same shape: sensitive location information collected and sold without meaningful consent verification. The government's own analysis said the data could tie people to sensitive locations and expose them to discrimination, violence, and emotional distress.
 
-Location is only one category. Broker profiles can include or infer:
-
-- names, email addresses, phone numbers, and present or former homes;
-- relatives, associates, household composition, and estimated age;
-- device and advertising identifiers;
-- purchases, browsing interests, searches, and app activity;
-- income bands, debts, property, occupation, and financial vulnerability;
-- movements and repeated visits to sensitive locations;
-- health interests, pregnancy-related interests, and possible medical concerns;
-- religion, political interests, ethnicity, and other demographic labels;
-- military affiliation and other employment details.
-
-Not every broker holds every field, and an inferred label is not necessarily true. The danger comes from scale, linkage, persistence, and the possibility that a buyer treats a probabilistic label as a fact.
+Location is just the headline. A mature broker profile can include or infer your relatives and household, your old addresses, your income band, your debts, your purchases, your browsing interests, your health and pregnancy-related interests, your religion, your politics, your military affiliation. Not every broker holds every field, and the inferred labels are sometimes flat wrong. The danger isn't one field. It's scale, linkage, and persistence, plus the fact that a buyer will treat a probabilistic guess as settled fact.
 
 ## How fragments become a dossier
 
-A phone app may collect a device identifier and location. A retailer records a purchase. A website sends advertising events. Public records reveal an address. A loyalty program connects a transaction to an email. A people-search service connects that email to relatives and prior homes.
+None of this arrives at the broker in one piece. Your phone app hands over a device identifier and a location. A retailer logs a purchase. A website fires advertising events. Public records contribute an address. A loyalty program ties a transaction to your email. A people-search site ties that email to your relatives and every home you've had. Someone buys the stitched result, enriches it, and sells it again.
 
-Real-time advertising adds another path. The Irish Council for Civil Liberties reported in its [investigation of real-time bidding](https://www.iccl.ie/digital-data/americas-hidden-security-crisis/) that data about a U.S. person's online activity and location was broadcast in RTB systems hundreds of times per day on average. That is an estimate about broadcasts in an advertising ecosystem, not proof that every recipient stores or sells every event. It still shows the extraordinary frequency with which data can leave the screen where it originated.
+Real-time advertising makes the copies multiply. The Irish Council for Civil Liberties, in its [investigation of real-time bidding](https://www.iccl.ie/digital-data/americas-hidden-security-crisis/), estimated that data about a U.S. person's online activity and location was broadcast in RTB systems hundreds of times per day on average. That's an estimate about broadcasts inside an ad ecosystem, not proof that every recipient keeps everything. But it tells you how often your data leaves the screen it started on, to places you have never heard of, under contracts you will never read.
 
-The path is rarely a simple sale from App A to Buyer B. Data can pass through software development kits, advertising exchanges, analytics vendors, identity-resolution services, resellers, and downstream clients. A record can be copied, enriched, scored, and sold again. Removing it from one visible page does not call every copy home.
+So no, removing yourself from one visible people-search page does not call every copy home. The copies have copies.
 
-## AI changes what a pile of cheap records can do
+## Why 2027 is the year this gets worse
 
-Data brokers existed long before generative AI. Heading into 2027, the change is not that AI suddenly creates privacy risk. The change is that it can lower the cost of turning scattered data into something operational.
+Data brokers existed long before generative AI, and I want to be clear that AI did not invent this problem. What AI changes is the cost of doing something with the pile.
 
-A capable system can help a user:
+Ten years ago, joining messy datasets, classifying purchases into sensitive categories, or ranking a million people by predicted vulnerability took a data science team. Now it's a prompt. A capable system can help join inconsistent names, addresses, and devices across datasets. It can classify free text and browsing history into sensitive categories. It can predict traits nobody ever told it about. It can rank people for targeting, scrutiny, exclusion, or fraud. It can write a personalized message that uses real details from your profile. It can let an ordinary employee query millions of rows in plain English instead of SQL. And it can take an "anonymous" dataset and try to reidentify it against outside records.
 
-- join inconsistent names, addresses, devices, and accounts across large datasets;
-- classify free text, URLs, purchases, and movements into sensitive categories;
-- predict unobserved traits from correlated signals;
-- rank people for targeting, scrutiny, exclusion, persuasion, or fraud;
-- generate personalized messages using details from a profile;
-- query millions of rows in ordinary language instead of specialist code;
-- attempt reidentification by comparing an "anonymous" dataset with outside records.
+The [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence) flags exactly these privacy risks: leakage of sensitive information, harmful inferences, and the difficulty of managing data across AI systems. NIST isn't saying every model can unmask every person, and neither am I. Reidentification depends on granularity, uniqueness, outside information, and access controls.
 
-The [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence) identifies privacy risks including leakage or unauthorized disclosure of sensitive information, harmful inferences, and the difficulty of managing data across AI systems. NIST does not say that every model can identify every person. Neither do I. Reidentification and inference depend on the data's granularity, uniqueness, outside information, access controls, and the system being used.
+But there are two distinct harms here, and people usually only think of the first. An AI-derived conclusion might be accurate, revealing something you never chose to disclose. Or it might be wrong, and still quietly decide how you get treated.
 
-There are two harms to remember. An AI-derived conclusion might be accurate and reveal something you never chose to disclose. Or it might be wrong and still influence how someone treats you.
+My honest forecast for 2027: the risk isn't some cartoonish all-knowing AI. It's ordinary organizations, your employer, your insurer, a landlord, a scammer, getting cheap tools to search, summarize, score, and personalize data they already hold. The records and the pipelines are already built. AI just hands the keys to everyone at once.
 
-By 2027, I expect the practical risk to be less about a villainous all-knowing model and more about ordinary organizations gaining inexpensive tools to search, summarize, score, and personalize data they already possess. That is a forecast, not an enacted fact. The underlying records and documented broker pathways are already here.
+## Why removal still matters
 
-## Who buys, and why removal matters
+Data has legitimate uses. Fraud prevention, regulated credit decisions, research, and public-record access are not the same activity as selling a pregnant woman's clinic visits. The problem is that you can't see the chain, you can't correct false data, you don't know who received it, and you never consented to most of the downstream uses.
 
-Data has legitimate uses. Fraud prevention, credit decisions under regulated systems, marketing, research, and public-record access are not identical activities. The problem is that people often cannot see the full chain, correct false data, understand who received it, or meaningfully consent to future uses.
+Removal won't make you invisible. I'm not going to pretend otherwise. But it adds friction, and friction matters. Every profile that doesn't exist is one an impersonator can't use against you. Suppressing your home address and relatives makes life harder for a stalker. Deleting broker records starves the AI-assisted linkage and targeting of inputs. Correcting a false profile stops a bad inference from propagating. And repeating the process limits the fresh copies that pile up.
 
-Potential buyers or users can include advertisers, insurers and financial firms within applicable rules, political campaigns, law enforcement or government contractors, investigators, employers using screening products, fraudsters, stalkers, and anyone willing to pay a people-search service. Availability, legality, and permitted use vary by dataset and jurisdiction.
-
-Removal does not make you invisible. It can still be worthwhile because it adds friction:
-
-- Fewer ready-made profiles can make impersonation and social engineering harder.
-- Suppressing home addresses and relatives can reduce the convenience offered to stalkers or harassers.
-- Deleting broker records reduces some inputs available for AI-assisted linkage and targeting.
-- Correcting false profiles can reduce the chance that a bad inference keeps propagating.
-- Repeating removal can limit the fresh copies that accumulate over time.
-
-Privacy is not an on-off switch. Reducing exposure is useful even when perfect erasure is impossible.
+Privacy isn't an on-off switch. Reducing exposure is worth doing even when perfect erasure is impossible.
 
 ## A practical removal plan
 
-### 1. See what is already exposed
+**See what's already exposed.** Search your exact name with your city, phone number, emails, old addresses, and common usernames. Check the people-search results. Keep URLs and screenshots for your own tracking, but don't republish the sensitive details.
 
-Search your exact name with your city, phone number, email addresses, current and old addresses, and common usernames. Check people-search results. Record URLs and screenshots for your own tracking, but do not republish the sensitive details.
+**Cut collection at the source.** Delete unused accounts and apps. Review location, contacts, microphone, and photo permissions. Prefer "while using" location access when an app genuinely needs it. Turn off ad personalization and reset your advertising identifier. Downstream opt-outs can never compensate for continuous upstream collection, so this step does more than any removal request.
 
-### 2. Reduce collection at the source
+**Use the official universal tools.** If you live in California, the state runs a free [Delete Request and Opt-out Platform, DROP](https://privacy.ca.gov/drop/). Per the state, one request goes to more than 600 registered data brokers, which began processing requests on August 1, 2026 and must check the system at least every 45 days. Eligibility and implementation can change, so use the official site, not an imitation. If you're elsewhere, check your state or national privacy regulator for the deletion and opt-out rights you actually have.
 
-Delete unused accounts and apps. Review location, contacts, microphone, photo, and background permissions. Prefer "while using" location access when an app genuinely needs it. Disable optional ad personalization and reset or limit advertising identifiers where your device allows it.
+**Opt out of the people-search sites.** Use each company's official suppression page. Keep a simple table: broker, URL, request date, confirmation number, recheck date. Give no more identity documentation than the process requires, and redact anything unrelated when you can.
 
-Downstream opt-outs cannot compensate for continuous upstream collection.
+**Protect what can't be deleted.** Unique passwords, multifactor authentication, a credit freeze where appropriate, a PIN on your mobile-carrier account. And treat unexpected messages that contain accurate personal details as untrusted. The accuracy is what makes a scam work; it doesn't make it legitimate.
 
-### 3. Use official universal tools where available
+**Recheck.** Broker ownership changes, public records update, apps collect again, and a suppressed profile can reappear under a new address or spelling. Quarterly is reasonable for most people. If you're facing stalking or harassment, skip the forms for now and get safety-focused help first.
 
-California residents can use the state's free [Delete Request and Opt-out Platform, or DROP](https://privacy.ca.gov/drop/). According to the state, DROP sends one request to more than 600 registered data brokers. Brokers began processing requests on August 1, 2026 and must access the system at least once every 45 days. Eligibility, exceptions, and implementation can change, so use the official site rather than an imitation.
-
-Residents elsewhere should check their privacy regulator or attorney general for applicable access, correction, deletion, and sale opt-out rights.
-
-### 4. Opt out of prominent people-search sites
-
-Use each company's official privacy or suppression page. Keep a simple table with the broker, URL, request date, confirmation number, and recheck date. Provide no more identity documentation than required, and redact unrelated fields when the process permits it.
-
-### 5. Protect the identifiers that cannot be deleted
-
-Use unique passwords and multifactor authentication. Freeze credit where appropriate. Lock down mobile-carrier accounts with a PIN. Treat unexpected messages containing personal facts as untrusted. Accurate details make a scam persuasive; they do not make it legitimate.
-
-### 6. Recheck
-
-Broker ownership changes. Public records update. Apps collect again. A suppressed profile can reappear under a new address or spelling. Quarterly checks are reasonable for many people; those facing stalking, harassment, or public exposure may need a more frequent and safety-focused plan.
-
-Paid removal services can save labor, but no credible service can guarantee permanent deletion from the entire ecosystem. Read what it covers, how often it rescans, what personal information it needs, and how it handles that information.
+Paid removal services can save you labor. No credible one promises permanent deletion from the entire ecosystem, and any that does is lying. Read what they cover, how often they rescan, and what they do with the information you hand them.
 
 ## What removal cannot promise
 
-A removal request may hide a public profile without deleting every internal, archival, legally retained, or previously transferred copy. Public records may remain at their source. A recipient may be allowed to retain data. Identity verification can itself require sharing information. Rights differ by jurisdiction.
+A removal request may hide a public profile without deleting internal, archival, legally retained, or already-transferred copies. Public records stay at their source. A recipient may be allowed to keep what they received. The verification process itself can require sharing information. Rights vary by where you live.
 
-If you face an immediate safety threat, prioritize physical safety, account security, credit protection, and professional or local assistance. Do not spend the critical first hours completing dozens of broker forms.
+And if you are in immediate danger, your physical safety comes first. Account security, credit protection, and local professional help. Do not spend the first critical hours filling out dozens of broker forms.
 
 ## The real value of your data
 
-I cannot prove your data is worth $300,000. I do not think anyone should use that figure without showing the math and the source.
+I can't prove your data is worth $300,000, and I don't think anyone should use that figure without showing the source and the math.
 
-What I can prove is more revealing: identifiable records about sensitive populations have been offered for cents. Regulators have documented markets involving precise location and intimate visits. Advertising systems can broadcast behavioral data at enormous frequency. AI can make those fragments easier to link, infer from, search, and use.
+What I can prove is more revealing. Identifiable records about sensitive populations have been offered for cents. Regulators have documented markets in precise location and visits to deeply personal places. Advertising systems broadcast behavioral data hundreds of times a day. And AI is making those fragments cheaper every quarter to join, search, infer from, and act on.
 
 The buyer's price is not your value.
 
-A list can be cheap and still expose a pregnancy, a medical concern, a religious practice, a military family, a frightened person seeking shelter, or the address where your children sleep. That is why removal deserves consideration. Not because it erases your existence, but because every unnecessary copy is another decision about your life that somebody else may get to make.
-
-## Keep reading
-
-- [How to delete your data from social media, dating apps, and Google](/posts/2026/11/21/how-to-delete-your-data-social-media-dating-apps-google/)
-- [How to get your ISP to delete your data](/posts/2026/11/22/how-to-get-your-isp-to-delete-your-data/)
-- [Why a survey link can become a quiet privacy and security problem](/posts/2026/11/21/redcap-survey-link-quiet-exploitation/)
-
-## Sources
-
-- Duke University Sanford School of Public Policy, [Data Brokers and the Sale of Data on U.S. Military Personnel](https://techpolicy.sanford.duke.edu/data-brokers-and-the-sale-of-data-on-us-military-personnel/) (November 2023).
-- U.S. Federal Trade Commission, [X-Mode Social, Inc. proposed consent-order analysis](https://www.federalregister.gov/documents/2024/01/18/2024-00928/x-mode-social-inc-public-comment) (January 18, 2024).
-- U.S. Federal Trade Commission, [Gravy Analytics proposed consent-order analysis](https://www.federalregister.gov/documents/2024/12/06/2024-28738/gravy-analytics-inc-analysis-of-proposed-consent-order-to-aid-public-comment) (December 6, 2024).
-- Irish Council for Civil Liberties, [America's hidden security crisis](https://www.iccl.ie/digital-data/americas-hidden-security-crisis/) (May 2022).
-- National Institute of Standards and Technology, [Artificial Intelligence Risk Management Framework: Generative Artificial Intelligence Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence) (July 2024).
-- California Privacy Protection Agency, [Delete Request and Opt-out Platform](https://privacy.ca.gov/drop/) (accessed November 26, 2026).
+A list can sell for pennies and still expose a pregnancy, a medical scare, a faith, a military family, a frightened person looking for a shelter, or the address where your children sleep. That's why removal is worth considering. Not because it erases you, but because every unnecessary copy of you is one more decision about your life that somebody else gets to make.
