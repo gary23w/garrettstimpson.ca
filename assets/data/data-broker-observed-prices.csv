@@ -1,0 +1,4 @@
+records,low_usd,high_usd,basis,source_date,source_url
+1,0.12,0.32,"Observed advertised per-record range in Duke military personnel study",2023-11,https://techpolicy.sanford.duke.edu/data-brokers-and-the-sale-of-data-on-us-military-personnel/
+100,12.00,32.00,"Arithmetic illustration: records multiplied by observed per-record range",2023-11,https://techpolicy.sanford.duke.edu/data-brokers-and-the-sale-of-data-on-us-military-personnel/
+10000,1200.00,3200.00,"Arithmetic illustration: records multiplied by observed per-record range",2023-11,https://techpolicy.sanford.duke.edu/data-brokers-and-the-sale-of-data-on-us-military-personnel/

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+<title id="title">Observed advertised prices for identifiable broker records</title>
+<desc id="desc">Duke University researchers reported identifiable military-related records advertised for 12 to 32 US cents per record in November 2023. The 100-record and 10,000-record bars are arithmetic illustrations using the same unit range. Units are nominal US dollars. Source: Duke University Sanford School of Public Policy, Data Brokers and the Sale of Data on U.S. Military Personnel, November 2023.</desc>
+<rect width="1200" height="700" fill="#0d1117"/>
+<text x="70" y="75" fill="#f0f6fc" font-family="Arial,sans-serif" font-size="34" font-weight="700">What identifiable broker records were actually offered for</text>
+<text x="70" y="115" fill="#9da7b3" font-family="Arial,sans-serif" font-size="21">Observed range: US$0.12-US$0.32 per military-related record, Duke University, 2023</text>
+<line x1="315" y1="165" x2="315" y2="545" stroke="#586069" stroke-width="2"/>
+<line x1="315" y1="545" x2="1125" y2="545" stroke="#586069" stroke-width="2"/>
+<text x="70" y="245" fill="#f0f6fc" font-family="Arial,sans-serif" font-size="25">1 record</text>
+<rect x="315" y="205" width="81" height="58" rx="8" fill="#58a6ff"/>
+<text x="412" y="242" fill="#f0f6fc" font-family="Arial,sans-serif" font-size="24">$0.12-$0.32</text>
+<text x="70" y="365" fill="#f0f6fc" font-family="Arial,sans-serif" font-size="25">100 records*</text>
+<rect x="315" y="325" width="300" height="58" rx="8" fill="#3fb950"/>
+<text x="631" y="362" fill="#f0f6fc" font-family="Arial,sans-serif" font-size="24">$12-$32</text>
+<text x="70" y="485" fill="#f0f6fc" font-family="Arial,sans-serif" font-size="25">10,000 records*</text>
+<rect x="315" y="445" width="660" height="58" rx="8" fill="#d29922"/>
+<text x="991" y="482" fill="#f0f6fc" font-family="Arial,sans-serif" font-size="24">$1,200-$3,200</text>
+<text x="70" y="600" fill="#c9d1d9" font-family="Arial,sans-serif" font-size="19">*Arithmetic illustrations at the same observed unit range, not separate market observations.</text>
+<text x="70" y="634" fill="#9da7b3" font-family="Arial,sans-serif" font-size="18">Bar lengths are illustrative within each quantity and are not a shared linear scale.</text>
+<text x="70" y="668" fill="#9da7b3" font-family="Arial,sans-serif" font-size="18">Source: Duke Sanford School, Data Brokers and the Sale of Data on U.S. Military Personnel (Nov. 2023).</text>
+</svg>
