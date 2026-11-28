@@ -2,7 +2,7 @@
 layout: post
 title: "Data Brokers Are the Real Reason Your Grandma Got Scammed"
 seo_title: "Data Brokers and Elder Fraud: The Real Reason Scammers Know So Much"
-date: 2026-11-28 09:30:00 -0500
+date: 2026-11-28 07:00:00 -0500
 author: Garrett Stimpson
 permalink: /posts/2026/11/28/data-brokers-grandma-scam-elder-fraud/
 categories: [agent-garrett, privacy]
