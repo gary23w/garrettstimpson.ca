@@ -51,6 +51,12 @@ I've written before about how to [opt out and follow up](/posts/2026/11/17/data-
 - **Opt her out** of the big people-search sites, then check again in three months. Set a calendar reminder. This is maintenance, not a one-time fix.
 - **Talk about the voice clone out loud.** Tell her the technology exists, tell her it's cheap, and tell her a real grandson will never be angry about a callback.
 
+## The Free Tool That Fights Back
+
+I built a free tool for this. It's called [f-ck_data_brokers](https://github.com/gary23w/f-ck_data_brokers), and it writes the opt-out letters for you, tracks every broker's excuse, and fires back when they stall. It covers the 600+ companies on the list, and it will always be free. If a broker refuses twice, it sends a final notice with seven days to act, then tells you exactly which privacy regulator takes complaints under your law and how to file. Regulators read those.
+
+It is work. These companies hide behind forms, silence, and the hope you'll get bored and quit. The tool does not get bored. Come back when a broker answers and it will read their reply and write your response. If you're in California, pair it with the state's own free DROP portal, which reaches every broker registered there in one request.
+
 ## Why I Take This Personally
 
 I've spent a decade in this field, and I've watched the industry build a supply chain for cruelty. Every "people search" site, every "marketing insights" firm, every app that sells location data is a link in the chain that ends with a scared 80-year-old wiring her savings to a stranger who knows her grandson's name.
